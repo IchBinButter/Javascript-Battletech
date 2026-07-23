@@ -1,0 +1,67 @@
+{
+  "equipment": [
+    {
+      "id": "heat_sink_single",
+      "name": "Single Heat Sink",
+      "dissipation": 1,
+      "type": "single",
+      "weight": 1.0
+    },
+    {
+      "id": "heat_sink_double",
+      "name": "Double Heat Sink (IS)",
+      "dissipation": 2,
+      "type": "double",
+      "weight": 1.0
+    },
+    {
+      "id": "jump_jet",
+      "name": "Jump Jet",
+      "heatPerUse": 3,
+      "weight": null,
+      "notes": "Weight = roundUp(tonnage/10) per jet. Max jets = walk MP."
+    },
+    {
+      "id": "case",
+      "name": "C.A.S.E.",
+      "description": "Cellular Ammunition Storage Equipment. Contains ammo explosions to that location section.",
+      "weight": 0.5,
+      "location": "sideTorsoOnly",
+      "explosionDamageReduction": true
+    },
+    {
+      "id": "ecm",
+      "name": "Guardian ECM Suite",
+      "description": "Generates ECM field disrupting enemy electronics within 6 hexes.",
+      "weight": 1.5,
+      "range": 6,
+      "toHitModifierEnemy": 1
+    },
+    {
+      "id": "targeting_computer",
+      "name": "Targeting Computer",
+      "description": "-1 to-hit modifier for direct-fire weapons.",
+      "weight": null,
+      "toHitModifier": -1,
+      "weightFormula": "tonnage/10 rounded up"
+    },
+    {
+      "id": "masc",
+      "name": "MASC",
+      "description": "Doubles walk MP when active. Roll 2D6 every turn active; fail = leg actuator damage.",
+      "weight": null,
+      "mpMultiplier": 2,
+      "failureRollTarget": 3,
+      "failureDamage": "leg actuator"
+    },
+    {
+      "id": "tsm",
+      "name": "Triple-Strength Myomer",
+      "description": "Doubles physical attack damage and walk MP at 9+ heat.",
+      "weight": null,
+      "heatThreshold": 9,
+      "walkMPBonus": 1,
+      "physicalDamageMultiplier": 2
+    }
+  ]
+}
