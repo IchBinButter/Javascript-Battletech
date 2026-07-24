@@ -100,6 +100,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     it('rejects movement for non-existent unit', () => {
       const { engine } = createEngineWithUnits();
       engine.phaseManager.enterPhase('movement');
+      engine.phaseManager.clearQueue();
       engine.stateManager.getState().currentPlayer = 0;
 
       const result = engine.processAction(0, {
@@ -170,6 +171,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     it('rejects fire for non-existent attacker', () => {
       const { engine } = createEngineWithUnits();
       engine.phaseManager.enterPhase('weapon_attack');
+      engine.phaseManager.clearQueue();
       engine.stateManager.getState().currentPlayer = 0;
 
       const result = engine.processAction(0, {
@@ -223,6 +225,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     it('rejects physical attack for non-existent units', () => {
       const { engine } = createEngineWithUnits();
       engine.phaseManager.enterPhase('physical_attack');
+      engine.phaseManager.clearQueue();
       engine.stateManager.getState().currentPlayer = 0;
 
       const result = engine.processAction(0, {

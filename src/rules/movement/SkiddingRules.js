@@ -36,16 +36,17 @@ export class SkiddingRules {
 
   /**
    * Resolve a skid.
-   * Unit continues moving in skid direction using remaining MP.
+   * Unit continues moving in skid direction (uses unit's current facing) using remaining MP.
    * @returns {{ path: string[], damage: number, collisions: any[] }}
    */
-  resolveSkid(unit, direction, remainingMP, gameState, diceRoller) {
+  resolveSkid(unit, remainingMP, gameState, diceRoller) {
     const path = [];
     const collisions = [];
     let currentKey = unit.position.hexKey;
-    const originalPathLength = remainingMP;
+    const direction = unit.position.facing;
+    let totalHexes = remainingMP;
 
-    for (let i = 0; i < remainingMP; i++) {
+    for (let i = 0; i < totalHexes; i++) {
       const nextKey = getNeighborInDirection(currentKey, direction);
       const nextHex = gameState.map.hexes.get(nextKey);
 
@@ -54,7 +55,8 @@ export class SkiddingRules {
       path.push(nextKey);
 
       if (nextHex.occupiedBy) {
-        const collisionDamage = Math.ceil(unit.tonnage / 5);
+        const hexesSkidded = path.length;
+        const collisionDamage = Math.ceil(unit.tonnage / 10) * hexesSkidded;
         collisions.push({
           hex: nextKey,
           unitId: nextHex.occupiedBy,
@@ -77,11 +79,15 @@ export class SkiddingRules {
       currentKey = nextKey;
 
       if ((nextHex.modifiers.ice || nextHex.terrainType === 'pavement') && diceRoller) {
-        // If another skid check fails, continue skidding
+        const roll = diceRoller.roll2d6();
+        const piloting = unit.pilot ? unit.pilot.piloting : 5;
+        if (roll < piloting) {
+          totalHexes += remainingMP;
+        }
       }
     }
 
-    const damage = originalPathLength;
+    const damage = Math.ceil(unit.tonnage / 10) * path.length;
 
     return {
       path,

@@ -44,11 +44,17 @@ export class PSRCalculator {
       }
 
       if (movement.enteredWater) {
-        triggers.push({ trigger: 'Entered Water', baseModifier: 0 });
+        const depth = movement.waterDepth || 0;
+        const waterMod = depth <= 1 ? 0 : depth === 2 ? 1 : 2;
+        triggers.push({ trigger: 'Entered Water', baseModifier: waterMod });
       }
 
       if (movement.standingUp) {
         triggers.push({ trigger: 'Standing Up', baseModifier: 0 });
+      }
+
+      if ((movement.type === 'run' || movement.type === 'jump') && unit.heat >= 15) {
+        triggers.push({ trigger: 'Overheating', baseModifier: 0 });
       }
     }
 
@@ -56,8 +62,12 @@ export class PSRCalculator {
       triggers.push({ trigger: '20+ Damage Received', baseModifier: 0 });
     }
 
+    if (unit._physicalAttackReceived) {
+      triggers.push({ trigger: 'Physical Attack Received', baseModifier: 0 });
+    }
+
     if (unit.gyro.hits >= 1) {
-      triggers.push({ trigger: 'Gyro Damage', baseModifier: unit.gyro.hits === 1 ? 0 : 999 });
+      triggers.push({ trigger: 'Gyro Damage', baseModifier: unit.gyro.hits === 1 ? 3 : 999 });
     }
 
     if (this.hasHipActuatorDamage(unit)) {
@@ -95,7 +105,7 @@ export class PSRCalculator {
 
     // Gyro hit already handled in triggers, but add standard gyro PSR if needed
     if (unit.gyro.hits === 1) {
-      modList.push('Gyro Hit: +0 (but PSR required)');
+      modList.push('Gyro Hit: +3 (PSR required)');
     } else if (unit.gyro.hits >= 2) {
       modList.push('Gyro Destroyed: Auto-fail');
       return { targetNumber: 999, modifiers: modList };
@@ -132,16 +142,16 @@ export class PSRCalculator {
    * Resolve a fall.
    * Applies pilot hit and location damage.
    */
-  resolveFall(unit, fallDirection, diceRoller) {
+  resolveFall(unit, fallDirection, diceRoller, levelsFallen = 1) {
     unit.prone = true;
 
-    // 1 hit to the pilot
     unit.pilot.hits++;
     if (unit.pilot.hits >= 6) {
       unit.pilot.conscious = false;
     }
 
-    const fallDamage = Math.ceil(unit.tonnage / 10);
+    const baseDamage = Math.ceil(unit.tonnage / 10);
+    const fallDamage = baseDamage * levelsFallen;
 
     const result = {
       pilotHit: true,

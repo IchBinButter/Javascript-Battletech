@@ -61,6 +61,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
     engine.diceRoller = makeDiceRoller(8);
 
     engine.phaseManager.enterPhase('weapon_attack');
+    engine.phaseManager.clearQueue();
     engine.stateManager.getState().currentPlayer = 0;
 
     // Atlas fires medium laser

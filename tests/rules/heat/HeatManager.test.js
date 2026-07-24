@@ -66,7 +66,7 @@ describe('HeatManager', () => {
     it('adds 2 heat for running', () => {
       const unit = makeUnit();
       const weapons = [{ heat: 5 }];
-      expect(manager.calculateHeatGeneration(unit, weapons, 'run')).toBe(7); // 5 + 2
+      expect(manager.calculateHeatGeneration(unit, weapons, 'run')).toBe(7);
     });
 
     it('adds 0 heat for walking', () => {
@@ -78,9 +78,9 @@ describe('HeatManager', () => {
     it('adds 3 heat per hex jumped (minimum 3)', () => {
       const unit = makeUnit();
       const weapons = [];
-      expect(manager.calculateHeatGeneration(unit, weapons, 'jump', 0)).toBe(3); // min 3
-      expect(manager.calculateHeatGeneration(unit, weapons, 'jump', 2)).toBe(6); // 2*3
-      expect(manager.calculateHeatGeneration(unit, weapons, 'jump', 5)).toBe(15); // 5*3
+      expect(manager.calculateHeatGeneration(unit, weapons, 'jump', 0)).toBe(3);
+      expect(manager.calculateHeatGeneration(unit, weapons, 'jump', 2)).toBe(6);
+      expect(manager.calculateHeatGeneration(unit, weapons, 'jump', 5)).toBe(15);
     });
 
     it('adds external heat', () => {
@@ -92,7 +92,7 @@ describe('HeatManager', () => {
     it('combines weapon + movement + external heat', () => {
       const unit = makeUnit({ _externalHeat: 2 });
       const weapons = [{ heat: 10 }, { heat: 5 }];
-      expect(manager.calculateHeatGeneration(unit, weapons, 'run')).toBe(19); // 15 + 2 + 2
+      expect(manager.calculateHeatGeneration(unit, weapons, 'run')).toBe(19);
     });
   });
 
@@ -120,23 +120,22 @@ describe('HeatManager', () => {
       };
       const gs = makeGameState({ '4,4': { terrainType: 'water_depth1' } });
       const dissipated = manager.applyHeatDissipation(unit, gs);
-      expect(dissipated).toBe(13); // 10 base + 3 leg sinks
+      expect(dissipated).toBe(13);
       expect(unit.heat).toBe(17);
     });
 
     it('does not double non-leg sinks in water', () => {
       const unit = makeUnit({ heat: 30 });
-      // No leg sinks in criticalSlots
       const gs = makeGameState({ '4,4': { terrainType: 'water_depth1' } });
       const dissipated = manager.applyHeatDissipation(unit, gs);
-      expect(dissipated).toBe(10); // Only base 10, no leg sink bonus
+      expect(dissipated).toBe(10);
     });
 
     it('accounts for damaged heat sinks', () => {
       const unit = makeUnit({ heat: 20, heatSinks: { count: 10, damaged: 3, type: 'single' } });
       const gs = makeGameState({ '4,4': {} });
       const dissipated = manager.applyHeatDissipation(unit, gs);
-      expect(dissipated).toBe(7); // 10 - 3
+      expect(dissipated).toBe(7);
       expect(unit.heat).toBe(13);
     });
 
@@ -144,88 +143,261 @@ describe('HeatManager', () => {
       const unit = makeUnit({ heat: 30, heatSinks: { count: 10, damaged: 0, type: 'double' } });
       const gs = makeGameState({ '4,4': {} });
       const dissipated = manager.applyHeatDissipation(unit, gs);
-      expect(dissipated).toBe(20); // 10 * 2
+      expect(dissipated).toBe(20);
     });
   });
 
-  describe('applyHeatEffects', () => {
-    it('no effects below heat 5', () => {
-      const unit = makeUnit({ heat: 4 });
+  describe('applyHeatEffects — BMM full heat scale', () => {
+    function expectEffects(heat, expectedEffects, overrides = {}) {
+      const unit = makeUnit({ heat, movement: { walk: 4, run: 6, jump: 3 }, ...overrides });
       const result = manager.applyHeatEffects(unit, makeDiceRoller());
-      expect(result.effects).toHaveLength(0);
-      expect(result.shutdownCheck).toBe(false);
-      expect(result.ammoExplosionCheck).toBe(false);
+      return { unit, result, expectedEffects };
+    }
+
+    it('heat 0-13: no effects', () => {
+      for (const heat of [0, 5, 10, 13]) {
+        const unit = makeUnit({ heat, movement: { walk: 4 } });
+        const result = manager.applyHeatEffects(unit, makeDiceRoller());
+        expect(result.effects, `heat ${heat}`).toHaveLength(0);
+        expect(result.shutdownCheck, `heat ${heat}`).toBe(false);
+        expect(result.ammoExplosionCheck, `heat ${heat}`).toBe(false);
+        expect(unit.currentMP, `heat ${heat}`).toBe(4);
+      }
     });
 
-    it('+1 TN at heat 5-9', () => {
-      const unit = makeUnit({ heat: 7, movement: { walk: 4 } });
+    it('heat 14: +1 TN, no MP penalty', () => {
+      const unit = makeUnit({ heat: 14, movement: { walk: 4 } });
       const result = manager.applyHeatEffects(unit, makeDiceRoller());
       expect(result.effects).toContain('+1 TN to weapons fire');
+      expect(result.effects).toHaveLength(1);
+      expect(result.shutdownCheck).toBe(false);
+      expect(result.ammoExplosionCheck).toBe(false);
+      expect(unit.currentMP).toBe(4);
     });
 
-    it('+2 TN and -1 MP at heat 10-14', () => {
-      const unit = makeUnit({ heat: 12, movement: { walk: 4 } });
+    it('heat 15: +2 TN, no MP penalty', () => {
+      const unit = makeUnit({ heat: 15, movement: { walk: 4 } });
       const result = manager.applyHeatEffects(unit, makeDiceRoller());
       expect(result.effects).toContain('+2 TN to weapons fire');
-      expect(result.effects).toContain('-1 Walk MP');
-      expect(unit.currentMP).toBe(3); // 4 - 1
+      expect(result.shutdownCheck).toBe(false);
+      expect(result.ammoExplosionCheck).toBe(false);
+      expect(unit.currentMP).toBe(4);
     });
 
-    it('+3 TN and -2 MP at heat 15-19', () => {
-      const unit = makeUnit({ heat: 17, movement: { walk: 4 } });
+    it('heat 16: +3 TN, no MP penalty', () => {
+      const unit = makeUnit({ heat: 16, movement: { walk: 4 } });
       const result = manager.applyHeatEffects(unit, makeDiceRoller());
       expect(result.effects).toContain('+3 TN to weapons fire');
-      expect(result.effects).toContain('-2 Walk MP');
-      expect(unit.currentMP).toBe(2); // 4 - 2
-      expect(result.ammoExplosionCheck).toBe(false); // Ammo explosion only at 24+
+      expect(result.shutdownCheck).toBe(false);
+      expect(result.ammoExplosionCheck).toBe(false);
+      expect(unit.currentMP).toBe(4);
     });
 
-    it('+4 TN, -3 MP, shutdown check at heat 20-23', () => {
-      const unit = makeUnit({ heat: 22, movement: { walk: 4 } });
+    it('heat 17: +4 TN, no MP penalty', () => {
+      const unit = makeUnit({ heat: 17, movement: { walk: 4 } });
       const result = manager.applyHeatEffects(unit, makeDiceRoller());
       expect(result.effects).toContain('+4 TN to weapons fire');
-      expect(result.effects).toContain('-3 Walk MP');
-      expect(unit.currentMP).toBe(1); // 4 - 3
-      expect(result.shutdownCheck).toBe(true);
-      expect(result.ammoExplosionCheck).toBe(false); // Ammo explosion only at 24+
+      expect(result.shutdownCheck).toBe(false);
+      expect(result.ammoExplosionCheck).toBe(false);
+      expect(unit.currentMP).toBe(4);
     });
 
-    it('shutdown check and ammo explosion at heat 24+', () => {
+    it('heat 18: +5 TN, -1 Walk MP', () => {
+      const unit = makeUnit({ heat: 18, movement: { walk: 4 } });
+      const result = manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(result.effects).toContain('+5 TN to weapons fire');
+      expect(result.effects).toContain('-1 Walk MP');
+      expect(result.shutdownCheck).toBe(false);
+      expect(result.ammoExplosionCheck).toBe(false);
+      expect(unit.currentMP).toBe(3);
+    });
+
+    it('heat 19: +6 TN, -2 Walk MP, ammo(4+)', () => {
+      const unit = makeUnit({ heat: 19, movement: { walk: 4 } });
+      const result = manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(result.effects).toContain('+6 TN to weapons fire');
+      expect(result.effects).toContain('-2 Walk MP');
+      expect(result.shutdownCheck).toBe(false);
+      expect(result.ammoExplosionCheck).toBe(true);
+      expect(result.ammoTarget).toBe(4);
+      expect(unit.currentMP).toBe(2);
+    });
+
+    it('heat 20: +7 TN, -3 Walk MP, shutdown(4+), ammo(6+)', () => {
+      const unit = makeUnit({ heat: 20, movement: { walk: 4 } });
+      const result = manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(result.effects).toContain('+7 TN to weapons fire');
+      expect(result.effects).toContain('-3 Walk MP');
+      expect(result.shutdownCheck).toBe(true);
+      expect(result.shutdownTarget).toBe(4);
+      expect(result.ammoExplosionCheck).toBe(true);
+      expect(result.ammoTarget).toBe(6);
+      expect(unit.currentMP).toBe(1);
+    });
+
+    it('heat 21: +8 TN, -4 Walk MP, shutdown(6+), ammo(8+)', () => {
+      const unit = makeUnit({ heat: 21, movement: { walk: 4 } });
+      const result = manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(result.effects).toContain('+8 TN to weapons fire');
+      expect(result.effects).toContain('-4 Walk MP');
+      expect(result.shutdownCheck).toBe(true);
+      expect(result.shutdownTarget).toBe(6);
+      expect(result.ammoExplosionCheck).toBe(true);
+      expect(result.ammoTarget).toBe(8);
+      expect(unit.currentMP).toBe(0);
+    });
+
+    it('heat 22: +9 TN, -5 Walk MP, shutdown(8+), ammo(10+)', () => {
+      const unit = makeUnit({ heat: 22, movement: { walk: 6 } });
+      const result = manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(result.effects).toContain('+9 TN to weapons fire');
+      expect(result.effects).toContain('-5 Walk MP');
+      expect(result.shutdownCheck).toBe(true);
+      expect(result.shutdownTarget).toBe(8);
+      expect(result.ammoExplosionCheck).toBe(true);
+      expect(result.ammoTarget).toBe(10);
+      expect(unit.currentMP).toBe(1);
+    });
+
+    it('heat 23: +10 TN, -6 Walk MP, shutdown(10+), ammo(12+)', () => {
+      const unit = makeUnit({ heat: 23, movement: { walk: 6 } });
+      const result = manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(result.effects).toContain('+10 TN to weapons fire');
+      expect(result.effects).toContain('-6 Walk MP');
+      expect(result.shutdownCheck).toBe(true);
+      expect(result.shutdownTarget).toBe(10);
+      expect(result.ammoExplosionCheck).toBe(true);
+      expect(result.ammoTarget).toBe(12);
+      expect(unit.currentMP).toBe(0);
+    });
+
+    it('heat 24+: auto shutdown, auto ammo', () => {
       const unit = makeUnit({ heat: 25, movement: { walk: 4 } });
       const result = manager.applyHeatEffects(unit, makeDiceRoller());
-      expect(result.effects).toContain('+4 TN to weapons fire');
-      expect(result.effects).toContain('-3 Walk MP');
-      expect(result.shutdownCheck).toBe(true); // Roll 4+ to avoid shutdown
-      expect(result.ammoExplosionCheck).toBe(true); // Roll 8+ for ammo explosion
+      expect(result.shutdownCheck).toBe(true);
+      expect(result.shutdownTarget).toBe('auto');
+      expect(result.ammoExplosionCheck).toBe(true);
+      expect(result.ammoTarget).toBe('auto');
+      expect(unit.currentMP).toBe(0);
     });
 
-    it('MP does not go below 0', () => {
-      const unit = makeUnit({ heat: 22, movement: { walk: 2 } });
+    it('MP does not go below 0 (heat 20+ on slow mech)', () => {
+      const unit = makeUnit({ heat: 20, movement: { walk: 2 } });
       manager.applyHeatEffects(unit, makeDiceRoller());
-      expect(unit.currentMP).toBeGreaterThanOrEqual(0);
+      expect(unit.currentMP).toBe(0);
+    });
+
+    it('TSM grants +2 walk MP at 9+ heat', () => {
+      const unit = makeUnit({ heat: 12, movement: { walk: 4 } });
+      unit.equipment.other = { tsm: true };
+      const result = manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(unit.currentMP).toBe(6); // 4 base + 2 TSM, no MP reduction at heat 12
+    });
+
+    it('TSM +2 is offset by MP penalties at high heat', () => {
+      const unit = makeUnit({ heat: 20, movement: { walk: 4 } });
+      unit.equipment.other = { tsm: true };
+      manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(unit.currentMP).toBe(3); // 4 - 3 MP reduction + 2 TSM
+    });
+
+    it('TSM does not activate below heat 9', () => {
+      const unit = makeUnit({ heat: 8, movement: { walk: 4 } });
+      unit.equipment.other = { tsm: true };
+      manager.applyHeatEffects(unit, makeDiceRoller());
+      expect(unit.currentMP).toBe(4);
+    });
+
+    it('heat effects are applied at the exact BMM threshold values', () => {
+      const expectations = [
+        [13, 0, 0, 4],
+        [14, 0, 0, 4],
+        [15, 0, 0, 4],
+        [16, 0, 0, 4],
+        [17, 0, 0, 4],
+        [18, 1, 0, 3],
+        [19, 2, 0, 2],
+        [20, 3, 4, 1],
+        [21, 4, 6, 0],
+        [22, 5, 8, -1], // currentMP clamped to 0
+        [23, 6, 10, -2], // currentMP clamped to 0
+      ];
+      for (const [heat, expectedMpLoss, expectedShutdownTarget, expectedRawMP] of expectations) {
+        const unit = makeUnit({ heat, movement: { walk: 4 } });
+        manager.applyHeatEffects(unit, makeDiceRoller());
+        const actualMP = Math.max(0, 4 - expectedMpLoss);
+        expect(unit.currentMP, `heat=${heat} MP`).toBe(actualMP);
+        if (expectedShutdownTarget > 0) {
+          expect(manager.applyHeatEffects(makeUnit({ heat, movement: { walk: 4 } }), makeDiceRoller()).shutdownTarget, `heat=${heat} shutdownTarget`).toBe(expectedShutdownTarget);
+        }
+      }
     });
   });
 
   describe('checkShutdown', () => {
-    it('does not check shutdown below heat 20', () => {
-      const unit = makeUnit({ heat: 15 });
+    it('returns false with target 0 when no shutdownTarget provided', () => {
+      const unit = makeUnit({ heat: 22 });
       const result = manager.checkShutdown(unit, makeDiceRoller(7));
       expect(result.shutdown).toBe(false);
       expect(result.target).toBe(0);
     });
 
-    it('shuts down on roll < 4 at heat 20+', () => {
-      const unit = makeUnit({ heat: 22 });
-      const result = manager.checkShutdown(unit, makeDiceRoller(3));
-      expect(result.shutdown).toBe(true); // Roll < 4 = shutdown
+    it('auto shutdown at heat 24+', () => {
+      const unit = makeUnit({ heat: 25 });
+      const result = manager.checkShutdown(unit, makeDiceRoller(7), 'auto');
+      expect(result.shutdown).toBe(true);
+      expect(result.target).toBe('auto');
+      expect(unit.shutdown).toBe(true);
+    });
+
+    it('shutdown on roll < target (heat 20: target 4, roll 3)', () => {
+      const unit = makeUnit({ heat: 20 });
+      const result = manager.checkShutdown(unit, makeDiceRoller(3), 4);
+      expect(result.shutdown).toBe(true);
       expect(result.target).toBe(4);
       expect(unit.shutdown).toBe(true);
     });
 
-    it('does not shut down on roll >= 4 at heat 20+', () => {
+    it('no shutdown on roll >= target (heat 20: target 4, roll 4)', () => {
+      const unit = makeUnit({ heat: 20 });
+      const result = manager.checkShutdown(unit, makeDiceRoller(4), 4);
+      expect(result.shutdown).toBe(false);
+    });
+
+    it('shutdown on roll < target (heat 21: target 6, roll 5)', () => {
+      const unit = makeUnit({ heat: 21 });
+      const result = manager.checkShutdown(unit, makeDiceRoller(5), 6);
+      expect(result.shutdown).toBe(true);
+    });
+
+    it('no shutdown on roll >= target (heat 21: target 6, roll 6)', () => {
+      const unit = makeUnit({ heat: 21 });
+      const result = manager.checkShutdown(unit, makeDiceRoller(6), 6);
+      expect(result.shutdown).toBe(false);
+    });
+
+    it('shutdown on roll < target (heat 22: target 8, roll 7)', () => {
       const unit = makeUnit({ heat: 22 });
-      const result = manager.checkShutdown(unit, makeDiceRoller(4));
-      expect(result.shutdown).toBe(false); // Roll >= 4 = avoid shutdown
+      const result = manager.checkShutdown(unit, makeDiceRoller(7), 8);
+      expect(result.shutdown).toBe(true);
+    });
+
+    it('no shutdown on roll >= target (heat 22: target 8, roll 8)', () => {
+      const unit = makeUnit({ heat: 22 });
+      const result = manager.checkShutdown(unit, makeDiceRoller(8), 8);
+      expect(result.shutdown).toBe(false);
+    });
+
+    it('shutdown on roll < target (heat 23: target 10, roll 9)', () => {
+      const unit = makeUnit({ heat: 23 });
+      const result = manager.checkShutdown(unit, makeDiceRoller(9), 10);
+      expect(result.shutdown).toBe(true);
+    });
+
+    it('no shutdown on roll >= target (heat 23: target 10, roll 10)', () => {
+      const unit = makeUnit({ heat: 23 });
+      const result = manager.checkShutdown(unit, makeDiceRoller(10), 10);
+      expect(result.shutdown).toBe(false);
     });
   });
 
@@ -249,17 +421,61 @@ describe('HeatManager', () => {
     });
 
     it('applies dissipation then effects', () => {
-      const unit = makeUnit({ heat: 16, heatSinks: { count: 10, damaged: 0, type: 'single' } });
+      const unit = makeUnit({ heat: 28, heatSinks: { count: 10, damaged: 0, type: 'single' } });
       unit.id = 'u1';
 
       const gs = makeGameState({ '4,4': {} });
       gs.units = { u1: unit };
 
       const results = manager.resolveHeatPhase(gs, makeDiceRoller(3));
-      // Dissipation: 16 - 10 = 6 heat remaining
-      // At heat 6: +1 TN effect
-      expect(results[0].heat).toBe(6);
+      expect(results[0].heat).toBe(18);
       expect(results[0].dissipation).toBe(10);
+    });
+
+    it('auto shutdown at heat 24+', () => {
+      const unit = makeUnit({ heat: 25, heatSinks: { count: 0, damaged: 0, type: 'single' } });
+      unit.id = 'u1';
+
+      const gs = makeGameState({ '4,4': {} });
+      gs.units = { u1: unit };
+
+      const results = manager.resolveHeatPhase(gs, makeDiceRoller(7));
+      const effects = results[0].effects;
+      expect(effects).toContain('Unit AUTO SHUTDOWN');
+      expect(unit.shutdown).toBe(true);
+    });
+
+    it('auto ammo explosion at heat 24+', () => {
+      const unit = makeUnit({ heat: 25, heatSinks: { count: 0, damaged: 0, type: 'single' } });
+      unit.id = 'u1';
+      unit.equipment.ammo = { ac5: { shots: 10 } };
+
+      const gs = makeGameState({ '4,4': {} });
+      gs.units = { u1: unit };
+
+      const results = manager.resolveHeatPhase(gs, makeDiceRoller(7));
+      const effects = results[0].effects;
+      expect(effects.some(e => e.includes('AMMO EXPLOSION') && e.includes('auto'))).toBe(true);
+    });
+
+    it('ammo explosion check at heat 20 (target 6+)', () => {
+      const unit = makeUnit({ heat: 30, heatSinks: { count: 10, damaged: 0, type: 'single' } });
+      unit.id = 'u1';
+      unit.equipment.ammo = { lrm15: { shots: 15 } };
+
+      const gs = makeGameState({ '4,4': {} });
+      gs.units = { u1: unit };
+
+      const results = manager.resolveHeatPhase(gs, makeDiceRoller(2));
+      expect(results[0].effects.some(e => e.includes('AMMO EXPLOSION'))).toBe(false);
+
+      const unit2 = makeUnit({ heat: 30, heatSinks: { count: 10, damaged: 0, type: 'single' } });
+      unit2.id = 'u2';
+      unit2.equipment.ammo = { lrm15: { shots: 15 } };
+      const gs2 = makeGameState({ '4,4': {} });
+      gs2.units = { u2: unit2 };
+      const results2 = manager.resolveHeatPhase(gs2, makeDiceRoller(10));
+      expect(results2[0].effects.some(e => e.includes('AMMO EXPLOSION') && e.includes('10'))).toBe(true);
     });
   });
 });

@@ -41,6 +41,8 @@ function makeUnit(hexKey, facing = 0, gunnery = 4, overrides = {}) {
     prone: false,
     shutdown: false,
     immobile: false,
+    hexesMoved: 0,
+    movementMode: 'walk',
     _movementModifier: 0,
     _targetMovementModifier: 0,
     getAttackerMovementModifier() { return this._movementModifier; },
@@ -102,6 +104,58 @@ describe('AttackResolver', () => {
     });
   });
 
+  describe('_getTargetMovementModifier', () => {
+    it('returns 0 for 0-2 hexes moved', () => {
+      const target = makeUnit('4,4', 0, 4, { hexesMoved: 2, movementMode: 'walk' });
+      expect(resolver._getTargetMovementModifier(target)).toBe(0);
+    });
+
+    it('returns 1 for 3-4 hexes moved', () => {
+      const target = makeUnit('4,4', 0, 4, { hexesMoved: 3, movementMode: 'walk' });
+      expect(resolver._getTargetMovementModifier(target)).toBe(1);
+    });
+
+    it('returns 2 for 5-6 hexes moved', () => {
+      const target = makeUnit('4,4', 0, 4, { hexesMoved: 6, movementMode: 'walk' });
+      expect(resolver._getTargetMovementModifier(target)).toBe(2);
+    });
+
+    it('returns 3 for 7-9 hexes moved', () => {
+      const target = makeUnit('4,4', 0, 4, { hexesMoved: 7, movementMode: 'walk' });
+      expect(resolver._getTargetMovementModifier(target)).toBe(3);
+    });
+
+    it('returns 4 for 10-17 hexes moved', () => {
+      const target = makeUnit('4,4', 0, 4, { hexesMoved: 10, movementMode: 'walk' });
+      expect(resolver._getTargetMovementModifier(target)).toBe(4);
+    });
+
+    it('returns 5 for 18-24 hexes moved', () => {
+      const target = makeUnit('4,4', 0, 4, { hexesMoved: 18, movementMode: 'walk' });
+      expect(resolver._getTargetMovementModifier(target)).toBe(5);
+    });
+
+    it('returns 6 for 25+ hexes moved', () => {
+      const target = makeUnit('4,4', 0, 4, { hexesMoved: 30, movementMode: 'walk' });
+      expect(resolver._getTargetMovementModifier(target)).toBe(6);
+    });
+
+    it('returns 1 per hex for jump mode (min 1)', () => {
+      const target1 = makeUnit('4,4', 0, 4, { hexesMoved: 3, movementMode: 'jump' });
+      expect(resolver._getTargetMovementModifier(target1)).toBe(3);
+
+      const target2 = makeUnit('4,4', 0, 4, { hexesMoved: 0, movementMode: 'jump' });
+      expect(resolver._getTargetMovementModifier(target2)).toBe(1);
+    });
+
+    it('falls back to getTargetMovementModifier if hexesMoved undefined', () => {
+      const target = makeUnit('4,4', 0, 4);
+      delete target.hexesMoved;
+      target._targetMovementModifier = 2;
+      expect(resolver._getTargetMovementModifier(target)).toBe(2);
+    });
+  });
+
   describe('calculateTargetNumber', () => {
     it('base TN equals gunnery skill', () => {
       const attacker = makeUnit('4,4', 0, 4);
@@ -110,7 +164,6 @@ describe('AttackResolver', () => {
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
       expect(result.canFire).toBe(true);
-      // Base gunnery = 4, distance 2 (short range) = +0
       expect(result.targetNumber).toBe(4);
     });
 
@@ -124,14 +177,31 @@ describe('AttackResolver', () => {
       expect(result.targetNumber).toBe(6); // 4 + 2
     });
 
-    it('adds target movement modifier', () => {
+    it('computes target movement modifier from hexesMoved', () => {
       const attacker = makeUnit('4,4', 0, 4);
-      const target = makeUnit('4,6', 0, 4);
-      target._targetMovementModifier = 3;
+      const target = makeUnit('4,6', 0, 4, { hexesMoved: 5 }); // 5 hexes = +2
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      expect(result.targetNumber).toBe(7); // 4 + 3
+      expect(result.targetNumber).toBe(6); // 4 + 2
+    });
+
+    it('adds jump movement modifier from hexesMoved', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4, { hexesMoved: 4, movementMode: 'jump' }); // 4 hexes jump = +4
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(8); // 4 + 4
+    });
+
+    it('uses target movement modifier integrated in TN calculation', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4, { hexesMoved: 0 });
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.modifiers).not.toContain('Target moved: +0');
     });
 
     it('adds light woods terrain modifier for target', () => {
@@ -161,9 +231,29 @@ describe('AttackResolver', () => {
       expect(result.targetNumber).toBe(2); // 4 - 4 = 0, clamped to 2
     });
 
-    it('applies -4 prone target modifier', () => {
+    it('applies -2 for prone target at adjacent range (distance 1)', () => {
       const attacker = makeUnit('4,4', 0, 4);
-      const target = makeUnit('4,6', 0, 4, { prone: true });
+      const target = makeUnit('4,5', 0, 4, { prone: true }); // distance 1
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({ '4,4': {}, '4,5': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(2); // 4 - 2 = 2
+      expect(result.modifiers).toContain('Target prone (adjacent): -2');
+    });
+
+    it('applies +1 for prone target at non-adjacent range', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4, { prone: true }); // distance 2
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(5); // 4 + 1
+      expect(result.modifiers).toContain('Target prone: +1');
+    });
+
+    it('applies shutdown -4 modifier', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4, { shutdown: true });
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
@@ -181,11 +271,10 @@ describe('AttackResolver', () => {
 
     it('adds range modifier for medium range', () => {
       const attacker = makeUnit('4,4', 0, 4);
-      const target = makeUnit('10,10', 0, 4); // far away
+      const target = makeUnit('10,10', 0, 4);
       const weapon = makeWeaponDef({ shortRange: 3, mediumRange: 6, longRange: 9 });
       const gs = makeGameState({ '4,4': {}, '10,10': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      // distance should be > shortRange, likely medium or long
       expect(result.canFire).toBe(true);
     });
 
@@ -201,12 +290,10 @@ describe('AttackResolver', () => {
     it('floors TN to minimum 2', () => {
       const attacker = makeUnit('4,4', 0, 4, { heat: 25 });
       attacker._movementModifier = 4;
-      const target = makeUnit('4,6', 0, 4);
-      target._targetMovementModifier = 4;
+      const target = makeUnit('4,6', 0, 4, { hexesMoved: 20 }); // +5
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      // TN is floored to 2 but not capped (can exceed 12)
       expect(result.targetNumber).toBeGreaterThanOrEqual(2);
     });
 
@@ -220,14 +307,84 @@ describe('AttackResolver', () => {
       expect(result.targetNumber).toBe(6); // 4 + 2
     });
 
-    it('adds minimum range modifier', () => {
+    it('adds correct minimum range modifier (off-by-1 fixed)', () => {
       const attacker = makeUnit('4,4', 0, 4);
       const target = makeUnit('4,5', 0, 4); // distance 1
       const weapon = makeWeaponDef({ minRange: 3 });
       const gs = makeGameState({ '4,4': {}, '4,5': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      // distance=1 < minRange=3, modifier = 3-1+1 = 3
-      expect(result.minimumRangeMod).toBe(3);
+      // distance=1 < minRange=3, modifier = 3-1 = 2
+      expect(result.minimumRangeMod).toBe(2);
+    });
+
+    it('adds minimum range modifier to target number', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,5', 0, 4); // distance 1
+      const weapon = makeWeaponDef({ minRange: 4 });
+      const gs = makeGameState({ '4,4': {}, '4,5': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      // distance=1 < minRange=4, modifier = 4-1 = 3. TN = 4 + 3 = 7
+      expect(result.targetNumber).toBe(7);
+    });
+
+    it('adds +1 for partial cover', () => {
+      // Attacker at level 2 (above intermediate), target at level 0,
+      // intermediate hex at level 2: not blocked (2 > 2 is false), partial cover (2 >= 0+2)
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({
+        '4,4': { level: 2 },
+        '4,5': { level: 2 },
+        '4,6': { level: 0 }
+      });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.modifiers).toContain('Partial cover: +1');
+    });
+
+    it('applies targeting computer for DE weapons', () => {
+      const attacker = makeUnit('4,4', 0, 4, {
+        equipment: { other: { targeting_computer: true } }
+      });
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef({ type: 'DE' });
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(3); // 4 - 1
+      expect(result.modifiers).toContain('Targeting Computer: -1');
+    });
+
+    it('applies targeting computer for DB weapons', () => {
+      const attacker = makeUnit('4,4', 0, 4, {
+        equipment: { other: { targeting_computer: true } }
+      });
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef({ type: 'DB' });
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(3); // 4 - 1
+    });
+
+    it('applies targeting computer for P weapons', () => {
+      const attacker = makeUnit('4,4', 0, 4, {
+        equipment: { other: { targeting_computer: true } }
+      });
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef({ type: 'P' });
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(3); // 4 - 1
+    });
+
+    it('does not apply targeting computer for M weapons', () => {
+      const attacker = makeUnit('4,4', 0, 4, {
+        equipment: { other: { targeting_computer: true } }
+      });
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef({ type: 'M' });
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(4); // no TC bonus for missile
     });
   });
 
@@ -270,35 +427,26 @@ describe('AttackResolver', () => {
     });
 
     it('returns reduced hits for low roll on SRM (cluster 2)', () => {
-      // Cluster 2, roll 2 => 1 from table
       expect(resolver.resolveClusterHit(2, 2)).toBe(1);
     });
 
     it('returns all hits for roll of 2 on cluster 6', () => {
-      // Cluster 6, roll 2 => 1 from table
       expect(resolver.resolveClusterHit(2, 6)).toBe(1);
     });
 
     it('returns correct hits for LRM-20 (cluster 20), roll 7', () => {
-      // From table: roll 7, cluster 20 => 8
       expect(resolver.resolveClusterHit(7, 20)).toBe(8);
     });
   });
 
   describe('getAttackDirection', () => {
     it('returns rear when attacker is behind target', () => {
-      // Target at 4,4 facing north (0). Attacker at 4,2 (north of target).
-      // directionBetween(attacker -> target) = direction from attacker toward target = south (3).
-      // Target faces north (0). diff = ((3-0+3)%6+3)%6 = 3 => rear.
       const attacker = makeUnit('4,2', 0);
-      const target = makeUnit('4,4', 0); // facing north
+      const target = makeUnit('4,4', 0);
       expect(resolver.getAttackDirection(attacker, target)).toBe('rear');
     });
 
     it('returns front when attacker is in front of target', () => {
-      // Target at 4,4 facing north (0). Attacker at 4,6 (south of target).
-      // directionBetween(attacker -> target) = direction from 4,6 to 4,4 = north (0).
-      // Target faces north (0). diff = ((0-0+3)%6+3)%6 = 0 => front.
       const attacker = makeUnit('4,6', 0);
       const target = makeUnit('4,4', 0);
       expect(resolver.getAttackDirection(attacker, target)).toBe('front');
@@ -317,7 +465,7 @@ describe('AttackResolver', () => {
       const target = makeUnit('4,6', 0, 4);
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
-      const dice = makeDiceRoller(8); // Always rolls 8
+      const dice = makeDiceRoller(8);
 
       const result = resolver.resolveWeaponAttack(attacker, weapon, {}, target, gs, dice);
       expect(result.hit).toBe(true);
@@ -329,7 +477,7 @@ describe('AttackResolver', () => {
       const target = makeUnit('4,6', 0, 4);
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
-      const dice = makeDiceRoller(2); // Always rolls 2
+      const dice = makeDiceRoller(2);
 
       const result = resolver.resolveWeaponAttack(attacker, weapon, {}, target, gs, dice);
       expect(result.hit).toBe(false);

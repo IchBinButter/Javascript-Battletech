@@ -39,8 +39,10 @@ export class MovementCalculator {
 
     let cost = TERRAIN_MP_COSTS[toHex.terrainType] || 1;
 
-    // Level change: +1 MP per level up
     const levelDiff = toHex.level - fromHex.level;
+    if (levelDiff >= 3) {
+      return Infinity;
+    }
     if (levelDiff > 0) {
       cost += levelDiff;
     }
@@ -156,9 +158,12 @@ export class MovementCalculator {
         if (neighborHex.occupiedBy && neighborKey !== startKey) continue;
 
         const terrainCost = this.calculateMPCost(currentHex, neighborHex, unit, movementType);
+        if (terrainCost === Infinity) continue;
+
         const moveDir = directionBetween(currentKey, neighborKey);
 
-        const newCost = currentCost + terrainCost;
+        const facingChangeCost = this.calculateFacingChangeFromDirection(currentFacing, moveDir);
+        const newCost = currentCost + terrainCost + facingChangeCost;
         if (newCost > maxMP) continue;
 
         const newPath = [...currentPath, neighborKey];
@@ -283,13 +288,29 @@ export class MovementCalculator {
     if (!unit.mascActive) return { roll: null, failed: false };
 
     const roll = diceRoller.roll2d6();
-    const failed = roll <= MASC_DATA.failureRollTarget;
+    const turnsActive = unit.mascTurnsActive || 1;
+    const failureTarget = MASC_DATA.failureRollTarget + 2 * (turnsActive - 1);
+    const failed = roll <= failureTarget;
 
     if (failed) {
       unit.mascActive = false;
       unit.mascTurnsActive = 0;
+      this._applyMASCLegDamage(unit);
     }
 
-    return { roll, failed };
+    return { roll, failed, target: failureTarget };
+  }
+
+  _applyMASCLegDamage(unit) {
+    for (const leg of ['leftLeg', 'rightLeg']) {
+      const slots = unit.criticalSlots && unit.criticalSlots[leg];
+      if (!slots) continue;
+      for (const slot of slots) {
+        if (slot.item && slot.item.includes('actuator') && slot.status === 'ok') {
+          slot.status = 'destroyed';
+          return;
+        }
+      }
+    }
   }
 }

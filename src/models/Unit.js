@@ -36,12 +36,15 @@ export class Unit {
     this.immobile = false;
     this.torsoTwist = 0;   // -1, 0, +1
     this.armsReversed = false;
+    this.hexesMoved = 0;
+    this.movementMode = 'walk';
 
     // Heat
     this.heat = 0;
 
     // Armor
     this.armor = deepClone(mechDef.armor);
+    this._initialArmor = deepClone(mechDef.armor);
 
     // Internal structure
     this.internalStructure = deepClone(mechDef.internalStructure);
@@ -72,6 +75,13 @@ export class Unit {
   /** Get current armor for a location (front or rear) */
   getArmor(location, isRear = false) {
     const loc = this.armor[location];
+    if (!loc) return 0;
+    return isRear ? (loc.rear || 0) : loc.front;
+  }
+
+  /** Get the initial (max) armor value for a location */
+  getMaxArmor(location, isRear = false) {
+    const loc = this._initialArmor[location];
     if (!loc) return 0;
     return isRear ? (loc.rear || 0) : loc.front;
   }

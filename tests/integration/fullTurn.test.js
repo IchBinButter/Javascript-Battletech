@@ -40,7 +40,8 @@ describe('Integration: Full Turn Simulation', () => {
     expect(engine.phaseManager.currentPhase).toBe('movement');
 
     // Phase 2: Movement - move atlas south (facing 3 = south, no turning cost)
-    // _enterMovement sets currentPlayer to initiative loser (player 1)
+    // _enterMovement builds a queue. Clear it so we can set currentPlayer manually.
+    engine.phaseManager.clearQueue();
     engine.stateManager.getState().currentPlayer = 0;
     const moveResult = engine.processAction(0, {
       type: 'move',
@@ -134,6 +135,7 @@ describe('Integration: Full Turn Simulation', () => {
 
     engine.phaseManager.enterPhase('initiative');
     engine.processAction(0, { type: 'endPhase' }); // initiative -> movement
+    engine.phaseManager.clearQueue();
     engine.stateManager.getState().currentPlayer = 0;
     engine.processAction(0, {
       type: 'move',

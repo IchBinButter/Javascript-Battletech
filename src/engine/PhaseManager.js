@@ -2,19 +2,96 @@
  * PhaseManager - Phase state machine for BattleTech turn flow.
  *
  * Phase sequence: initiative → movement → weapon_attack → physical_attack → heat → end
+ *
+ * Movement, weapon_attack, and physical_attack phases use per-unit alternation.
+ * The phaseUnitQueue alternates units between players; phaseUnitIndex advances on each action.
  */
 
 import { PHASES } from '../models/GameState.js';
+import { createSeededDice } from '../utils/dice.js';
 
 export class PhaseManager {
   constructor() {
     this.engine = null;
     this.currentPhase = 'initiative';
     this.phaseCallbacks = {};
+    this.phaseUnitQueue = [];
+    this.phaseUnitIndex = 0;
+    this.initiativeWinnerGoesFirst = false;
   }
 
   setEngine(gameEngine) {
     this.engine = gameEngine;
+  }
+
+  /**
+   * Initiative winner chooses whether to move first (affects movement/weapon phases).
+   */
+  chooseInitiative(goFirst) {
+    this.initiativeWinnerGoesFirst = !!goFirst;
+    this.engine.eventBus.emit('initiativeChoice', { goFirst: this.initiativeWinnerGoesFirst });
+  }
+
+  /**
+   * Build alternating player/unit queue for per-unit action ordering.
+   */
+  buildUnitQueue(firstPlayer, secondPlayer) {
+    const state = this.engine.stateManager.getState();
+    const firstUnits = state.getPlayerUnits(firstPlayer.id);
+    const secondUnits = state.getPlayerUnits(secondPlayer.id);
+
+    const queue = [];
+    const maxLen = Math.max(firstUnits.length, secondUnits.length);
+
+    for (let i = 0; i < maxLen; i++) {
+      if (i < firstUnits.length) {
+        queue.push({ playerId: firstUnits[i].player, unitId: firstUnits[i].id });
+      }
+      if (i < secondUnits.length) {
+        queue.push({ playerId: secondUnits[i].player, unitId: secondUnits[i].id });
+      }
+    }
+
+    return queue;
+  }
+
+  /** Get the current queue entry, or null if empty/exhausted. */
+  getCurrentQueueEntry() {
+    if (this.phaseUnitQueue.length === 0 || this.phaseUnitIndex >= this.phaseUnitQueue.length) {
+      return null;
+    }
+    return this.phaseUnitQueue[this.phaseUnitIndex];
+  }
+
+  /** Advance queue index. Returns true if no more entries remain. */
+  advanceQueue() {
+    if (this.phaseUnitQueue.length === 0) {
+      return false;
+    }
+    this.phaseUnitIndex++;
+    if (this.phaseUnitIndex >= this.phaseUnitQueue.length) {
+      return true;
+    }
+    const entry = this.phaseUnitQueue[this.phaseUnitIndex];
+    const state = this.engine.stateManager.getState();
+    state.currentPlayer = entry.playerId;
+    this.engine.eventBus.emit('queueAdvanced', entry);
+    return false;
+  }
+
+  /** Advance queue; if exhausted, auto-call nextPhase. Returns true if phase advanced. */
+  advanceQueueOrNextPhase() {
+    if (this.advanceQueue()) {
+      this.nextPhase();
+      return true;
+    }
+    return false;
+  }
+
+  /** Clear the current unit queue. */
+  clearQueue() {
+    this.phaseUnitQueue = [];
+    this.phaseUnitIndex = 0;
   }
 
   /**
@@ -44,13 +121,11 @@ export class PhaseManager {
         break;
     }
 
-    // Emit phase change
     this.engine.eventBus.emit('phaseChanged', {
       phase,
       turn: this.engine.stateManager.getState().turn
     });
 
-    // Call user-registered callback
     if (this.phaseCallbacks[phase]) {
       this.phaseCallbacks[phase]();
     }
@@ -60,7 +135,8 @@ export class PhaseManager {
     const state = this.engine.stateManager.getState();
     state.phase = 'initiative';
 
-    // Roll initiative
+    this.initiativeWinnerGoesFirst = false;
+
     const result = this.engine.initiativeManager.rollInitiative(
       state.players,
       this.engine.diceRoller
@@ -74,56 +150,86 @@ export class PhaseManager {
     const state = this.engine.stateManager.getState();
     state.phase = 'movement';
 
-    // Determine move order (loser moves first)
-    const order = this.engine.initiativeManager.getInitiativeOrder(
-      state.initiativeWinner,
-      state.players,
-      'movement'
-    );
-    state.currentPlayer = order[0];
+    const winner = state.initiativeWinner;
+    const players = state.players;
+    const loser = players.find(p => p.id !== winner) || players[0];
+    const winnerPlayer = players.find(p => p.id === winner) || players[0];
+
+    // Build alternating queue: loser first unless winner chose to go first
+    const first = this.initiativeWinnerGoesFirst ? winnerPlayer : loser;
+    const second = this.initiativeWinnerGoesFirst ? loser : winnerPlayer;
+
+    this.phaseUnitQueue = this.buildUnitQueue(first, second);
+    this.phaseUnitIndex = 0;
 
     // Reset unit MP for all units
     for (const unit of Object.values(state.units)) {
       unit.currentMP = unit.movement.walk;
     }
 
-    this.engine.eventBus.emit('movementPhase', { order });
+    // Set current player from queue
+    const entry = this.phaseUnitQueue[0];
+    if (entry) {
+      state.currentPlayer = entry.playerId;
+    }
+
+    this.engine.eventBus.emit('movementPhase', { queue: this.phaseUnitQueue });
   }
 
   _enterWeaponAttack() {
     const state = this.engine.stateManager.getState();
     state.phase = 'weapon_attack';
 
-    const order = this.engine.initiativeManager.getInitiativeOrder(
-      state.initiativeWinner,
-      state.players,
-      'weapon_attack'
-    );
-    state.currentPlayer = order[0];
+    const winner = state.initiativeWinner;
+    const players = state.players;
+    const loser = players.find(p => p.id !== winner) || players[0];
+    const winnerPlayer = players.find(p => p.id === winner) || players[0];
 
-    this.engine.eventBus.emit('weaponAttackPhase', { order });
+    const first = this.initiativeWinnerGoesFirst ? winnerPlayer : loser;
+    const second = this.initiativeWinnerGoesFirst ? loser : winnerPlayer;
+
+    this.phaseUnitQueue = this.buildUnitQueue(first, second);
+    this.phaseUnitIndex = 0;
+
+    const entry = this.phaseUnitQueue[0];
+    if (entry) {
+      state.currentPlayer = entry.playerId;
+    }
+
+    this.engine.eventBus.emit('weaponAttackPhase', { queue: this.phaseUnitQueue });
   }
 
   _enterPhysicalAttack() {
     const state = this.engine.stateManager.getState();
     state.phase = 'physical_attack';
 
-    // Winner moves first in physical attack
-    const order = this.engine.initiativeManager.getInitiativeOrder(
-      state.initiativeWinner,
-      state.players,
-      'physical_attack'
-    );
-    state.currentPlayer = order[0];
+    const winner = state.initiativeWinner;
+    const players = state.players;
+    const loser = players.find(p => p.id !== winner) || players[0];
+    const winnerPlayer = players.find(p => p.id === winner) || players[0];
 
-    this.engine.eventBus.emit('physicalAttackPhase', { order });
+    // Physical attack: winner goes first (not affected by winner's choice)
+    this.phaseUnitQueue = this.buildUnitQueue(winnerPlayer, loser);
+    this.phaseUnitIndex = 0;
+
+    const entry = this.phaseUnitQueue[0];
+    if (entry) {
+      state.currentPlayer = entry.playerId;
+    }
+
+    this.engine.eventBus.emit('physicalAttackPhase', { queue: this.phaseUnitQueue });
   }
 
   _enterHeatPhase() {
     const state = this.engine.stateManager.getState();
     state.phase = 'heat';
 
-    // Heat is automatic - calculate for all units
+    // Auto-resolve heat for all units
+    if (this.engine && this.engine.heatManager) {
+      const heatResults = this.engine.heatManager.resolveHeatPhase(state, this.engine.diceRoller);
+      this.engine.eventBus.emit('heatResolved', heatResults);
+    }
+
     this.engine.eventBus.emit('heatPhase', {});
   }
 
@@ -131,15 +237,61 @@ export class PhaseManager {
     const state = this.engine.stateManager.getState();
     state.phase = 'end';
 
+    // Consciousness checks
+    for (const unit of Object.values(state.units)) {
+      if (unit.pilot.hits > 0 && unit.pilot.conscious) {
+        const consciousnessLabels = ['invalid', 'target3', 'target5', 'target7', 'target10', 'autoFail'];
+        const consciousnessTargets = [0, 3, 5, 7, 10, null];
+        const hits = Math.min(unit.pilot.hits, 5);
+        const target = consciousnessTargets[hits];
+
+        if (target === null) {
+          // 5+ hits: auto unconscious
+          unit.pilot.conscious = false;
+          this.engine.eventBus.emit('pilotUnconscious', {
+            unitId: unit.id,
+            roll: 0,
+            target: 0,
+            hits: unit.pilot.hits,
+            auto: true
+          });
+        } else {
+          const roll = this.engine.diceRoller.roll2d6();
+          if (roll < target) {
+            unit.pilot.conscious = false;
+            this.engine.eventBus.emit('pilotUnconscious', {
+              unitId: unit.id,
+              roll,
+              target,
+              hits: unit.pilot.hits,
+              auto: false
+            });
+          }
+        }
+      }
+    }
+
+    // Shutdown restart checks
+    for (const unit of Object.values(state.units)) {
+      if (unit.shutdown) {
+        const roll = this.engine.diceRoller.roll2d6();
+        if (roll >= 8) {
+          unit.shutdown = false;
+          this.engine.eventBus.emit('unitRestarted', { unitId: unit.id, roll });
+        } else {
+          this.engine.eventBus.emit('unitRestartFailed', { unitId: unit.id, roll });
+        }
+      }
+    }
+
     // End phase cleanup
     for (const unit of Object.values(state.units)) {
-      // Reset torso twists
       unit.torsoTwist = 0;
       unit.armsReversed = false;
-
-      // Reset movement modifiers
       unit._movementModifier = 0;
       unit._targetMovementModifier = 0;
+      unit.hexesMoved = 0;
+      unit.movementMode = 'walk';
     }
 
     // Advance smoke timers
@@ -156,12 +308,27 @@ export class PhaseManager {
   /**
    * Validate if an action is allowed in the current phase.
    */
-  validateAction(actionType, playerId) {
+  validateAction(actionType, playerId, unitId = null) {
     const state = this.engine.stateManager.getState();
 
-    // Must be current player's turn
-    if (playerId !== state.currentPlayer) {
-      return { valid: false, reason: 'Not your turn' };
+    // endPhase and selectUnit bypass queue/player checks
+    if (actionType === 'endPhase' || actionType === 'selectUnit') {
+      return { valid: true, reason: '' };
+    }
+
+    // Queue-based validation
+    const entry = this.getCurrentQueueEntry();
+    if (entry) {
+      if (playerId !== entry.playerId) {
+        return { valid: false, reason: 'Not your turn' };
+      }
+      if (unitId && unitId !== entry.unitId) {
+        return { valid: false, reason: 'Not the current acting unit' };
+      }
+    } else {
+      if (playerId !== state.currentPlayer) {
+        return { valid: false, reason: 'Not your turn' };
+      }
     }
 
     switch (actionType) {
@@ -173,10 +340,6 @@ export class PhaseManager {
         return { valid: state.phase === 'physical_attack', reason: 'Only in physical attack phase' };
       case 'confirmFacing':
         return { valid: state.phase === 'movement', reason: 'Only in movement phase' };
-      case 'endPhase':
-        return { valid: true, reason: '' };
-      case 'selectUnit':
-        return { valid: true, reason: '' };
       default:
         return { valid: false, reason: `Unknown action: ${actionType}` };
     }
@@ -186,6 +349,8 @@ export class PhaseManager {
    * Advance to the next phase.
    */
   nextPhase() {
+    this.clearQueue();
+
     const idx = PHASES.indexOf(this.currentPhase);
     let next = null;
 
@@ -195,6 +360,8 @@ export class PhaseManager {
       // Start new turn
       const state = this.engine.stateManager.getState();
       state.turn++;
+      // Re-seed dice roller for the new turn
+      this.engine.diceRoller = createSeededDice(this.engine.gameId, state.turn);
       next = PHASES[0];
     }
 

@@ -61,10 +61,18 @@ export class GameEngine {
   }
 
   /**
+   * Extract the relevant unit ID from an action for queue validation.
+   */
+  _getActionUnitId(action) {
+    return action.unitId || action.attackerId || null;
+  }
+
+  /**
    * Process a player action. Main entry point for all player interactions.
    */
   processAction(playerId, action) {
-    const validation = this.phaseManager.validateAction(action.type, playerId);
+    const unitId = this._getActionUnitId(action);
+    const validation = this.phaseManager.validateAction(action.type, playerId, unitId);
     if (!validation.valid) {
       return { success: false, error: validation.reason };
     }
@@ -96,8 +104,12 @@ export class GameEngine {
 
     this.actionLog.push({ playerId, action, result, phase: this.phaseManager.currentPhase });
 
-    // Emit action result
     this.eventBus.emit('actionProcessed', { playerId, action, result });
+
+    // Advance the unit queue after actions that consume a unit's turn
+    if (result.success && ['move', 'fire', 'physicalAttack'].includes(action.type)) {
+      this.phaseManager.advanceQueueOrNextPhase();
+    }
 
     return result;
   }
@@ -273,14 +285,6 @@ export class GameEngine {
   }
 
   _handleEndPhase(playerId) {
-    this.stateManager.applyStateChange(() => {
-      if (this.phaseManager.currentPhase === 'heat') {
-        const state = this.stateManager.getState();
-        const heatResults = this.heatManager.resolveHeatPhase(state, this.diceRoller);
-        this.eventBus.emit('heatResolved', heatResults);
-      }
-    });
-
     const nextPhase = this.phaseManager.nextPhase();
     return { success: true, nextPhase };
   }

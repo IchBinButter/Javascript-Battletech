@@ -30,8 +30,8 @@ export class AttackResolver {
     tn += attackerMod;
     if (attackerMod > 0) mods.push(`Attacker moved: +${attackerMod}`);
 
-    // T - Target movement modifier
-    const targetMod = target.getTargetMovementModifier();
+    // T - Target movement modifier (computed from hexes moved)
+    const targetMod = this._getTargetMovementModifier(target);
     tn += targetMod;
     if (targetMod > 0) mods.push(`Target moved: +${targetMod}`);
 
@@ -47,10 +47,18 @@ export class AttackResolver {
       }
     }
 
-    // T - Target prone (immobile)
+    // Compute distance early for prone and range modifiers
+    const distance = hexDistance(attacker.position.hexKey, target.position.hexKey);
+
+    // T - Target prone (adjacent = -2, non-adjacent = +1)
     if (target.prone) {
-      tn -= 4; // Immobile target bonus
-      mods.push(`Target immobile (prone): -4`);
+      if (distance === 1) {
+        tn -= 2;
+        mods.push(`Target prone (adjacent): -2`);
+      } else {
+        tn += 1;
+        mods.push(`Target prone: +1`);
+      }
     } else if (target.immobile) {
       tn -= 4;
       mods.push(`Target immobile: -4`);
@@ -89,7 +97,8 @@ export class AttackResolver {
     }
 
     // O - Targeting Computer
-    if (weaponDef.type === 'DE' &&
+    const targetCompTypes = ['DE', 'DB', 'P'];
+    if (targetCompTypes.includes(weaponDef.type) &&
         attacker.equipment &&
         attacker.equipment.other &&
         attacker.equipment.other.targeting_computer) {
@@ -99,14 +108,13 @@ export class AttackResolver {
 
     // O - Partial cover
     if (losResult.partialCover) {
-      tn -= 1;
-      mods.push(`Partial cover: -1`);
+      tn += 1;
+      mods.push(`Partial cover: +1`);
     }
 
     // O - Minimum range
-    const distance = hexDistance(attacker.position.hexKey, target.position.hexKey);
     if (distance < weaponDef.minRange) {
-      const minRangeMod = weaponDef.minRange - distance + 1;
+      const minRangeMod = weaponDef.minRange - distance;
       tn += minRangeMod;
       mods.push(`Min range: +${minRangeMod}`);
     }
@@ -126,7 +134,7 @@ export class AttackResolver {
       rangeMod,
       distance,
       losResult,
-      minimumRangeMod: distance < weaponDef.minRange ? weaponDef.minRange - distance + 1 : 0
+      minimumRangeMod: distance < weaponDef.minRange ? weaponDef.minRange - distance : 0
     };
   }
 
@@ -223,17 +231,30 @@ export class AttackResolver {
    * @returns {number} Number of missiles that hit
    */
   resolveClusterHit(roll, clusterSize) {
-    const tableKey = clusterSize.toString();
     const table = this.hitTables.clusterTable;
     const rollEntry = table[roll.toString()];
 
     if (!rollEntry) {
-      // Default: all hit
       return clusterSize;
     }
 
-    const hits = rollEntry[tableKey];
-    return hits !== undefined ? hits : clusterSize;
+    const tableKey = clusterSize.toString();
+    const directHits = rollEntry[tableKey];
+    if (directHits !== undefined) {
+      return directHits;
+    }
+
+    const standardColumns = [2, 4, 6, 10, 15, 20];
+    const col = standardColumns.find((c) => c % clusterSize === 0);
+    if (col) {
+      const scale = col / clusterSize;
+      const baseHits = rollEntry[col.toString()];
+      if (baseHits !== undefined) {
+        return Math.max(1, Math.floor(baseHits / scale));
+      }
+    }
+
+    return clusterSize;
   }
 
   /**
@@ -264,5 +285,26 @@ export class AttackResolver {
     if (heat < 15) return 2;
     if (heat < 20) return 3;
     return 4;
+  }
+
+  /**
+   * Compute target movement modifier from hexes moved.
+   * Falls back to unit.getTargetMovementModifier() if hexesMoved not set.
+   */
+  _getTargetMovementModifier(target) {
+    if (target.hexesMoved !== undefined) {
+      const hm = target.hexesMoved;
+      if (target.movementMode === 'jump') {
+        return Math.max(1, hm);
+      }
+      if (hm <= 2) return 0;
+      if (hm <= 4) return 1;
+      if (hm <= 6) return 2;
+      if (hm <= 9) return 3;
+      if (hm <= 17) return 4;
+      if (hm <= 24) return 5;
+      return 6;
+    }
+    return target.getTargetMovementModifier ? target.getTargetMovementModifier() : 0;
   }
 }

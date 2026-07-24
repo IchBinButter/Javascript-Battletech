@@ -12,6 +12,7 @@ export class UIController {
     // DOM elements
     this.phaseLabel = document.getElementById('phase-label');
     this.turnLabel = document.getElementById('turn-label');
+    this.activePlayerLabel = document.getElementById('active-player');
     this.unitDetails = document.getElementById('unit-details');
     this.actionButtons = document.getElementById('action-buttons');
     this.weaponPanel = document.getElementById('weapon-panel');
@@ -26,6 +27,9 @@ export class UIController {
     this.weaponFireMode = false;
     this.selectedWeapons = [];
     this._pendingTarget = null;
+
+    // Movement preview
+    this._pendingMove = null;
   }
 
   init(gameEngine, mapRenderer) {
@@ -44,11 +48,37 @@ export class UIController {
     this._setupActionButtons();
   }
 
+  _hideAllPanels() {
+    this.movementPanel.style.display = 'none';
+    this.weaponPanel.style.display = 'none';
+    this.physicalPanel.style.display = 'none';
+    this.weaponFireMode = false;
+    this._pendingTarget = null;
+    this._pendingMove = null;
+
+    if (this.mapRenderer) {
+      this.mapRenderer.validMoves = null;
+    }
+  }
+
   _onPhaseChanged(data) {
     this.phaseLabel.textContent = `Phase: ${data.phase}`;
     this.turnLabel.textContent = `Turn: ${data.turn}`;
     this._pendingTarget = null;
+
+    const state = this.gameEngine.stateManager.getState();
+    this._updateActivePlayer(state);
+
+    this._hideAllPanels();
     this._updateActionButtons(data.phase);
+  }
+
+  _updateActivePlayer(state) {
+    if (this.activePlayerLabel) {
+      const player = state.players[state.currentPlayer];
+      const name = player ? player.name : `Player ${state.currentPlayer}`;
+      this.activePlayerLabel.textContent = `Active: ${name}`;
+    }
   }
 
   _updateActionButtons(phase) {
@@ -210,11 +240,43 @@ export class UIController {
   }
 
   _getWeaponData(weaponType) {
-    // This is populated from the weapon lookup table
     if (this.gameEngine.attackResolver && this.gameEngine._weaponsData) {
       return this.gameEngine._weaponsData[weaponType] || null;
     }
     return null;
+  }
+
+  _renderHeatBar(unit) {
+    const scale = 30;
+    const segments = 15;
+    const heatPerSegment = scale / segments;
+
+    let html = '<div class="heat-bar">';
+    for (let i = 0; i < segments; i++) {
+      const segStart = i * heatPerSegment;
+      let cls = 'inactive';
+      if (unit.heat > segStart) {
+        if (segStart < 5) cls = 'safe';
+        else if (segStart < 10) cls = 'warn';
+        else if (segStart < 15) cls = 'danger';
+        else cls = 'critical';
+      }
+      html += `<div class="heat-segment ${cls}" title="Heat ${Math.round(segStart)}-${Math.round(segStart + heatPerSegment)}"></div>`;
+    }
+    html += '</div>';
+    return html;
+  }
+
+  _getHeatEffects(unit) {
+    if (unit.heat < 5) return '';
+    const effects = [];
+    if (unit.heat >= 5) effects.push('-1 MP');
+    if (unit.heat >= 10) effects.push('-2 MP');
+    if (unit.heat >= 15) effects.push('+1 to-hit');
+    if (unit.heat >= 20) effects.push('Ammo explosion 4+');
+    if (unit.heat >= 25) effects.push('Shutdown 4+');
+    if (unit.heat >= 30) effects.push('AUTO SHUTDOWN');
+    return effects.length ? ` (${effects.join(', ')})` : '';
   }
 
   updateUnitPanel(unit) {
@@ -230,8 +292,8 @@ export class UIController {
     const locations = ['head', 'centerTorso', 'leftTorso', 'rightTorso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg'];
     for (const loc of locations) {
       const armor = unit.getArmor(loc);
-      const maxArmor = unit.tonnage > 60 ? 45 : unit.tonnage > 35 ? 30 : 20;
-      const pct = Math.min(100, Math.max(0, (armor / maxArmor) * 100));
+      const maxArmor = unit.getMaxArmor(loc);
+      const pct = maxArmor > 0 ? Math.min(100, Math.max(0, (armor / maxArmor) * 100)) : 0;
       const internal = unit.getInternal(loc);
       const destroyed = unit.isLocationDestroyed(loc) ? ' DESTROYED' : '';
       armorHTML += `
@@ -248,9 +310,22 @@ export class UIController {
       return wd ? `<li>${wd.name} (${w.location})</li>` : `<li>${w.type} (${w.location})</li>`;
     }).join('');
 
+    const playerColor = unit.player === 0 ? '#3b82f6' : '#ef4444';
+    const playerName = this.gameEngine
+      ? (this.gameEngine.stateManager.getState().players[unit.player]?.name || `Player ${unit.player + 1}`)
+      : `Player ${unit.player + 1}`;
+    const isActive = this.gameEngine
+      && this.gameEngine.stateManager.getState().currentPlayer === unit.player;
+
     this.unitDetails.innerHTML = `
-      <p><strong>${unit.name}</strong> (${unit.tonnage}t) - Player ${unit.player + 1}</p>
-      <p>Heat: ${unit.heat} | MP: ${unit.currentMP}/${unit.movement.walk}(${unit.movement.run})</p>
+      <p>
+        <strong>${unit.name}</strong> (${unit.tonnage}t)
+        <span style="color:${playerColor}"> - ${playerName}</span>
+        ${isActive ? ' <span style="color:#4cc9f0">[ACTIVE]</span>' : ''}
+      </p>
+      <p>Heat: ${unit.heat} / ${unit.heatSinks.count * (unit.heatSinks.type === 'double' ? 2 : 1)} dissipation${this._getHeatEffects(unit)}</p>
+      ${this._renderHeatBar(unit)}
+      <p>MP: ${unit.currentMP}/${unit.movement.walk}(${unit.movement.run})</p>
       <p>Pilot: G${unit.pilot.gunnery}/P${unit.pilot.piloting} | Facing: ${unit.position.facing}</p>
       ${unit.prone ? '<p style="color:#ff4444">PRONE</p>' : ''}
       ${unit.shutdown ? '<p style="color:#ff4444">SHUTDOWN</p>' : ''}
@@ -307,7 +382,60 @@ export class UIController {
   }
 
   _onActionProcessed(data) {
-    // Generic action logging
+  }
+
+  _handleConfirmMove() {
+    const state = this.gameEngine.stateManager.getState();
+    const unit = state.getUnit(this.selectedUnitId);
+    if (!unit) { this.log('No unit selected', 'miss'); return; }
+
+    if (this._pendingMove) {
+      const result = this.gameEngine.processAction(state.currentPlayer, {
+        type: 'move',
+        unitId: unit.id,
+        path: this._pendingMove.path,
+        movementType: this._pendingMove.movementType
+      });
+
+      if (result.error) {
+        this.log(`Movement error: ${result.error}`, 'miss');
+      }
+
+      this._clearMovementPreview();
+      if (this.mapRenderer) {
+        this.mapRenderer.render(state);
+      }
+      this.updateUnitPanel(state.getUnit(unit.id));
+    }
+  }
+
+  _handleCancelMove() {
+    this._clearMovementPreview();
+    if (this.mapRenderer) {
+      this.mapRenderer.render(this.gameEngine.stateManager.getState());
+    }
+  }
+
+  _clearMovementPreview() {
+    this._pendingMove = null;
+    if (this.mapRenderer) {
+      this.mapRenderer.validMoves = null;
+      this.mapRenderer.hoveredHex = null;
+    }
+  }
+
+  _refreshMovementPreview() {
+    const state = this.gameEngine.stateManager.getState();
+    if (state.phase !== 'movement') return;
+    const unit = state.getUnit(this.selectedUnitId);
+    if (!unit || unit.player !== state.currentPlayer) return;
+
+    const validMoves = this.gameEngine.movementCalc.getValidMoves(unit, state, this.movementMode);
+    if (this.mapRenderer) {
+      this.mapRenderer.validMoves = validMoves;
+      this.mapRenderer.render(state);
+    }
+    this._pendingMove = null;
   }
 
   _setupActionButtons() {
@@ -315,8 +443,21 @@ export class UIController {
     document.querySelectorAll('input[name="moveMode"]').forEach(radio => {
       radio.addEventListener('change', (e) => {
         this.movementMode = e.target.value;
+        this._refreshMovementPreview();
       });
     });
+
+    // Confirm move button
+    const btnConfirm = document.getElementById('btn-confirm-move');
+    if (btnConfirm) {
+      btnConfirm.addEventListener('click', () => this._handleConfirmMove());
+    }
+
+    // Cancel move button
+    const btnCancel = document.getElementById('btn-cancel-move');
+    if (btnCancel) {
+      btnCancel.addEventListener('click', () => this._handleCancelMove());
+    }
 
     // Fire Selected button
     const btnFire = document.getElementById('btn-fire');

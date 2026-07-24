@@ -193,6 +193,16 @@ canvas.addEventListener('click', (event) => {
     // Normal selection
     mapRenderer.selectedUnit = unitOnHex.id;
     ui.updateUnitPanel(unitOnHex);
+
+    // Show movement preview for own units in movement phase
+    if (state.phase === 'movement' && unitOnHex.player === state.currentPlayer) {
+      const validMoves = gameEngine.movementCalc.getValidMoves(unitOnHex, state, ui.movementMode);
+      mapRenderer.validMoves = validMoves;
+      ui._pendingMove = null;
+    } else {
+      mapRenderer.validMoves = null;
+    }
+
     mapRenderer.render(state);
     return;
   }
@@ -206,32 +216,31 @@ canvas.addEventListener('click', (event) => {
   }
 
   if (state.phase === 'movement' && mapRenderer.selectedUnit) {
-    // Clicked empty hex during movement phase
-    // Move selected unit
+    // Clicked empty hex during movement phase - set pending move
     const unit = state.getUnit(mapRenderer.selectedUnit);
     if (unit && unit.player === state.currentPlayer) {
-      const result = gameEngine.processAction(state.currentPlayer, {
-        type: 'move',
-        unitId: unit.id,
-        path: [unit.position.hexKey, hexKey],
-        movementType: ui.movementMode
-      });
-
-      if (result.error) {
-        ui.log(`Movement error: ${result.error}`, 'miss');
+      const validMoves = mapRenderer.validMoves;
+      if (validMoves && validMoves.has(hexKey)) {
+        const moveData = validMoves.get(hexKey);
+        ui._pendingMove = {
+          path: moveData.path,
+          movementType: ui.movementMode
+        };
+        mapRenderer.hoveredHex = hexKey;
+        ui.log(`Move pending to ${hexKey} (${moveData.cost} MP). Click Confirm Move or press Cancel.`);
       } else {
-        ui.log(`Moved ${unit.name} to ${hexKey}`);
+        ui.log('Cannot reach that hex', 'miss');
       }
-
-      mapRenderer.render(gameEngine.stateManager.getState());
-      ui.updateUnitPanel(unit);
+      mapRenderer.render(state);
     }
+    return;
   }
 
   // Deselect if clicking empty hex during non-movement
   if (state.phase !== 'movement') {
     mapRenderer.selectedUnit = null;
     ui.updateUnitPanel(null);
+    mapRenderer.validMoves = null;
     mapRenderer.render(state);
   }
 });

@@ -1,9 +1,14 @@
 /**
  * PhysicalAttackResolver - Physical attack resolution (punch, kick, charge, DFA, push, club).
+ * All hit location tables sourced from hitTables.json.
  */
 
 import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { PSRCalculator } from '../movement/PSRCalculator.js';
+import hitTables from '../../data/hitTables.json' with { type: 'json' };
+
+const PUNCH_TABLE = hitTables.hitLocation.punch;
+const KICK_TABLE = hitTables.hitLocation.kick;
 
 export class PhysicalAttackResolver {
   constructor() {
@@ -33,7 +38,6 @@ export class PhysicalAttackResolver {
 
     if (hit) {
       damage = Math.floor(attacker.tonnage / 10); // 1 per 10 tons
-      // Punch hits use punch location table (simplified: use standard)
       const locRoll = diceRoller.roll2d6();
       locations = [{ location: this.punchLocation(locRoll), damage }];
     }
@@ -114,7 +118,7 @@ export class PhysicalAttackResolver {
       // Damage = attacker tonnage / 10 * distance charged in hexes
       targetDamage = Math.floor(attacker.tonnage / 10) * distanceCharged;
       const locRoll = diceRoller.roll2d6();
-      locations = [{ location: this.chargeLocation(locRoll), damage: targetDamage }];
+      locations = [{ location: this.punchLocation(locRoll), damage: targetDamage }];
 
       // Attacker takes damage = target tonnage / 10
       attackerDamage = Math.floor(target.tonnage / 10);
@@ -135,6 +139,9 @@ export class PhysicalAttackResolver {
 
   /**
    * Resolve a Death From Above (DFA) attack.
+   * TN = piloting + attacker move mod + target move mod.
+   * On hit: target takes damage, attacker takes floor(tonnage/5).
+   * ALL damage uses the punch location table.
    */
   resolveDFA(attacker, target, diceRoller) {
     if (!attacker.movement.jump || attacker.movement.jump <= 0) {
@@ -144,26 +151,20 @@ export class PhysicalAttackResolver {
       return { success: false, reason: 'Attacker is prone' };
     }
 
-    // DFA is high-risk: TN = piloting + 4 (simplified)
-    const tn = attacker.pilot.piloting + 4;
+    const tn = this.calculatePhysicalTN(attacker, target, 'dfa');
     const roll = diceRoller.roll2d6();
     const hit = roll >= tn;
 
     let targetDamage = 0;
-    let kickDamage = 0;
     let attackerDamage = 0;
     let locations = [];
 
     if (hit) {
-      targetDamage = Math.floor(attacker.tonnage / 10); // Punch damage component
-      kickDamage = Math.floor(attacker.tonnage / 5); // Kick damage component
-      attackerDamage = Math.floor(attacker.tonnage / 10); // Attacker always takes leg damage in DFA
+      targetDamage = Math.floor(attacker.tonnage / 10) * 3;
+      attackerDamage = Math.floor(attacker.tonnage / 5);
       const locRoll = diceRoller.roll2d6();
       locations = [{ location: this.punchLocation(locRoll), damage: targetDamage }];
-      const kickRoll = diceRoller.roll2d6();
-      locations.push({ location: this.kickLocation(kickRoll), damage: kickDamage });
     } else {
-      // Missed DFA: attacker auto-falls and takes damage
       attackerDamage = Math.floor(attacker.tonnage / 5);
     }
 
@@ -173,10 +174,9 @@ export class PhysicalAttackResolver {
       hit,
       roll,
       targetNumber: tn,
-      targetDamage: targetDamage + kickDamage,
+      targetDamage,
       attackerDamage,
       hitLocations: locations,
-      // DFA always knocks attacker prone
       attackerProne: true
     };
   }
@@ -211,7 +211,7 @@ export class PhysicalAttackResolver {
 
   /**
    * Calculate the base TN for a physical attack.
-   * TN = piloting skill + modifiers
+   * TN = piloting skill + modifiers.
    */
   calculatePhysicalTN(attacker, target, type) {
     let tn = attacker.pilot.piloting;
@@ -219,13 +219,11 @@ export class PhysicalAttackResolver {
     // Type-specific modifiers
     switch (type) {
       case 'punch':
-        // Missing one arm: +1
         if (attacker.isLocationDestroyed('leftArm') || attacker.isLocationDestroyed('rightArm')) {
           tn += 1;
         }
         break;
       case 'kick':
-        // Missing one leg: +2 (harder to kick with one leg)
         if (attacker.isLocationDestroyed('leftLeg') || attacker.isLocationDestroyed('rightLeg')) {
           tn += 2;
         }
@@ -233,7 +231,7 @@ export class PhysicalAttackResolver {
       case 'charge':
         break;
       case 'dfa':
-        tn += 4; // DFA is inherently difficult
+        // DFA uses piloting + attacker move mod + target move mod (no flat +4)
         break;
       case 'push':
         break;
@@ -254,24 +252,16 @@ export class PhysicalAttackResolver {
   }
 
   punchLocation(roll) {
-    const table = {
-      2: 'head', 3: 'head', 4: 'centerTorso', 5: 'rightTorso',
-      6: 'leftTorso', 7: 'centerTorso', 8: 'leftArm', 9: 'rightArm',
-      10: 'leftTorso', 11: 'rightTorso', 12: 'head'
-    };
-    return table[roll] || 'centerTorso';
+    const entry = PUNCH_TABLE[roll.toString()];
+    return entry ? entry.location : 'centerTorso';
   }
 
   kickLocation(roll) {
-    const table = {
-      2: 'leftTorso', 3: 'rightTorso', 4: 'leftLeg', 5: 'rightLeg',
-      6: 'leftLeg', 7: 'rightLeg', 8: 'leftLeg', 9: 'rightLeg',
-      10: 'leftLeg', 11: 'rightLeg', 12: 'leftLeg'
-    };
-    return table[roll] || 'leftLeg';
+    const entry = KICK_TABLE[roll.toString()];
+    return entry ? entry.location : 'leftLeg';
   }
 
   chargeLocation(roll) {
-    return this.punchLocation(roll); // Charges use punch table
+    return this.punchLocation(roll);
   }
 }
