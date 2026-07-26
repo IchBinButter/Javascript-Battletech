@@ -5,3 +5,5 @@ dist/
 .DS_Store
 Thumbs.db
 .hive/
+*.pdf
+RULES_AUDIT_REFERENCE.md

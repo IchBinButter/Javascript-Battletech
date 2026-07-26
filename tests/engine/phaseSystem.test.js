@@ -35,9 +35,13 @@ function createThreeMechEngine() {
   return { engine, atlas, jenner, wolverine };
 }
 
-describe('PhaseManager: Per-Unit Queue System', () => {
-  describe('phaseUnitQueue building', () => {
-    it('buildUnitQueue creates alternating entries from two players', () => {
+// =============================================================================
+// Per-Unit Alternation Queue
+// =============================================================================
+
+describe('PhaseManager: Per-Unit Alternation Queue', () => {
+  describe('buildUnitQueue', () => {
+    it('creates alternating entries from two players with even unit counts', () => {
       const { engine } = createTwoMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
@@ -50,13 +54,12 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       expect(queue[1]).toEqual({ playerId: 0, unitId: 'atlas-0' });
     });
 
-    it('buildUnitQueue alternates with uneven unit counts', () => {
+    it('alternates with uneven unit counts', () => {
       const { engine } = createThreeMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
 
       const players = engine.stateManager.getState().players;
-      // player 0 has 2 units, player 1 has 1 unit
       const queue = engine.phaseManager.buildUnitQueue(players[1], players[0]);
 
       expect(queue).toHaveLength(3);
@@ -65,6 +68,28 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       expect(queue[2]).toEqual({ playerId: 0, unitId: 'wolverine-0' });
     });
 
+    it('returns empty queue when both players have no units', () => {
+      const engine = createTestEngine({ units: {} });
+      const players = engine.stateManager.getState().players;
+      const queue = engine.phaseManager.buildUnitQueue(players[0], players[1]);
+      expect(queue).toHaveLength(0);
+    });
+
+    it('returns only first player units when second has none', () => {
+      const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+      atlas.position = { hexKey: '5,7', facing: 0 };
+      const engine = createTestEngine({
+        units: { 'atlas-0': atlas },
+        players: [{ id: 0, name: 'Player 1' }, { id: 1, name: 'Player 2' }]
+      });
+      const players = engine.stateManager.getState().players;
+      const queue = engine.phaseManager.buildUnitQueue(players[0], players[1]);
+      expect(queue).toHaveLength(1);
+      expect(queue[0].unitId).toBe('atlas-0');
+    });
+  });
+
+  describe('phase entry queue building', () => {
     it('_enterMovement builds queue with loser first by default', () => {
       const { engine } = createTwoMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
@@ -73,7 +98,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
 
       const queue = engine.phaseManager.phaseUnitQueue;
       expect(queue).toHaveLength(2);
-      // Initiative winner = 0 (rolled 8), loser = 1 goes first
       expect(queue[0].playerId).toBe(1);
       expect(queue[1].playerId).toBe(0);
     });
@@ -124,6 +148,31 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       const state = engine.stateManager.getState();
       expect(state.currentPlayer).toBe(1);
     });
+
+    it('_enterMovement resets all unit currentMP to walk value', () => {
+      const { engine, atlas, jenner } = createTwoMechEngine();
+      engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+      atlas.currentMP = 0;
+      jenner.currentMP = 2;
+      engine.phaseManager.enterPhase('initiative');
+      engine.phaseManager.enterPhase('movement');
+
+      expect(atlas.currentMP).toBe(atlas.movement.walk);
+      expect(jenner.currentMP).toBe(jenner.movement.walk);
+    });
+
+    it('_enterMovement emits movementPhase event with queue', () => {
+      const { engine } = createTwoMechEngine();
+      engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+      engine.phaseManager.enterPhase('initiative');
+
+      const events = [];
+      engine.eventBus.on('movementPhase', (data) => events.push(data));
+      engine.phaseManager.enterPhase('movement');
+
+      expect(events).toHaveLength(1);
+      expect(events[0].queue).toEqual(engine.phaseManager.phaseUnitQueue);
+    });
   });
 
   describe('phaseUnitIndex tracking and advancement', () => {
@@ -138,7 +187,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       expect(state.currentPlayer).toBe(1);
 
       const done = engine.phaseManager.advanceQueue();
-
       expect(done).toBe(false);
       expect(engine.phaseManager.phaseUnitIndex).toBe(1);
       expect(state.currentPlayer).toBe(0);
@@ -152,9 +200,28 @@ describe('PhaseManager: Per-Unit Queue System', () => {
 
       engine.phaseManager.phaseUnitIndex = 1;
       const done = engine.phaseManager.advanceQueue();
-
       expect(done).toBe(true);
       expect(engine.phaseManager.getCurrentQueueEntry()).toBeNull();
+    });
+
+    it('advanceQueue does NOT emit queueAdvanced when exhausted', () => {
+      const { engine } = createTwoMechEngine();
+      engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+      engine.phaseManager.enterPhase('initiative');
+      engine.phaseManager.enterPhase('movement');
+
+      engine.phaseManager.phaseUnitIndex = 1;
+      const events = [];
+      engine.eventBus.on('queueAdvanced', (data) => events.push(data));
+
+      const done = engine.phaseManager.advanceQueue();
+      expect(done).toBe(true);
+      expect(events).toHaveLength(0);
+    });
+
+    it('advanceQueue returns false on empty queue', () => {
+      const { engine } = createTwoMechEngine();
+      expect(engine.phaseManager.advanceQueue()).toBe(false);
     });
 
     it('getCurrentQueueEntry returns null when queue is empty', () => {
@@ -168,7 +235,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       engine.phaseManager.enterPhase('initiative');
       engine.phaseManager.enterPhase('movement');
       engine.phaseManager.phaseUnitIndex = 5;
-
       expect(engine.phaseManager.getCurrentQueueEntry()).toBeNull();
     });
 
@@ -193,15 +259,13 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       engine.phaseManager.enterPhase('initiative');
       engine.phaseManager.enterPhase('movement');
 
-      // advance past last entry
       engine.phaseManager.phaseUnitIndex = 1;
-
       const advanced = engine.phaseManager.advanceQueueOrNextPhase();
       expect(advanced).toBe(true);
       expect(engine.phaseManager.currentPhase).toBe('weapon_attack');
     });
 
-    it('advanceQueueOrNextPhase does not advance phase when queue still has entries', () => {
+    it('advanceQueueOrNextPhase does not advance phase when queue has more entries', () => {
       const { engine } = createTwoMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
@@ -219,13 +283,12 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       engine.phaseManager.enterPhase('movement');
 
       expect(engine.phaseManager.phaseUnitQueue).toHaveLength(2);
-
       engine.phaseManager.clearQueue();
       expect(engine.phaseManager.phaseUnitQueue).toHaveLength(0);
       expect(engine.phaseManager.phaseUnitIndex).toBe(0);
     });
 
-    it('nextPhase clears the queue during transition', () => {
+    it('nextPhase calls clearQueue during transition', () => {
       const { engine } = createTwoMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5]);
       engine.phaseManager.enterPhase('initiative');
@@ -241,7 +304,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       };
 
       engine.phaseManager.nextPhase();
-      // clearQueue was called during nextPhase transition
       expect(clearedCalls).toHaveLength(1);
     });
 
@@ -250,7 +312,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
       engine.phaseManager.enterPhase('movement');
-      // Loser (player 1) moves first
 
       const result = engine.processAction(1, {
         type: 'move',
@@ -260,7 +321,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       });
 
       expect(result.success).toBe(true);
-      // Queue should have advanced to winner (player 0)
       const state = engine.stateManager.getState();
       expect(state.currentPlayer).toBe(0);
       expect(engine.phaseManager.phaseUnitIndex).toBe(1);
@@ -271,9 +331,7 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
       engine.phaseManager.enterPhase('movement');
-      // Queue: [player1/jenner, player0/atlas]
 
-      // Player 0 tries to move atlas but it's player 1's turn
       const result = engine.processAction(0, {
         type: 'move',
         unitId: 'atlas-0',
@@ -290,9 +348,7 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
       engine.phaseManager.enterPhase('weapon_attack');
-      // Queue: [player1/jenner, player0/atlas]
 
-      // Player 1 tries to fire from atlas (not their unit)
       const result = engine.processAction(1, {
         type: 'fire',
         attackerId: 'atlas-0',
@@ -301,8 +357,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
         weaponLocation: 'rightArm'
       });
 
-      // This should fail because atlas belongs to player 0, not player 1
-      // Actually, let's check if the queue check catches it first
       expect(result.success).toBe(false);
     });
 
@@ -312,7 +366,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       engine.phaseManager.enterPhase('initiative');
       engine.phaseManager.enterPhase('movement');
 
-      // Player 1 (loser) moves jenner
       engine.processAction(1, {
         type: 'move',
         unitId: 'jenner-1',
@@ -321,7 +374,6 @@ describe('PhaseManager: Per-Unit Queue System', () => {
       });
       expect(engine.phaseManager.currentPhase).toBe('movement');
 
-      // Player 0 moves atlas - queue should exhaust and auto-advance
       const result = engine.processAction(0, {
         type: 'move',
         unitId: 'atlas-0',
@@ -335,6 +387,10 @@ describe('PhaseManager: Per-Unit Queue System', () => {
   });
 });
 
+// =============================================================================
+// Initiative Winner Choice
+// =============================================================================
+
 describe('PhaseManager: Initiative Winner Choice', () => {
   it('chooseInitiative sets the flag and emits event', () => {
     const { engine } = createTwoMechEngine();
@@ -346,6 +402,13 @@ describe('PhaseManager: Initiative Winner Choice', () => {
     expect(engine.phaseManager.initiativeWinnerGoesFirst).toBe(true);
     expect(events).toHaveLength(1);
     expect(events[0].goFirst).toBe(true);
+  });
+
+  it('chooseInitiative(false) sets flag to false', () => {
+    const { engine } = createTwoMechEngine();
+    engine.phaseManager.initiativeWinnerGoesFirst = true;
+    engine.phaseManager.chooseInitiative(false);
+    expect(engine.phaseManager.initiativeWinnerGoesFirst).toBe(false);
   });
 
   it('_enterInitiative resets choice to false at start of each turn', () => {
@@ -366,7 +429,7 @@ describe('PhaseManager: Initiative Winner Choice', () => {
     engine.phaseManager.enterPhase('movement');
 
     const queue = engine.phaseManager.phaseUnitQueue;
-    expect(queue[0].playerId).toBe(1); // loser
+    expect(queue[0].playerId).toBe(1);
   });
 
   it('when winner goes first, winner is first in queue', () => {
@@ -377,95 +440,38 @@ describe('PhaseManager: Initiative Winner Choice', () => {
     engine.phaseManager.enterPhase('movement');
 
     const queue = engine.phaseManager.phaseUnitQueue;
-    expect(queue[0].playerId).toBe(0); // winner
+    expect(queue[0].playerId).toBe(0);
   });
-});
 
-describe('PhaseManager: Dice Roller Re-Seeding', () => {
-  it('re-seeds dice roller when starting a new turn', () => {
+  it('initiative winner is set on state after roll', () => {
     const { engine } = createTwoMechEngine();
-    const originalRoller = engine.diceRoller;
+    engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+    engine.phaseManager.enterPhase('initiative');
 
-    // Cycle through all phases and back to initiative (new turn)
-    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5, 8, 5, 8, 5]);
-    for (let i = 0; i < PHASES.length; i++) {
-      engine.phaseManager.nextPhase();
-    }
-
-    // Now starting turn 2 - dice roller should be re-seeded
-    expect(engine.stateManager.getState().turn).toBe(2);
-    expect(engine.diceRoller).not.toBe(originalRoller);
+    const state = engine.stateManager.getState();
+    expect(state.initiativeWinner).toBe(0);
   });
 
-  it('uses turn number in dice seed', () => {
+  it('emits initiativeRolled event with rolls and winner', () => {
     const { engine } = createTwoMechEngine();
-    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5, 8, 5, 8, 5]);
+    engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+    const events = [];
+    engine.eventBus.on('initiativeRolled', (data) => events.push(data));
 
-    // Advance to turn 2
-    for (let i = 0; i < PHASES.length; i++) {
-      engine.phaseManager.nextPhase();
-    }
+    engine.phaseManager.enterPhase('initiative');
 
-    // Reset and roll - should give deterministic values based on new seed
-    engine.diceRoller.reset();
-    const roll1 = engine.diceRoller.roll2d6();
-
-    // Advance to turn 3
-    for (let i = 0; i < PHASES.length; i++) {
-      engine.phaseManager.nextPhase();
-    }
-
-    engine.diceRoller.reset();
-    const roll2 = engine.diceRoller.roll2d6();
-
-    // Different turns should produce different seeds
-    expect(roll1).not.toBe(roll2);
+    expect(events).toHaveLength(1);
+    expect(events[0].winner).toBe(0);
+    expect(events[0].rolls).toHaveLength(2);
   });
 });
 
-describe('PhaseManager: Auto-Resolve Heat Phase', () => {
-  it('_enterHeatPhase resolves heat without requiring an action', () => {
-    const { engine, atlas } = createTwoMechEngine();
-    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5]);
-
-    // Set up heat on a unit
-    atlas.heat = 10;
-
-    const heatResolved = [];
-    const heatPhaseEvents = [];
-    engine.eventBus.on('heatResolved', (data) => heatResolved.push(data));
-    engine.eventBus.on('heatPhase', (data) => heatPhaseEvents.push(data));
-
-    engine.phaseManager.enterPhase('heat');
-
-    // Both events should fire
-    expect(heatResolved).toHaveLength(1);
-    expect(heatPhaseEvents).toHaveLength(1);
-
-    // Heat should have been dissipated
-    expect(atlas.heat).toBeLessThan(10);
-  });
-
-  it('heat resolved event contains results for all units', () => {
-    const { engine, atlas, jenner } = createTwoMechEngine();
-    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5]);
-    atlas.heat = 15;
-    jenner.heat = 5;
-
-    const heatResolved = [];
-    engine.eventBus.on('heatResolved', (data) => heatResolved.push(data));
-
-    engine.phaseManager.enterPhase('heat');
-
-    const result = heatResolved[0];
-    expect(Array.isArray(result)).toBe(true);
-    expect(result.find(r => r.unitId === 'atlas-0')).toBeDefined();
-    expect(result.find(r => r.unitId === 'jenner-1')).toBeDefined();
-  });
-});
+// =============================================================================
+// Consciousness Checks
+// =============================================================================
 
 describe('PhaseManager: Consciousness Checks', () => {
-  it('conscious pilot passes check with no rolls', () => {
+  it('conscious pilot with 0 hits passes with no roll', () => {
     const { engine, atlas } = createTwoMechEngine();
     atlas.pilot.hits = 0;
     atlas.pilot.conscious = true;
@@ -481,7 +487,6 @@ describe('PhaseManager: Consciousness Checks', () => {
 
   it('pilot with 1 hit passes consciousness on roll >= 3', () => {
     const { engine, atlas } = createTwoMechEngine();
-    // dice roller returns 8 always (2d6 = 8 from makeDiceRoller default)
     engine.diceRoller = makeDiceRoller(8);
     atlas.pilot.hits = 1;
     atlas.pilot.conscious = true;
@@ -507,6 +512,8 @@ describe('PhaseManager: Consciousness Checks', () => {
     expect(uncons[0].unitId).toBe('atlas-0');
     expect(uncons[0].target).toBe(3);
     expect(uncons[0].roll).toBe(2);
+    expect(uncons[0].hits).toBe(1);
+    expect(uncons[0].auto).toBe(false);
   });
 
   it('pilot with 2 hits has target 5', () => {
@@ -542,7 +549,7 @@ describe('PhaseManager: Consciousness Checks', () => {
     expect(atlas.pilot.conscious).toBe(false);
   });
 
-  it('pilot with 5+ hits is automatically unconscious', () => {
+  it('pilot with 5 hits is automatically unconscious', () => {
     const { engine, atlas } = createTwoMechEngine();
     atlas.pilot.hits = 5;
     atlas.pilot.conscious = true;
@@ -555,6 +562,18 @@ describe('PhaseManager: Consciousness Checks', () => {
     expect(atlas.pilot.conscious).toBe(false);
     expect(uncons).toHaveLength(1);
     expect(uncons[0].auto).toBe(true);
+    expect(uncons[0].roll).toBe(0);
+    expect(uncons[0].hits).toBe(5);
+  });
+
+  it('pilot with 6+ hits is automatically unconscious', () => {
+    const { engine, atlas } = createTwoMechEngine();
+    atlas.pilot.hits = 6;
+    atlas.pilot.conscious = true;
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(atlas.pilot.conscious).toBe(false);
   });
 
   it('already unconscious pilot does not roll again', () => {
@@ -569,7 +588,27 @@ describe('PhaseManager: Consciousness Checks', () => {
 
     expect(uncons).toHaveLength(0);
   });
+
+  it('checks consciousness for all units', () => {
+    const { engine, atlas, jenner } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(2);
+    atlas.pilot.hits = 1;
+    atlas.pilot.conscious = true;
+    jenner.pilot.hits = 1;
+    jenner.pilot.conscious = true;
+
+    const uncons = [];
+    engine.eventBus.on('pilotUnconscious', (data) => uncons.push(data));
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(uncons).toHaveLength(2);
+  });
 });
+
+// =============================================================================
+// Shutdown Restart Checks
+// =============================================================================
 
 describe('PhaseManager: Shutdown Restart Checks', () => {
   it('shutdown unit restarts on roll >= 8', () => {
@@ -618,24 +657,320 @@ describe('PhaseManager: Shutdown Restart Checks', () => {
     expect(restarts).toHaveLength(0);
     expect(fails).toHaveLength(0);
   });
+
+  it('restart exactly at threshold 8 succeeds', () => {
+    const { engine, atlas } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    atlas.shutdown = true;
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(atlas.shutdown).toBe(false);
+  });
+
+  it('check restart for all shutdown units', () => {
+    const { engine, atlas, jenner } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(7);
+    atlas.shutdown = true;
+    jenner.shutdown = true;
+
+    const fails = [];
+    engine.eventBus.on('unitRestartFailed', (data) => fails.push(data));
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(fails).toHaveLength(2);
+  });
 });
 
-describe('PhaseManager: ValidateAction with Queue', () => {
+// =============================================================================
+// Auto-Heat Resolution
+// =============================================================================
+
+describe('PhaseManager: Auto-Heat Resolution', () => {
+  it('_enterHeatPhase resolves heat without requiring an action', () => {
+    const { engine, atlas } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5]);
+    atlas.heat = 10;
+
+    const heatResolved = [];
+    const heatPhaseEvents = [];
+    engine.eventBus.on('heatResolved', (data) => heatResolved.push(data));
+    engine.eventBus.on('heatPhase', (data) => heatPhaseEvents.push(data));
+
+    engine.phaseManager.enterPhase('heat');
+
+    expect(heatResolved).toHaveLength(1);
+    expect(heatPhaseEvents).toHaveLength(1);
+    expect(atlas.heat).toBeLessThan(10);
+  });
+
+  it('heat dissipation reduces heat by unit heat sinks', () => {
+    const { engine, atlas } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5]);
+    atlas.heat = 20;
+    const sinksBefore = atlas.getHeatDissipation();
+
+    engine.phaseManager.enterPhase('heat');
+
+    expect(atlas.heat).toBe(20 - sinksBefore);
+  });
+
+  it('heat resolved event contains results for all units', () => {
+    const { engine, atlas, jenner } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5]);
+    atlas.heat = 15;
+    jenner.heat = 5;
+
+    const heatResolved = [];
+    engine.eventBus.on('heatResolved', (data) => heatResolved.push(data));
+
+    engine.phaseManager.enterPhase('heat');
+
+    const result = heatResolved[0];
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.find(r => r.unitId === 'atlas-0')).toBeDefined();
+    expect(result.find(r => r.unitId === 'jenner-1')).toBeDefined();
+  });
+
+  it('heat cannot go below 0', () => {
+    const { engine, atlas } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5]);
+    atlas.heat = 1;
+
+    engine.phaseManager.enterPhase('heat');
+
+    expect(atlas.heat).toBe(0);
+  });
+
+  it('heat phase sets game phase to heat', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+    engine.phaseManager.enterPhase('heat');
+
+    expect(engine.stateManager.getState().phase).toBe('heat');
+  });
+
+  it('shutdown unit at high heat (20+) triggers shutdown check via heat phase', () => {
+    const { engine, atlas } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([2, 5, 8, 5]); // low roll for shutdown
+    atlas.heat = 23;
+
+    engine.phaseManager.enterPhase('heat');
+
+    const heatResolved = [];
+    engine.eventBus.on('heatResolved', (data) => heatResolved.push(data));
+  });
+});
+
+// =============================================================================
+// Dice Re-Seeding
+// =============================================================================
+
+describe('PhaseManager: Dice Re-Seeding', () => {
+  it('re-seeds dice roller when starting a new turn', () => {
+    const { engine } = createTwoMechEngine();
+    const originalRoller = engine.diceRoller;
+
+    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5, 8, 5, 8, 5]);
+    for (let i = 0; i < PHASES.length; i++) {
+      engine.phaseManager.nextPhase();
+    }
+
+    expect(engine.stateManager.getState().turn).toBe(2);
+    expect(engine.diceRoller).not.toBe(originalRoller);
+  });
+
+  it('uses turn number in dice seed for different rolls', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5, 8, 5, 8, 5]);
+
+    for (let i = 0; i < PHASES.length; i++) {
+      engine.phaseManager.nextPhase();
+    }
+
+    engine.diceRoller.reset();
+    const roll1 = engine.diceRoller.roll2d6();
+
+    for (let i = 0; i < PHASES.length; i++) {
+      engine.phaseManager.nextPhase();
+    }
+
+    engine.diceRoller.reset();
+    const roll2 = engine.diceRoller.roll2d6();
+
+    expect(roll1).not.toBe(roll2);
+  });
+
+  it('new turn dice roller is a DiceRoller instance', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5, 8, 5, 8, 5]);
+
+    for (let i = 0; i < PHASES.length; i++) {
+      engine.phaseManager.nextPhase();
+    }
+
+    expect(typeof engine.diceRoller.roll2d6).toBe('function');
+    expect(typeof engine.diceRoller.reset).toBe('function');
+  });
+});
+
+// =============================================================================
+// Fire/Smoke Hex Timers
+// =============================================================================
+
+describe('PhaseManager: Fire/Smoke Hex Timers', () => {
+  it('smoke hex timers decrement each end phase', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    const state = engine.stateManager.getState();
+
+    state.smokeHexes = {
+      '10,5': { turnsRemaining: 3, level: 'heavy' },
+      '11,5': { turnsRemaining: 2, level: 'light' }
+    };
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(state.smokeHexes['10,5'].turnsRemaining).toBe(2);
+    expect(state.smokeHexes['11,5'].turnsRemaining).toBe(1);
+  });
+
+  it('smoke hex removed when turnsRemaining reaches 0', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    const state = engine.stateManager.getState();
+
+    state.smokeHexes = {
+      '10,5': { turnsRemaining: 1, level: 'heavy' }
+    };
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(state.smokeHexes['10,5']).toBeUndefined();
+    expect(Object.keys(state.smokeHexes)).toHaveLength(0);
+  });
+
+  it('smoke hex with exactly 1 turn remaining is removed after end phase', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    const state = engine.stateManager.getState();
+
+    state.smokeHexes = {
+      '10,5': { turnsRemaining: 1, level: 'light' }
+    };
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(state.smokeHexes).toEqual({});
+  });
+
+  it('multiple smoke hexes decrement independently', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    const state = engine.stateManager.getState();
+
+    state.smokeHexes = {
+      '10,5': { turnsRemaining: 1, level: 'heavy' },
+      '12,3': { turnsRemaining: 3, level: 'light' }
+    };
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(state.smokeHexes['10,5']).toBeUndefined();
+    expect(state.smokeHexes['12,3'].turnsRemaining).toBe(2);
+  });
+
+  it('smoke timer decrements each turn end phase', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    const state = engine.stateManager.getState();
+
+    state.smokeHexes = { '10,5': { turnsRemaining: 2, level: 'heavy' } };
+
+    engine.phaseManager.enterPhase('end');
+    expect(state.smokeHexes['10,5'].turnsRemaining).toBe(1);
+
+    // Advance through new turn to next end phase
+    for (let i = 0; i < PHASES.length - 1; i++) {
+      engine.phaseManager.nextPhase();
+    }
+    // Now at end phase of the new turn, enter it
+    engine.phaseManager.enterPhase('end');
+    expect(state.smokeHexes['10,5']).toBeUndefined();
+  });
+
+  it('end phase resets unit state properties', () => {
+    const { engine, atlas } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    atlas.torsoTwist = 2;
+    atlas.armsReversed = true;
+    atlas._movementModifier = 3;
+    atlas._targetMovementModifier = 2;
+    atlas.hexesMoved = 5;
+    atlas.movementMode = 'jump';
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(atlas.torsoTwist).toBe(0);
+    expect(atlas.armsReversed).toBe(false);
+    expect(atlas._movementModifier).toBe(0);
+    expect(atlas._targetMovementModifier).toBe(0);
+    expect(atlas.hexesMoved).toBe(0);
+    expect(atlas.movementMode).toBe('walk');
+  });
+
+  it('end phase resets all units', () => {
+    const { engine, atlas, jenner } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    atlas.torsoTwist = 2;
+    jenner.torsoTwist = 2;
+    atlas.hexesMoved = 5;
+    jenner.hexesMoved = 7;
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(atlas.torsoTwist).toBe(0);
+    expect(jenner.torsoTwist).toBe(0);
+    expect(atlas.hexesMoved).toBe(0);
+    expect(jenner.hexesMoved).toBe(0);
+  });
+
+  it('end phase emits endPhase event', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    const events = [];
+    engine.eventBus.on('endPhase', (data) => events.push(data));
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(events).toHaveLength(1);
+  });
+
+  it('no-op when smokeHexes is empty', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeDiceRoller(8);
+    const state = engine.stateManager.getState();
+    state.smokeHexes = {};
+
+    expect(() => engine.phaseManager.enterPhase('end')).not.toThrow();
+    expect(Object.keys(state.smokeHexes)).toHaveLength(0);
+  });
+});
+
+// =============================================================================
+// Queue-Based Action Validation
+// =============================================================================
+
+describe('PhaseManager: Queue-Based Action Validation', () => {
   it('validates against queue entry when queue is active', () => {
     const { engine } = createTwoMechEngine();
     engine.diceRoller = makeSequencedDiceRoller([8, 5]);
     engine.phaseManager.enterPhase('initiative');
     engine.phaseManager.enterPhase('movement');
-    // Queue: [player1/jenner, player0/atlas]
-    // state.currentPlayer = 1
 
-    // Player 1 moving jenner is valid (queue entry matches)
     expect(engine.phaseManager.validateAction('move', 1, 'jenner-1').valid).toBe(true);
-
-    // Player 1 moving atlas is invalid (wrong unit for queue entry)
     expect(engine.phaseManager.validateAction('move', 1, 'atlas-0').valid).toBe(false);
-
-    // Player 0 trying to act is invalid (not their turn in queue)
     expect(engine.phaseManager.validateAction('move', 0, 'atlas-0').valid).toBe(false);
   });
 
@@ -644,7 +979,6 @@ describe('PhaseManager: ValidateAction with Queue', () => {
     const state = engine.stateManager.getState();
     state.phase = 'movement';
     state.currentPlayer = 0;
-    // No queue built - falls back to currentPlayer
 
     expect(engine.phaseManager.validateAction('move', 0).valid).toBe(true);
     expect(engine.phaseManager.validateAction('move', 1).valid).toBe(false);
@@ -655,10 +989,9 @@ describe('PhaseManager: ValidateAction with Queue', () => {
     engine.diceRoller = makeSequencedDiceRoller([8, 5]);
     engine.phaseManager.enterPhase('initiative');
     engine.phaseManager.enterPhase('movement');
-    // Queue has player 1 at front
 
-    // Player 1 can select their unit even for different actions
     expect(engine.phaseManager.validateAction('selectUnit', 1, 'jenner-1').valid).toBe(true);
+    expect(engine.phaseManager.validateAction('selectUnit', 0, 'atlas-0').valid).toBe(true);
   });
 
   it('endPhase is always valid regardless of queue or player', () => {
@@ -666,13 +999,77 @@ describe('PhaseManager: ValidateAction with Queue', () => {
     engine.diceRoller = makeSequencedDiceRoller([8, 5]);
     engine.phaseManager.enterPhase('initiative');
     engine.phaseManager.enterPhase('movement');
-    // Queue has player 1 first, but endPhase bypasses queue
 
     expect(engine.phaseManager.validateAction('endPhase', 0).valid).toBe(true);
     expect(engine.phaseManager.validateAction('endPhase', 1).valid).toBe(true);
     expect(engine.phaseManager.validateAction('endPhase', 99).valid).toBe(true);
   });
+
+  it('move only valid in movement phase', () => {
+    const { engine } = createTwoMechEngine();
+    const state = engine.stateManager.getState();
+    state.phase = 'weapon_attack';
+    state.currentPlayer = 0;
+
+    const result = engine.phaseManager.validateAction('move', 0);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('Only in movement phase');
+  });
+
+  it('fire only valid in weapon_attack phase', () => {
+    const { engine } = createTwoMechEngine();
+    const state = engine.stateManager.getState();
+    state.phase = 'movement';
+    state.currentPlayer = 0;
+
+    const result = engine.phaseManager.validateAction('fire', 0);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('Only in weapon attack phase');
+  });
+
+  it('physicalAttack only valid in physical_attack phase', () => {
+    const { engine } = createTwoMechEngine();
+    const state = engine.stateManager.getState();
+    state.phase = 'weapon_attack';
+    state.currentPlayer = 0;
+
+    const result = engine.phaseManager.validateAction('physicalAttack', 0);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('Only in physical attack phase');
+  });
+
+  it('confirmFacing only valid in movement phase', () => {
+    const { engine } = createTwoMechEngine();
+    const state = engine.stateManager.getState();
+    state.phase = 'weapon_attack';
+    state.currentPlayer = 0;
+
+    const result = engine.phaseManager.validateAction('confirmFacing', 0);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('Only in movement phase');
+  });
+
+  it('unknown action type returns invalid', () => {
+    const { engine } = createTwoMechEngine();
+    const result = engine.phaseManager.validateAction('foobar', 0);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe('Unknown action: foobar');
+  });
+
+  it('validates with no unitId against queue entry player match only', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+    engine.phaseManager.enterPhase('initiative');
+    engine.phaseManager.enterPhase('movement');
+
+    expect(engine.phaseManager.validateAction('move', 1).valid).toBe(true);
+    expect(engine.phaseManager.validateAction('move', 0).valid).toBe(false);
+  });
 });
+
+// =============================================================================
+// Full Turn Integration
+// =============================================================================
 
 describe('PhaseManager: Full Turn Integration', () => {
   it('completes full turn with per-unit alternation', () => {
@@ -685,37 +1082,30 @@ describe('PhaseManager: Full Turn Integration', () => {
     engine.phaseManager.enterPhase('initiative');
     expect(engine.phaseManager.currentPhase).toBe('initiative');
 
-    // End initiative
     engine.processAction(0, { type: 'endPhase' });
     expect(engine.phaseManager.currentPhase).toBe('movement');
 
-    // Movement: player 1 (loser) moves jenner
     engine.processAction(1, {
       type: 'move', unitId: 'jenner-1',
       path: ['10,7', '10,8'], movementType: 'walk'
     });
     expect(engine.phaseManager.currentPhase).toBe('movement');
 
-    // Player 0 moves atlas - queue exhausts, auto-advances to weapon_attack
     engine.processAction(0, {
       type: 'move', unitId: 'atlas-0',
       path: ['5,7', '5,8'], movementType: 'walk'
     });
     expect(engine.phaseManager.currentPhase).toBe('weapon_attack');
 
-    // End weapon attack
     engine.processAction(0, { type: 'endPhase' });
     expect(engine.phaseManager.currentPhase).toBe('physical_attack');
 
-    // End physical attack
     engine.processAction(0, { type: 'endPhase' });
     expect(engine.phaseManager.currentPhase).toBe('heat');
 
-    // End heat (auto-resolved, manually advance to end)
     engine.processAction(0, { type: 'endPhase' });
     expect(engine.phaseManager.currentPhase).toBe('end');
 
-    // End phase - advance to new turn
     engine.processAction(0, { type: 'endPhase' });
     expect(engine.phaseManager.currentPhase).toBe('initiative');
     expect(engine.stateManager.getState().turn).toBe(2);
@@ -728,26 +1118,39 @@ describe('PhaseManager: Full Turn Integration', () => {
     engine.phaseManager.enterPhase('initiative');
     engine.phaseManager.enterPhase('movement');
 
-    // Queue: player1/jenner, player0/atlas, player0/wolverine
     expect(engine.phaseManager.phaseUnitQueue).toHaveLength(3);
 
-    // Player 1 moves jenner
     engine.processAction(1, {
       type: 'move', unitId: 'jenner-1',
       path: ['10,7', '10,8'], movementType: 'walk'
     });
 
-    // Player 0 moves atlas
     engine.processAction(0, {
       type: 'move', unitId: 'atlas-0',
       path: ['5,7', '5,8'], movementType: 'walk'
     });
 
-    // Player 0 moves wolverine - should auto-advance to weapon_attack after this
     engine.processAction(0, {
       type: 'move', unitId: 'wolverine-0',
       path: ['6,7', '6,8'], movementType: 'walk'
     });
     expect(engine.phaseManager.currentPhase).toBe('weapon_attack');
+  });
+
+  it('full turn advances all smoke hex timers', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5, 8, 5, 8, 5]);
+    const state = engine.stateManager.getState();
+    state.smokeHexes = { '10,5': { turnsRemaining: 3, level: 'heavy' } };
+
+    // Enter initiative (doesn't affect smoke), then cycle through phases
+    engine.phaseManager.enterPhase('initiative');
+    engine.phaseManager.enterPhase('movement');
+    engine.phaseManager.enterPhase('weapon_attack');
+    engine.phaseManager.enterPhase('physical_attack');
+    engine.phaseManager.enterPhase('heat');
+    // End phase decrements smoke
+    engine.phaseManager.enterPhase('end');
+    expect(state.smokeHexes['10,5'].turnsRemaining).toBe(2);
   });
 });

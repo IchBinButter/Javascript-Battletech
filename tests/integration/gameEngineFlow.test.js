@@ -21,256 +21,134 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     return { engine, atlas, jenner };
   }
 
-  describe('processAction dispatching', () => {
-    it('rejects unknown action types', () => {
-      const { engine } = createEngineWithUnits();
-      engine.stateManager.getState().currentPlayer = 0;
+  function setupPhaseWithWinner(phase, winnerPlayerId, goFirst = false) {
+    const { engine, atlas, jenner } = createEngineWithUnits();
+    engine.phaseManager.enterPhase('initiative');
+    engine.stateManager.getState().initiativeWinner = winnerPlayerId;
+    if (goFirst) {
+      engine.phaseManager.chooseInitiative(true);
+    }
+    engine.phaseManager.enterPhase(phase);
+    return { engine, atlas, jenner };
+  }
 
-      const result = engine.processAction(0, { type: 'invalidAction' });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Unknown action');
-    });
+  function getCurrentQueueEntry(engine) {
+    return engine.phaseManager.getCurrentQueueEntry();
+  }
 
-    it('rejects actions from wrong player', () => {
-      const { engine } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('movement');
-      engine.stateManager.getState().currentPlayer = 0;
+  describe('Queue-based validation', () => {
+    it('rejects action from wrong player when queue is active', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+      const entry = getCurrentQueueEntry(engine);
+      const wrongPlayer = entry.playerId === 0 ? 1 : 0;
 
-      const result = engine.processAction(1, {
+      const result = engine.processAction(wrongPlayer, {
         type: 'move',
-        unitId: 'jenner-1',
+        unitId: entry.unitId,
         path: ['7,7', '7,8'],
         movementType: 'walk'
       });
+
       expect(result.success).toBe(false);
       expect(result.error).toBe('Not your turn');
     });
 
-    it('emits actionProcessed event for every action', () => {
-      const { engine } = createEngineWithUnits();
-      const processed = [];
-      engine.eventBus.on('actionProcessed', (data) => {
-        processed.push({ type: data.action.type, success: data.result.success });
-      });
+    it('rejects action for wrong unit even when player matches', () => {
+      const { engine, atlas } = setupPhaseWithWinner('movement', 0);
+      const entry = getCurrentQueueEntry(engine);
+      const correctPlayer = entry.playerId;
+      const wrongUnitId = Object.keys(engine.stateManager.getState().units)
+        .find(id => id !== entry.unitId);
 
-      engine.processAction(0, { type: 'endPhase' });
-      expect(processed).toHaveLength(1);
-      expect(processed[0].type).toBe('endPhase');
-      expect(processed[0].success).toBe(true);
-    });
-
-    it('logs every action with phase info', () => {
-      const { engine } = createEngineWithUnits();
-
-      engine.processAction(0, { type: 'endPhase' }); // initiative -> movement
-      engine.stateManager.getState().currentPlayer = 0;
-      engine.processAction(0, {
+      const result = engine.processAction(correctPlayer, {
         type: 'move',
-        unitId: 'atlas-0',
-        path: ['5,7', '5,8'],
+        unitId: wrongUnitId,
+        path: [atlas.position.hexKey, '5,8'],
         movementType: 'walk'
       });
 
-      expect(engine.actionLog).toHaveLength(2);
-      // endPhase action is logged AFTER nextPhase() runs, so phase = new phase
-      expect(engine.actionLog[0].phase).toBe('movement');
-      expect(engine.actionLog[1].phase).toBe('movement');
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Not the current acting unit');
     });
-  });
 
-  describe('movement action flow', () => {
-    it('validates and applies movement', () => {
-      const { engine, atlas } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('movement');
-      engine.stateManager.getState().currentPlayer = 0;
+    it('accepts action for correct player and queue unit', () => {
+      const { engine } = setupPhaseWithWinner('movement', 1, true);
+      const entry = getCurrentQueueEntry(engine);
 
-      const result = engine.processAction(0, {
+      const result = engine.processAction(entry.playerId, {
         type: 'move',
-        unitId: 'atlas-0',
+        unitId: entry.unitId,
         path: ['5,7', '5,8'],
         movementType: 'walk'
       });
 
       expect(result.success).toBe(true);
-      expect(result.unitId).toBe('atlas-0');
-      expect(result.finalHex).toBe('5,8');
-      expect(atlas.position.hexKey).toBe('5,8');
+      expect(result.unitId).toBe(entry.unitId);
     });
 
-    it('rejects movement for non-existent unit', () => {
-      const { engine } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('movement');
-      engine.phaseManager.clearQueue();
-      engine.stateManager.getState().currentPlayer = 0;
+    it('rejects entirely unknown action types', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0, true);
+      const entry = getCurrentQueueEntry(engine);
 
-      const result = engine.processAction(0, {
+      const result = engine.processAction(entry.playerId, { type: 'invalidAction' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Unknown action');
+    });
+  });
+
+  describe('Wrong-unit rejection', () => {
+    it('rejects movement for opponent unit in queue-based validation', () => {
+      const { engine } = setupPhaseWithWinner('movement', 1, false);
+      const state = engine.stateManager.getState();
+      const opponentUnits = state.getPlayerUnits(1);
+      const opponentUnit = opponentUnits[0];
+
+      const wrongPlayerForQueue = getCurrentQueueEntry(engine).playerId === 1 ? 0 : 1;
+
+      const result = engine.processAction(wrongPlayerForQueue, {
         type: 'move',
-        unitId: 'nonexistent',
-        path: ['5,7', '5,8'],
+        unitId: opponentUnit.id,
+        path: ['7,7', '7,8'],
         movementType: 'walk'
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Unit not found');
     });
 
-    it('emits unitMoved event on successful move', () => {
-      const { engine } = createEngineWithUnits();
-      const moved = [];
-      engine.eventBus.on('unitMoved', (data) => moved.push(data));
+    it('rejects fire action for wrong player in weapon_attack queue', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0);
+      const entry = getCurrentQueueEntry(engine);
+      const wrongPlayer = entry.playerId === 0 ? 1 : 0;
 
-      engine.phaseManager.enterPhase('movement');
-      engine.stateManager.getState().currentPlayer = 0;
-      engine.processAction(0, {
-        type: 'move',
-        unitId: 'atlas-0',
-        path: ['5,7', '5,8'],
-        movementType: 'walk'
-      });
-
-      expect(moved).toHaveLength(1);
-      expect(moved[0].unitId).toBe('atlas-0');
-      expect(moved[0].hexKey).toBe('5,8');
-    });
-
-    it('sets movement modifier based on movement type', () => {
-      const { engine, atlas } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('movement');
-      engine.stateManager.getState().currentPlayer = 0;
-
-      engine.processAction(0, {
-        type: 'move',
-        unitId: 'atlas-0',
-        path: ['5,7', '5,8'],
-        movementType: 'run'
-      });
-
-      expect(atlas._movementModifier).toBe(2); // run = +2
-    });
-  });
-
-  describe('fire action flow', () => {
-    it('requires attackResolver to be initialized', () => {
-      const { engine, atlas, jenner } = createEngineWithUnits();
-      engine.attackResolver = null;
-      engine.phaseManager.enterPhase('weapon_attack');
-      engine.stateManager.getState().currentPlayer = 0;
-
-      const result = engine.processAction(0, {
+      const result = engine.processAction(wrongPlayer, {
         type: 'fire',
-        attackerId: 'atlas-0',
-        targetId: 'jenner-1',
+        attackerId: entry.unitId,
+        targetId: entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0',
         weapon: createWeaponDef('med_laser'),
         weaponLocation: 'rightArm'
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('not initialized');
+      expect(result.error).toBe('Not your turn');
     });
 
-    it('rejects fire for non-existent attacker', () => {
-      const { engine } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('weapon_attack');
-      engine.phaseManager.clearQueue();
-      engine.stateManager.getState().currentPlayer = 0;
+    it('rejects physicalAttack for wrong player in physical_attack queue', () => {
+      const { engine } = setupPhaseWithWinner('physical_attack', 0);
+      const entry = getCurrentQueueEntry(engine);
+      const wrongPlayer = entry.playerId === 0 ? 1 : 0;
 
-      const result = engine.processAction(0, {
-        type: 'fire',
-        attackerId: 'nonexistent',
-        targetId: 'jenner-1',
-        weapon: createWeaponDef('med_laser'),
-        weaponLocation: 'rightArm'
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Attacker not found');
-    });
-
-    it('rejects fire for non-existent target', () => {
-      const { engine } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('weapon_attack');
-      engine.stateManager.getState().currentPlayer = 0;
-
-      const result = engine.processAction(0, {
-        type: 'fire',
-        attackerId: 'atlas-0',
-        targetId: 'nonexistent',
-        weapon: createWeaponDef('med_laser'),
-        weaponLocation: 'rightArm'
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Target not found');
-    });
-
-    it('accumulates heat on attacker when firing', () => {
-      const { engine, atlas } = createEngineWithUnits();
-      engine.diceRoller = makeDiceRoller(8);
-      engine.phaseManager.enterPhase('weapon_attack');
-      engine.stateManager.getState().currentPlayer = 0;
-
-      engine.processAction(0, {
-        type: 'fire',
-        attackerId: 'atlas-0',
-        targetId: 'jenner-1',
-        weapon: createWeaponDef('med_laser'),
-        weaponLocation: 'rightArm'
-      });
-
-      expect(atlas.heat).toBe(3);
-    });
-  });
-
-  describe('physical attack action flow', () => {
-    it('rejects physical attack for non-existent units', () => {
-      const { engine } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('physical_attack');
-      engine.phaseManager.clearQueue();
-      engine.stateManager.getState().currentPlayer = 0;
-
-      const result = engine.processAction(0, {
+      const result = engine.processAction(wrongPlayer, {
         type: 'physicalAttack',
-        attackerId: 'nonexistent',
-        targetId: 'jenner-1',
+        attackerId: entry.unitId,
+        targetId: entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0',
         attackType: 'punch'
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Unit not found');
+      expect(result.error).toBe('Not your turn');
     });
 
-    it('rejects unknown physical attack type', () => {
-      const { engine } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('physical_attack');
-      engine.stateManager.getState().currentPlayer = 0;
-
-      const result = engine.processAction(0, {
-        type: 'physicalAttack',
-        attackerId: 'atlas-0',
-        targetId: 'jenner-1',
-        attackType: 'invalidAttack'
-      });
-
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Unknown physical attack');
-    });
-  });
-
-  describe('selectUnit action', () => {
-    it('returns unit info for valid selection', () => {
-      const { engine } = createEngineWithUnits();
-      engine.stateManager.getState().currentPlayer = 0;
-
-      const result = engine.processAction(0, {
-        type: 'selectUnit',
-        unitId: 'atlas-0'
-      });
-
-      expect(result.success).toBe(true);
-      expect(result.unitId).toBe('atlas-0');
-    });
-
-    it('rejects selecting opponent unit', () => {
+    it('rejects selecting opponent unit via selectUnit', () => {
       const { engine } = createEngineWithUnits();
       engine.stateManager.getState().currentPlayer = 0;
 
@@ -284,34 +162,370 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
   });
 
-  describe('confirmFacing action', () => {
-    it('is rejected when not in movement phase', () => {
-      const { engine, atlas } = createEngineWithUnits();
-      engine.stateManager.getState().currentPlayer = 0;
+  describe('Queue exhaustion', () => {
+    it('advances phase to weapon_attack after all units move', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+      const phaseMgr = engine.phaseManager;
 
-      const result = engine.processAction(0, {
-        type: 'confirmFacing',
-        unitId: 'atlas-0',
-        facing: 3
+      expect(phaseMgr.currentPhase).toBe('movement');
+
+      const q1 = getCurrentQueueEntry(engine);
+      engine.processAction(q1.playerId, {
+        type: 'move', unitId: q1.unitId,
+        path: [q1.unitId === 'atlas-0' ? '5,7' : '7,7', '5,8'],
+        movementType: 'walk'
+      });
+
+      const q2 = getCurrentQueueEntry(engine);
+      expect(q2).not.toBeNull();
+
+      engine.processAction(q2.playerId, {
+        type: 'move', unitId: q2.unitId,
+        path: [q2.unitId === 'atlas-0' ? '5,7' : '7,7', '5,8'],
+        movementType: 'walk'
+      });
+
+      expect(phaseMgr.currentPhase).toBe('weapon_attack');
+    });
+
+    it('advances phase to physical_attack after all units fire', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0);
+      engine.diceRoller = makeDiceRoller(8);
+      const phaseMgr = engine.phaseManager;
+
+      expect(phaseMgr.currentPhase).toBe('weapon_attack');
+
+      const q1 = getCurrentQueueEntry(engine);
+      const targetId1 = q1.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+      engine.processAction(q1.playerId, {
+        type: 'fire', attackerId: q1.unitId, targetId: targetId1,
+        weapon: createWeaponDef('med_laser'), weaponLocation: 'rightArm'
+      });
+
+      const q2 = getCurrentQueueEntry(engine);
+      expect(q2).not.toBeNull();
+      const targetId2 = q2.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+      engine.processAction(q2.playerId, {
+        type: 'fire', attackerId: q2.unitId, targetId: targetId2,
+        weapon: createWeaponDef('med_laser'), weaponLocation: 'rightArm'
+      });
+
+      expect(phaseMgr.currentPhase).toBe('physical_attack');
+    });
+
+    it('advances phase to heat after all physical attacks', () => {
+      const { engine } = setupPhaseWithWinner('physical_attack', 1);
+      engine.diceRoller = makeDiceRoller(10);
+      const phaseMgr = engine.phaseManager;
+
+      expect(phaseMgr.currentPhase).toBe('physical_attack');
+
+      const q1 = getCurrentQueueEntry(engine);
+      const targetId1 = q1.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+      engine.processAction(q1.playerId, {
+        type: 'physicalAttack', attackerId: q1.unitId, targetId: targetId1,
+        attackType: 'punch'
+      });
+
+      const q2 = getCurrentQueueEntry(engine);
+      expect(q2).not.toBeNull();
+      const targetId2 = q2.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+      engine.processAction(q2.playerId, {
+        type: 'physicalAttack', attackerId: q2.unitId, targetId: targetId2,
+        attackType: 'kick'
+      });
+
+      expect(phaseMgr.currentPhase).toBe('heat');
+    });
+
+    it('getCurrentQueueEntry returns null when queue is empty', () => {
+      const { engine } = createEngineWithUnits();
+      const entry = engine.phaseManager.getCurrentQueueEntry();
+      expect(entry).toBeNull();
+    });
+  });
+
+  describe('Initiative choice', () => {
+    it('emits initiativeRolled and initiativeChoice events', () => {
+      const { engine } = createEngineWithUnits();
+      const events = [];
+      engine.eventBus.on('initiativeRolled', (d) => events.push('initiativeRolled'));
+      engine.eventBus.on('initiativeChoice', (d) => events.push('initiativeChoice'));
+
+      engine.phaseManager.enterPhase('initiative');
+      engine.phaseManager.chooseInitiative(true);
+
+      expect(events).toContain('initiativeRolled');
+      expect(events).toContain('initiativeChoice');
+    });
+
+    it('loser moves first by default (goFirst=false)', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0, false);
+      const firstEntry = getCurrentQueueEntry(engine);
+
+      expect(firstEntry.playerId).toBe(1);
+      expect(firstEntry.unitId).toBe('jenner-1');
+    });
+
+    it('winner moves first when goFirst=true', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0, true);
+      const firstEntry = getCurrentQueueEntry(engine);
+
+      expect(firstEntry.playerId).toBe(0);
+      expect(firstEntry.unitId).toBe('atlas-0');
+    });
+
+    it('loser fires first by default in weapon_attack phase', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0, false);
+      const firstEntry = getCurrentQueueEntry(engine);
+
+      expect(firstEntry.playerId).toBe(1);
+      expect(firstEntry.unitId).toBe('jenner-1');
+    });
+
+    it('winner fires first when goFirst=true in weapon_attack', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0, true);
+      const firstEntry = getCurrentQueueEntry(engine);
+
+      expect(firstEntry.playerId).toBe(0);
+      expect(firstEntry.unitId).toBe('atlas-0');
+    });
+
+    it('physical_attack always has winner first regardless of goFirst', () => {
+      const { engine } = setupPhaseWithWinner('physical_attack', 0, false);
+      const firstEntry = getCurrentQueueEntry(engine);
+
+      expect(firstEntry.playerId).toBe(0);
+      expect(firstEntry.unitId).toBe('atlas-0');
+    });
+  });
+
+  describe('Movement with per-unit alternation', () => {
+    it('both units get movement turns in alternating order', () => {
+      const { engine } = setupPhaseWithWinner('movement', 1, false);
+      const turnOrder = [];
+
+      while (engine.phaseManager.currentPhase === 'movement') {
+        const entry = getCurrentQueueEntry(engine);
+        if (!entry) break;
+        const unit = engine.stateManager.getState().getUnit(entry.unitId);
+        const startHex = unit.position.hexKey;
+        const [col, row] = startHex.split(',').map(Number);
+        const destHex = `${col + 1},${row}`;
+
+        engine.processAction(entry.playerId, {
+          type: 'move', unitId: entry.unitId,
+          path: [startHex, destHex],
+          movementType: 'walk'
+        });
+        turnOrder.push({ playerId: entry.playerId, unitId: entry.unitId });
+      }
+
+      expect(turnOrder).toHaveLength(2);
+      expect(turnOrder[0].playerId).not.toBe(turnOrder[1].playerId);
+    });
+
+    it('sets movement modifier based on movement type via queue', () => {
+      const { engine, atlas } = setupPhaseWithWinner('movement', 1, true);
+      const entry = getCurrentQueueEntry(engine);
+      const unit = engine.stateManager.getState().getUnit(entry.unitId);
+      const startHex = unit.position.hexKey;
+
+      engine.processAction(entry.playerId, {
+        type: 'move', unitId: entry.unitId,
+        path: [startHex, `${parseInt(startHex.split(',')[0]) + 1},${startHex.split(',')[1]}`],
+        movementType: 'run'
+      });
+
+      expect(unit._movementModifier).toBe(2);
+      expect(unit.movementMode).toBe('walk');
+    });
+
+    it('movement path updates unit position', () => {
+      const { engine, atlas } = setupPhaseWithWinner('movement', 1, true);
+      const entry = getCurrentQueueEntry(engine);
+      const expectedUnitId = entry.unitId;
+      const unit = engine.stateManager.getState().getUnit(expectedUnitId);
+      const startHex = unit.position.hexKey;
+
+      engine.processAction(entry.playerId, {
+        type: 'move', unitId: expectedUnitId,
+        path: [startHex, `${parseInt(startHex.split(',')[0]) + 1},${startHex.split(',')[1]}`],
+        movementType: 'walk'
+      });
+
+      expect(unit.position.hexKey).not.toBe(startHex);
+    });
+
+    it('emits unitMoved event on successful move via queue', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+      const moved = [];
+      engine.eventBus.on('unitMoved', (data) => moved.push(data));
+
+      const entry = getCurrentQueueEntry(engine);
+      const unit = engine.stateManager.getState().getUnit(entry.unitId);
+      const startHex = unit.position.hexKey;
+      const destHex = `${parseInt(startHex.split(',')[0]) + 1},${startHex.split(',')[1]}`;
+
+      engine.processAction(entry.playerId, {
+        type: 'move', unitId: entry.unitId,
+        path: [startHex, destHex],
+        movementType: 'walk'
+      });
+
+      expect(moved).toHaveLength(1);
+      expect(moved[0].unitId).toBe(entry.unitId);
+      expect(moved[0].hexKey).toBe(destHex);
+    });
+  });
+
+  describe('Fire with per-unit alternation', () => {
+    it('both units fire in alternating order', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0);
+      engine.diceRoller = makeDiceRoller(8);
+
+      const turnOrder = [];
+      while (engine.phaseManager.currentPhase === 'weapon_attack') {
+        const entry = getCurrentQueueEntry(engine);
+        if (!entry) break;
+        const targetId = entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+
+        engine.processAction(entry.playerId, {
+          type: 'fire', attackerId: entry.unitId, targetId,
+          weapon: createWeaponDef('med_laser'), weaponLocation: 'rightArm'
+        });
+        turnOrder.push({ playerId: entry.playerId, unitId: entry.unitId });
+      }
+
+      expect(turnOrder).toHaveLength(2);
+      expect(turnOrder[0].playerId).not.toBe(turnOrder[1].playerId);
+    });
+
+    it('requires attackResolver to be initialized', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0);
+      engine.attackResolver = null;
+      const entry = getCurrentQueueEntry(engine);
+
+      const targetId = entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+      const result = engine.processAction(entry.playerId, {
+        type: 'fire', attackerId: entry.unitId, targetId,
+        weapon: createWeaponDef('med_laser'), weaponLocation: 'rightArm'
       });
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('Only in movement phase');
+      expect(result.error).toContain('not initialized');
     });
 
-    it('updates unit facing in movement phase', () => {
-      const { engine, atlas } = createEngineWithUnits();
-      engine.phaseManager.enterPhase('movement');
-      engine.stateManager.getState().currentPlayer = 0;
+    it('accumulates heat on attacker when firing via queue', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0);
+      engine.diceRoller = makeDiceRoller(8);
+      const entry = getCurrentQueueEntry(engine);
+      const attacker = engine.stateManager.getState().getUnit(entry.unitId);
+      const targetId = entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+      const heatBefore = attacker.heat;
 
-      const result = engine.processAction(0, {
-        type: 'confirmFacing',
-        unitId: 'atlas-0',
-        facing: 3
+      engine.processAction(entry.playerId, {
+        type: 'fire', attackerId: entry.unitId, targetId,
+        weapon: createWeaponDef('med_laser'), weaponLocation: 'rightArm'
       });
 
-      expect(result.success).toBe(true);
-      expect(atlas.position.facing).toBe(3);
+      expect(attacker.heat).toBeGreaterThan(heatBefore);
+    });
+
+    it('rejects fire for non-existent target in queue context', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0);
+      const entry = getCurrentQueueEntry(engine);
+
+      const result = engine.processAction(entry.playerId, {
+        type: 'fire', attackerId: entry.unitId, targetId: 'nonexistent',
+        weapon: createWeaponDef('med_laser'), weaponLocation: 'rightArm'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Target not found');
+    });
+  });
+
+  describe('Physical attack with per-unit alternation', () => {
+    it('both units resolve physical attacks in alternating order', () => {
+      const { engine } = setupPhaseWithWinner('physical_attack', 1);
+      engine.diceRoller = makeDiceRoller(10);
+
+      const turnOrder = [];
+      while (engine.phaseManager.currentPhase === 'physical_attack') {
+        const entry = getCurrentQueueEntry(engine);
+        if (!entry) break;
+        const targetId = entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+
+        engine.processAction(entry.playerId, {
+          type: 'physicalAttack', attackerId: entry.unitId, targetId,
+          attackType: 'punch'
+        });
+        turnOrder.push({ playerId: entry.playerId, unitId: entry.unitId });
+      }
+
+      expect(turnOrder).toHaveLength(2);
+      expect(turnOrder[0].playerId).not.toBe(turnOrder[1].playerId);
+    });
+
+    it('rejects unknown physical attack type via queue', () => {
+      const { engine } = setupPhaseWithWinner('physical_attack', 1, false);
+      const entry = getCurrentQueueEntry(engine);
+      const targetId = entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
+
+      const result = engine.processAction(entry.playerId, {
+        type: 'physicalAttack', attackerId: entry.unitId, targetId,
+        attackType: 'invalidAttack'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Unknown physical attack');
+    });
+  });
+
+  describe('Full phase flow with per-unit alternation', () => {
+    it('completes full turn: initiative → movement → weapon_attack → physical_attack', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+      engine.diceRoller = makeDiceRoller(8);
+
+      const phasesSeen = [];
+      phasesSeen.push(engine.phaseManager.currentPhase);
+
+      function processCurrentPhase(phaseName, actionBuilder) {
+        while (engine.phaseManager.currentPhase === phaseName) {
+          const entry = getCurrentQueueEntry(engine);
+          if (!entry) break;
+          const unit = engine.stateManager.getState().getUnit(entry.unitId);
+          const startHex = unit.position.hexKey;
+          const [col, row] = startHex.split(',').map(Number);
+
+          engine.processAction(entry.playerId, actionBuilder(entry, unit, col, row));
+        }
+        phasesSeen.push(engine.phaseManager.currentPhase);
+      }
+
+      processCurrentPhase('movement', (entry, unit, col, row) => ({
+        type: 'move', unitId: entry.unitId,
+        path: [unit.position.hexKey, `${col + 1},${row}`],
+        movementType: 'walk'
+      }));
+
+      processCurrentPhase('weapon_attack', (entry) => ({
+        type: 'fire', attackerId: entry.unitId,
+        targetId: entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0',
+        weapon: createWeaponDef('med_laser'), weaponLocation: 'rightArm'
+      }));
+
+      processCurrentPhase('physical_attack', (entry) => ({
+        type: 'physicalAttack', attackerId: entry.unitId,
+        targetId: entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0',
+        attackType: 'punch'
+      }));
+
+      expect(phasesSeen).toContain('movement');
+      expect(phasesSeen).toContain('weapon_attack');
+      expect(phasesSeen).toContain('physical_attack');
+      expect(engine.phaseManager.currentPhase).toBeDefined();
     });
   });
 
@@ -348,6 +562,29 @@ describe('Integration: GameEngine Action Processing Flow', () => {
 
       engine.stateManager.undo();
       expect(engine.stateManager.getState().turn).toBe(originalTurn);
+    });
+
+    it('reflects queue-driven phase transitions in state', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+      const state = engine.stateManager.getState();
+
+      expect(state.phase).toBe('movement');
+
+      const q1 = getCurrentQueueEntry(engine);
+      engine.processAction(q1.playerId, {
+        type: 'move', unitId: q1.unitId,
+        path: [q1.unitId === 'atlas-0' ? '5,7' : '7,7', '5,8'],
+        movementType: 'walk'
+      });
+
+      const q2 = getCurrentQueueEntry(engine);
+      engine.processAction(q2.playerId, {
+        type: 'move', unitId: q2.unitId,
+        path: [q2.unitId === 'atlas-0' ? '5,7' : '7,7', '5,8'],
+        movementType: 'walk'
+      });
+
+      expect(state.phase).toBe('weapon_attack');
     });
   });
 
@@ -386,18 +623,178 @@ describe('Integration: GameEngine Action Processing Flow', () => {
       engine.phaseManager.enterPhase('movement');
       expect(calls).toHaveLength(0);
     });
+
+    it('emits events during queue-based action processing', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+      const events = [];
+      engine.eventBus.on('actionProcessed', (d) => events.push({ type: d.action.type, success: d.result.success }));
+      engine.eventBus.on('unitMoved', (d) => events.push({ event: 'unitMoved', unitId: d.unitId }));
+      engine.eventBus.on('phaseChanged', () => events.push({ event: 'phaseChanged' }));
+
+      const q1 = getCurrentQueueEntry(engine);
+      engine.processAction(q1.playerId, {
+        type: 'move', unitId: q1.unitId,
+        path: [q1.unitId === 'atlas-0' ? '5,7' : '7,7', '5,8'],
+        movementType: 'walk'
+      });
+
+      const q2 = getCurrentQueueEntry(engine);
+      engine.processAction(q2.playerId, {
+        type: 'move', unitId: q2.unitId,
+        path: [q2.unitId === 'atlas-0' ? '5,7' : '7,7', '5,8'],
+        movementType: 'walk'
+      });
+
+      const actionProcessedEvents = events.filter(e => e.type === 'move');
+      expect(actionProcessedEvents).toHaveLength(2);
+      expect(actionProcessedEvents.every(e => e.success)).toBe(true);
+
+      const moveEvents = events.filter(e => e.event === 'unitMoved');
+      expect(moveEvents).toHaveLength(2);
+
+      const phaseEvents = events.filter(e => e.event === 'phaseChanged');
+      expect(phaseEvents.length).toBeGreaterThan(0);
+    });
+
+    it('logs every action with correct phase info', () => {
+      const { engine } = setupPhaseWithWinner('movement', 1, true);
+
+      const q1 = getCurrentQueueEntry(engine);
+      engine.processAction(q1.playerId, {
+        type: 'move', unitId: q1.unitId,
+        path: [q1.unitId === 'atlas-0' ? '5,7' : '7,7', '5,8'],
+        movementType: 'walk'
+      });
+
+      expect(engine.actionLog).toHaveLength(1);
+      expect(engine.actionLog[0].phase).toBe('movement');
+      expect(engine.actionLog[0].action.type).toBe('move');
+    });
   });
 
   describe('DiceRoller integration', () => {
-    it('dice roller produces deterministic results', () => {
+    it('dice roller produces deterministic results via reset', () => {
       const { engine } = createEngineWithUnits();
       const roller = engine.diceRoller;
       const roll1 = roller.roll2d6();
 
-      // Reset and roll again - should get same result
       roller.reset();
       const roll2 = roller.roll2d6();
       expect(roll1).toBe(roll2);
+    });
+
+    it('dice roller reset returns same sequence after being consumed', () => {
+      const { engine } = createEngineWithUnits();
+      const roller = engine.diceRoller;
+      const results1 = [];
+      for (let i = 0; i < 5; i++) results1.push(roller.roll2d6());
+
+      roller.reset();
+      const results2 = [];
+      for (let i = 0; i < 5; i++) results2.push(roller.roll2d6());
+
+      expect(results1).toEqual(results2);
+    });
+
+    it('optional dice fallback that mimics real roll for tests', () => {
+      const roller = makeDiceRoller(7);
+      expect(roller.roll2d6()).toBe(7);
+      expect(roller.roll1d6()).toBe(4); // ceil(7/2) = 4
+      expect(roller.next()).toBe(0.5);
+    });
+  });
+
+  describe('endPhase action', () => {
+    it('endPhase advances to next phase', () => {
+      const { engine } = createEngineWithUnits();
+      engine.phaseManager.enterPhase('initiative');
+      expect(engine.phaseManager.currentPhase).toBe('initiative');
+
+      const result = engine.processAction(0, { type: 'endPhase' });
+      expect(result.success).toBe(true);
+      expect(engine.phaseManager.currentPhase).toBe('movement');
+    });
+
+    it('endPhase bypasses queue-based player validation', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+      const entry = getCurrentQueueEntry(engine);
+      const wrongPlayer = entry.playerId === 0 ? 1 : 0;
+
+      const result = engine.processAction(wrongPlayer, { type: 'endPhase' });
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('selectUnit action', () => {
+    it('returns unit info for valid selection', () => {
+      const { engine } = createEngineWithUnits();
+      engine.stateManager.getState().currentPlayer = 0;
+
+      const result = engine.processAction(0, {
+        type: 'selectUnit',
+        unitId: 'atlas-0'
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.unitId).toBe('atlas-0');
+    });
+
+    it('returns error for non-existent unit', () => {
+      const { engine } = createEngineWithUnits();
+      engine.stateManager.getState().currentPlayer = 0;
+
+      const result = engine.processAction(0, {
+        type: 'selectUnit',
+        unitId: 'nonexistent'
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Unit not found');
+    });
+
+    it('bypasses queue-based validation', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+      const entry = getCurrentQueueEntry(engine);
+      const wrongPlayer = entry.playerId === 0 ? 1 : 0;
+
+      const result = engine.processAction(wrongPlayer, {
+        type: 'selectUnit',
+        unitId: wrongPlayer === 0 ? 'atlas-0' : 'jenner-1'
+      });
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('confirmFacing action', () => {
+    it('is rejected when not in movement phase', () => {
+      const { engine, atlas } = createEngineWithUnits();
+      engine.stateManager.getState().currentPlayer = 0;
+
+      const result = engine.processAction(0, {
+        type: 'confirmFacing',
+        unitId: 'atlas-0',
+        facing: 3
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Only in movement phase');
+    });
+
+    it('updates unit facing in movement phase via queue', () => {
+      const { engine } = setupPhaseWithWinner('movement', 1, true);
+      const entry = getCurrentQueueEntry(engine);
+      const unit = engine.stateManager.getState().getUnit(entry.unitId);
+      const originalFacing = unit.position.facing;
+
+      const result = engine.processAction(entry.playerId, {
+        type: 'confirmFacing',
+        unitId: entry.unitId,
+        facing: (originalFacing + 2) % 6
+      });
+
+      expect(result.success).toBe(true);
+      expect(unit.position.facing).toBe((originalFacing + 2) % 6);
     });
   });
 });

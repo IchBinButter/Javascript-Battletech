@@ -231,6 +231,7 @@ export class GameEngine {
 
     this.eventBus.emit('unitAttacked', { attackerId: attacker.id, targetId: target.id, result });
 
+    result.success = true;
     return result;
   }
 

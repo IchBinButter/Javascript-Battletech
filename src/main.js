@@ -1,6 +1,6 @@
 /**
  * BattleTech Tabletop Simulator - Main Entry Point
- * Integrates game engine, map renderer, and UI controller.
+ * Integrates start menu, force builder, game engine, map renderer, and UI controller.
  */
 import { HexGrid } from './hex/HexGrid.js';
 import { pixelToHex } from './hex/HexMath.js';
@@ -10,6 +10,8 @@ import { Weapon } from './models/Weapon.js';
 import { GameEngine } from './engine/GameEngine.js';
 import { MapRenderer } from './renderer/MapRenderer.js';
 import { UIController } from './ui/UIController.js';
+import { StartMenu } from './ui/StartMenu.js';
+import { ForceBuilder } from './ui/ForceBuilder.js';
 
 // ---- Globals ----
 const HEX_SIZE = 30;
@@ -17,9 +19,12 @@ let gameEngine;
 let mapRenderer;
 let ui;
 let weaponsLookup;
+let mechsData, weaponsData, hitTables, mapsData;
 
 // Canvas setup
 const canvas = document.getElementById('map-canvas');
+const app = document.getElementById('app');
+const startMenuOverlay = document.getElementById('start-menu-overlay');
 
 function resizeCanvas() {
   const container = document.getElementById('map-container');
@@ -37,66 +42,87 @@ async function loadJSON(path) {
   return resp.json();
 }
 
-// ---- Initialize ----
-async function init() {
-  resizeCanvas();
-  window.addEventListener('resize', () => {
-    resizeCanvas();
-    if (gameEngine && mapRenderer) {
-      mapRenderer.render(gameEngine.stateManager.getState());
+// ---- Show/hide game UI ----
+function showGame() {
+  startMenuOverlay.style.display = 'none';
+  app.style.display = 'grid';
+}
+
+function hideGame() {
+  app.style.display = 'none';
+}
+
+// ---- Initialize Game with Selected Forces ----
+function startGame(forceBuilder) {
+  const players = forceBuilder.getPlayers();
+  const selectedMapId = forceBuilder.selectedMapId;
+
+  // Create hex grid from selected map or default
+  let hexGrid;
+  if (selectedMapId && mapsData) {
+    const mapDef = mapsData.maps.find(m => m.id === selectedMapId);
+    if (mapDef) {
+      hexGrid = new HexGrid(mapDef.width, mapDef.height);
+      for (const [key, data] of Object.entries(mapDef.hexes)) {
+        hexGrid.setHex(key, new (Object.getPrototypeOf(hexGrid).constructor === Function ? Object : Object).constructor(key, data));
+      }
+      // Use Hex class for proper hex objects
+      const { Hex } = await import('./models/Hex.js');
+      hexGrid = new HexGrid(mapDef.width, mapDef.height);
+      for (const [key, data] of Object.entries(mapDef.hexes)) {
+        hexGrid.setHex(key, new Hex(key, { terrainType: data.terrain, level: data.level || 0 }));
+      }
     }
-  });
-
-  // Load all data
-  let mechsData, weaponsData, hitTables;
-  try {
-    [mechsData, weaponsData, hitTables] = await Promise.all([
-      loadJSON('src/data/mechs.json'),
-      loadJSON('src/data/weapons.json'),
-      loadJSON('src/data/hitTables.json')
-    ]);
-  } catch (e) {
-    console.error('Failed to load data:', e);
-    document.getElementById('dice-log').innerHTML = '<div class="log-entry miss">ERROR: Failed to load game data files</div>';
-    return;
   }
-
-  // Build weapon lookup
-  weaponsLookup = Weapon.createLookup(weaponsData);
-
-  // Create map
-  const hexGrid = HexGrid.createDefaultMap();
+  if (!hexGrid) {
+    hexGrid = HexGrid.createDefaultMap();
+  }
 
   // Create game state
   const gameState = new GameState({
     players: [
-      { id: 0, name: 'Player 1', homeEdge: 'north' },
-      { id: 1, name: 'Player 2', homeEdge: 'south' }
+      { id: 0, name: players[0].name || 'Player 1', homeEdge: 'north' },
+      { id: 1, name: players[1].name || 'Player 2', homeEdge: 'south' }
     ]
   });
-  gameState.map = { width: 17, height: 15, hexes: hexGrid.hexes };
+  gameState.map = { width: hexGrid.width, height: hexGrid.height, hexes: hexGrid.hexes };
 
-  // Create units
-  const atlas = new Unit(mechsData.mechs[0], 0, 'atlas-0');
-  atlas.position.hexKey = '6,3';
-  atlas.position.facing = 3;
+  // Create units from force builder selections
+  let unitIndex = 0;
+  for (let playerIdx = 0; playerIdx < 2; playerIdx++) {
+    const player = players[playerIdx];
+    const homeRow = playerIdx === 0 ? 3 : hexGrid.height - 4;
+    const units = player.units || [];
 
-  const jenner = new Unit(mechsData.mechs[1], 0, 'jenner-0');
-  jenner.position.hexKey = '10,3';
-  jenner.position.facing = 3;
+    for (let i = 0; i < units.length; i++) {
+      const mechDef = units[i];
+      const unitId = `unit-${unitIndex++}`;
+      const unit = new Unit(mechDef, playerIdx, unitId);
 
-  const wolverine = new Unit(mechsData.mechs[2], 1, 'wolverine-1');
-  wolverine.position.hexKey = '6,12';
-  wolverine.position.facing = 0;
+      // Place units in a row at their home edge
+      const col = 4 + (i * 3);
+      unit.position.hexKey = `${col},${homeRow}`;
+      unit.position.facing = playerIdx === 0 ? 3 : 0; // Face toward enemy
 
-  const thunderbolt = new Unit(mechsData.mechs[3], 1, 'thunderbolt-1');
-  thunderbolt.position.hexKey = '10,12';
-  thunderbolt.position.facing = 0;
+      gameState.addUnit(unit);
+    }
+  }
 
-  gameState.addUnit(atlas);
-  gameState.addUnit(jenner);
-  gameState.addUnit(wolverine);
-  gameState.addUnit(thunderbolt);
+  // If no units selected, use defaults
+  if (Object.keys(gameState.units).length === 0) {
+    const defaults = [
+      { def: mechsData.mechs[0], player: 0, col: 6, row: 3, facing: 3 },
+      { def: mechsData.mechs[1], player: 0, col: 10, row: 3, facing: 3 },
+      { def: mechsData.mechs[2], player: 1, col: 6, row: 12, facing: 0 },
+      { def: mechsData.mechs[3], player: 1, col: 10, row: 12, facing: 0 }
+    ];
+    for (const d of defaults) {
+      const unit = new Unit(d.def, d.player, `default-${d.player}-${d.col}`);
+      unit.position.hexKey = `${d.col},${d.row}`;
+      unit.position.facing = d.facing;
+      gameState.addUnit(unit);
+    }
+  }
 
   // Initialize game engine
   gameEngine = new GameEngine(gameState);
@@ -110,12 +136,13 @@ async function init() {
   ui = new UIController();
   ui.init(gameEngine, mapRenderer);
 
-  // Trigger initial phase to set up phase buttons
+  // Trigger initial phase
   gameEngine.phaseManager.enterPhase('initiative');
 
   // Hook up render updates
   gameEngine.eventBus.on('phaseChanged', () => {
     mapRenderer.render(gameEngine.stateManager.getState());
+    updateUI();
   });
   gameEngine.eventBus.on('unitMoved', () => {
     mapRenderer.render(gameEngine.stateManager.getState());
@@ -127,19 +154,97 @@ async function init() {
     mapRenderer.render(gameEngine.stateManager.getState());
   });
 
+  // Show game UI
+  showGame();
+
   // Initial render
   updateUI();
   mapRenderer.render(gameState);
 
-  ui.log('BattleTech Tabletop Simulator initialized!');
-  ui.log('Map: 17×15 hex grid with 4 BattleMechs');
-  ui.log('Atlas AS7-D + Jenner JR7-D vs Wolverine WVR-6R + Thunderbolt TDR-5S');
+  const unitCount = Object.keys(gameState.units).length;
+  ui.log(`BattleTech Tabletop Simulator started!`);
+  ui.log(`${gameState.players[0].name} vs ${gameState.players[1].name}`);
+  ui.log(`${unitCount} BattleMechs deployed`);
   ui.log('Click a Mech to select it. Arrow keys to pan.');
-  ui.log('Click "Roll Initiative" to start the turn sequence.');
 }
 
-// ---- Interaction ----
+// ---- Start Menu Setup ----
+function showStartMenu() {
+  hideGame();
+
+  const startMenu = new StartMenu({
+    onNewGame: () => {
+      showForceBuilder();
+    },
+    onLoadGame: () => {
+      // TODO: Implement load game
+      alert('Load game not yet implemented');
+    }
+  });
+  startMenu.attach(startMenuOverlay);
+  startMenuOverlay.style.display = 'flex';
+  startMenu.show();
+}
+
+function showForceBuilder() {
+  startMenuOverlay.style.display = 'none';
+
+  // Create a temporary container for force builder
+  const builderContainer = document.createElement('div');
+  builderContainer.id = 'force-builder-container';
+  builderContainer.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;background:#1a1a2e;overflow:auto;';
+  document.body.appendChild(builderContainer);
+
+  const forceBuilder = new ForceBuilder({
+    mechsData: mechsData,
+    mapsData: mapsData,
+    container: builderContainer,
+    onStartGame: (players, selectedMapId) => {
+      forceBuilder.selectedMapId = selectedMapId;
+      builderContainer.remove();
+      startGame(forceBuilder);
+    },
+    onCancel: () => {
+      builderContainer.remove();
+      showStartMenu();
+    }
+  });
+}
+
+// ---- Main Initialization ----
+async function init() {
+  resizeCanvas();
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+    if (gameEngine && mapRenderer) {
+      mapRenderer.render(gameEngine.stateManager.getState());
+    }
+  });
+
+  // Load all data
+  try {
+    [mechsData, weaponsData, hitTables, mapsData] = await Promise.all([
+      loadJSON('src/data/mechs.json'),
+      loadJSON('src/data/weapons.json'),
+      loadJSON('src/data/hitTables.json'),
+      loadJSON('src/data/maps/index.json').catch(() => ({ maps: [] }))
+    ]);
+  } catch (e) {
+    console.error('Failed to load data:', e);
+    document.getElementById('dice-log').innerHTML = '<div class="log-entry miss">ERROR: Failed to load game data files</div>';
+    return;
+  }
+
+  // Build weapon lookup
+  weaponsLookup = Weapon.createLookup(weaponsData);
+
+  // Show start menu
+  showStartMenu();
+}
+
+// ---- Game Interaction (only active when game is running) ----
 canvas.addEventListener('click', (event) => {
+  if (!gameEngine) return;
   const state = gameEngine.stateManager.getState();
   const rect = canvas.getBoundingClientRect();
   const px = event.clientX - rect.left - mapRenderer.offsetX;
@@ -216,7 +321,6 @@ canvas.addEventListener('click', (event) => {
   }
 
   if (state.phase === 'movement' && mapRenderer.selectedUnit) {
-    // Clicked empty hex during movement phase - set pending move
     const unit = state.getUnit(mapRenderer.selectedUnit);
     if (unit && unit.player === state.currentPlayer) {
       const validMoves = mapRenderer.validMoves;
@@ -227,7 +331,7 @@ canvas.addEventListener('click', (event) => {
           movementType: ui.movementMode
         };
         mapRenderer.hoveredHex = hexKey;
-        ui.log(`Move pending to ${hexKey} (${moveData.cost} MP). Click Confirm Move or press Cancel.`);
+        ui.log(`Move pending to ${hexKey} (${moveData.cost} MP). Click Confirm Move.`);
       } else {
         ui.log('Cannot reach that hex', 'miss');
       }
@@ -236,7 +340,7 @@ canvas.addEventListener('click', (event) => {
     return;
   }
 
-  // Deselect if clicking empty hex during non-movement
+  // Deselect
   if (state.phase !== 'movement') {
     mapRenderer.selectedUnit = null;
     ui.updateUnitPanel(null);
@@ -248,13 +352,17 @@ canvas.addEventListener('click', (event) => {
 // Mouse wheel pan
 canvas.addEventListener('wheel', (event) => {
   event.preventDefault();
+  if (!mapRenderer) return;
   mapRenderer.offsetX -= event.deltaX;
   mapRenderer.offsetY -= event.deltaY;
-  mapRenderer.render(gameEngine.stateManager.getState());
+  if (gameEngine) {
+    mapRenderer.render(gameEngine.stateManager.getState());
+  }
 });
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (event) => {
+  if (!gameEngine) return;
   const state = gameEngine.stateManager.getState();
 
   switch (event.key) {
@@ -281,12 +389,13 @@ document.addEventListener('keydown', (event) => {
     case 'g':
       mapRenderer.showGrid = !mapRenderer.showGrid;
       break;
-    default: return; // Only render if key was handled
+    default: return;
   }
   mapRenderer.render(state);
 });
 
 function updateUI() {
+  if (!gameEngine) return;
   const state = gameEngine.stateManager.getState();
   document.getElementById('turn-label').textContent = `Turn: ${state.turn}`;
   document.getElementById('phase-label').textContent = `Phase: ${state.phase}`;

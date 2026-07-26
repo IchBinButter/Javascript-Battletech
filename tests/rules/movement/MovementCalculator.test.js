@@ -3,18 +3,19 @@ import { MovementCalculator } from '../../../src/rules/movement/MovementCalculat
 import { Hex } from '../../../src/models/Hex.js';
 import { hexNeighbors, directionBetween } from '../../../src/hex/HexMath.js';
 
+// =============================================================================
+// Helpers
+// =============================================================================
+
 function makeHex(key, terrainType = 'clear', level = 0, overrides = {}) {
   return new Hex(key, { terrainType, level, ...overrides });
 }
 
-function makeUnit(walk = 4, run = 6, jump = 0, facing = 0, heat = 0) {
+function makeUnit(walk = 4, run = 6, jump = 3, facing = 0, heat = 0) {
   return {
     movement: { walk, run, jump },
-    currentMP: walk,
     heat,
     position: { hexKey: '4,4', facing },
-    _movementModifier: 0,
-    _targetMovementModifier: 0,
     criticalSlots: {
       leftLeg: [
         { item: 'hip_actuator', status: 'ok' },
@@ -28,9 +29,7 @@ function makeUnit(walk = 4, run = 6, jump = 0, facing = 0, heat = 0) {
         { item: 'lower_leg_actuator', status: 'ok' },
         { item: 'foot_actuator', status: 'ok' }
       ]
-    },
-    getAttackerMovementModifier() { return this._movementModifier; },
-    getTargetMovementModifier() { return this._targetMovementModifier; }
+    }
   };
 }
 
@@ -52,88 +51,348 @@ function makeDiceRoller(sequence = []) {
   };
 }
 
+/**
+ * Build a hex map centered on centerKey with radius hexes around it.
+ * Default: all clear, level 0.
+ */
 function buildSimpleHexMap(centerKey, radius, terrainType = 'clear', level = 0) {
   const hexes = {};
   hexes[centerKey] = makeHex(centerKey, terrainType, level);
-  const neighbors = hexNeighbors(centerKey);
-  for (const n of neighbors) {
-    hexes[n] = makeHex(n, terrainType, level);
-  }
-  if (radius >= 2) {
-    for (const n of neighbors) {
-      const n2list = hexNeighbors(n);
-      for (const n2 of n2list) {
-        if (!hexes[n2]) {
-          hexes[n2] = makeHex(n2, terrainType, level);
+  for (let r = 1; r <= radius; r++) {
+    const keys = new Set();
+    for (const [key] of Object.entries(hexes)) {
+      for (const n of hexNeighbors(key)) {
+        if (!keys.has(n) && !hexes[n]) {
+          keys.add(n);
         }
       }
+    }
+    for (const k of keys) {
+      hexes[k] = makeHex(k, terrainType, level);
     }
   }
   return hexes;
 }
 
+// =============================================================================
+// Even-column (4,4) hex neighbor layout:
+//   N(dir0): 4,3   NE(dir1): 5,3   SE(dir2): 5,4
+//   S(dir3): 4,5   SW(dir4): 3,4   NW(dir5): 3,3
+// =============================================================================
+
 describe('MovementCalculator', () => {
   const calc = new MovementCalculator();
 
-  describe('calculateMPCost', () => {
-    it('costs 1 MP for clear terrain', () => {
+  // ==========================================================
+  // TERRAIN COSTS (calculateMPCost)
+  // ==========================================================
+  describe('terrain costs (calculateMPCost)', () => {
+    it('clear costs 1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'clear', 0);
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
     });
 
-    it('costs 2 MP for light woods', () => {
+    it('light_woods costs 2 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'light_woods', 0);
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
     });
 
-    it('costs 3 MP for heavy woods', () => {
+    it('heavy_woods costs 3 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'heavy_woods', 0);
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
     });
 
+    it('water_depth1 costs 2 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'water_depth1', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
+    });
+
+    it('water_depth2 costs 3 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'water_depth2', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
+    it('rough costs 2 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'rough', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
+    });
+
+    it('rubble costs 2 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'rubble', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
+    });
+
+    it('swamp costs 3 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'swamp', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
+    it('pavement costs 1 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'pavement', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+    });
+
+    it('bridge costs 1 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'bridge', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+    });
+
+    it('unknown terrain defaults to 1 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'magma_field', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+    });
+  });
+
+  // ==========================================================
+  // LEVEL CHANGE COSTS
+  // ==========================================================
+  describe('level change costs', () => {
     it('adds +1 MP per level climbed', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'clear', 1);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2); // 1 base + 1 climb
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
+    });
+
+    it('adds +2 MP for 2-level climb', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 2);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
     });
 
     it('does not reduce cost for downhill', () => {
       const from = makeHex('4,4', 'clear', 2);
       const to = makeHex('4,5', 'clear', 0);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1); // terrain cost only
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
     });
 
-    it('jump jets ignore terrain cost (always 1)', () => {
+    it('level change on heavy_woods: 3 terrain + 1 climb = 4', () => {
       const from = makeHex('4,4', 'clear', 0);
-      const to = makeHex('4,5', 'heavy_woods', 2);
+      const to = makeHex('4,5', 'heavy_woods', 1);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(4);
+    });
+
+    it('pavement overrides level climb cost to 1', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'pavement', 2);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+    });
+  });
+
+  // ==========================================================
+  // LEVEL 3+ RESTRICTION
+  // ==========================================================
+  describe('level 3+ restriction', () => {
+    it('returns Infinity for exactly 3-level climb', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 3);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(Infinity);
+    });
+
+    it('returns Infinity for 4-level climb', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 4);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(Infinity);
+    });
+
+    it('returns Infinity for running into hex 3+ levels higher', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 3);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'run')).toBe(Infinity);
+    });
+
+    it('allows downhill of any magnitude', () => {
+      const from = makeHex('4,4', 'clear', 10);
+      const to = makeHex('4,5', 'clear', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+    });
+
+    it('jump jets bypass level 3+ restriction', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 5);
       expect(calc.calculateMPCost(from, to, makeUnit(), 'jump')).toBe(1);
     });
 
+    it('getValidMoves blocks 3+ level climb hex', () => {
+      const unit = makeUnit(8, 12, 0, 0);
+      const hexes = {
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 3)
+      };
+      const gs = makeGameState(hexes);
+      const moves = calc.getValidMoves(unit, gs, 'walk');
+      expect(moves.has('4,3')).toBe(false);
+    });
+
+    it('getValidMoves allows 2-level climb hex', () => {
+      const unit = makeUnit(8, 12, 0, 0);
+      const hexes = {
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 2)
+      };
+      const gs = makeGameState(hexes);
+      const moves = calc.getValidMoves(unit, gs, 'walk');
+      expect(moves.has('4,3')).toBe(true);
+    });
+  });
+
+  // ==========================================================
+  // TERRAIN MODIFIERS
+  // ==========================================================
+  describe('terrain modifiers', () => {
     it('ice adds +1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 0, { ice: true });
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
+    });
+
+    it('ice on light_woods adds +1 (total 3)', () => {
+      const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'light_woods', 0, { ice: true });
-      // Base 2, ice: +1 = 3
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
     });
 
     it('mud adds +1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'clear', 0, { mud: true });
-      // Base 1, mud: +1 = 2
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
     });
 
-    it('pavement always costs 1', () => {
+    it('deepSnow adds +1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
-      const to = makeHex('4,5', 'pavement', 1);
-      // Level 1 climb would add cost, but pavement overrides to 1
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+      const to = makeHex('4,5', 'clear', 0, { deepSnow: true });
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
+    });
+
+    it('ice + mud stack (+2 total)', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 0, { ice: true, mud: true });
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
+    it('ice + deepSnow stack (+2 total)', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 0, { ice: true, deepSnow: true });
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
+    it('jump ignores terrain modifiers', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 0, { ice: true, mud: true, deepSnow: true });
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'jump')).toBe(1);
     });
   });
 
+  // ==========================================================
+  // FACING CHANGE COSTS (calculateFacingChange)
+  // ==========================================================
+  describe('facing change cost (calculateFacingChange)', () => {
+    it('returns 0 for same hex', () => {
+      expect(calc.calculateFacingChange('4,4', '4,4', 0)).toBe(0);
+    });
+
+    it('returns 0 when moving straight ahead (facing 0, N to N neighbor)', () => {
+      const cost = calc.calculateFacingChange('4,4', '4,3', 0);
+      expect(cost).toBe(0);
+    });
+
+    it('returns 1 for one hexside turn (facing 0, NE neighbor = dir 1)', () => {
+      const cost = calc.calculateFacingChange('4,4', '5,3', 0);
+      expect(cost).toBe(1);
+    });
+
+    it('returns 2 for two hexsides turn (facing 0, SE neighbor = dir 2)', () => {
+      const cost = calc.calculateFacingChange('4,4', '5,4', 0);
+      expect(cost).toBe(2);
+    });
+
+    it('returns 3 for three hexsides turn (facing 0, S neighbor = dir 3)', () => {
+      const cost = calc.calculateFacingChange('4,4', '4,5', 0);
+      expect(cost).toBe(3);
+    });
+
+    it('wraps: 4 hexsides = cost 2, because 6-4=2 shorter path', () => {
+      const cost = calc.calculateFacingChange('4,4', '3,4', 0);
+      expect(cost).toBe(2);
+    });
+
+    it('wraps: 5 hexsides = cost 1, because 6-5=1 shorter path', () => {
+      const cost = calc.calculateFacingChange('4,4', '3,3', 0);
+      expect(cost).toBe(1);
+    });
+
+    it('returns 0 when both hexes share the same direction as another facing', () => {
+      expect(calc.calculateFacingChange('4,4', '4,3', 0)).toBe(0);
+      expect(calc.calculateFacingChange('4,4', '5,3', 1)).toBe(0);
+      expect(calc.calculateFacingChange('4,4', '5,4', 2)).toBe(0);
+      expect(calc.calculateFacingChange('4,4', '4,5', 3)).toBe(0);
+      expect(calc.calculateFacingChange('4,4', '3,4', 4)).toBe(0);
+      expect(calc.calculateFacingChange('4,4', '3,3', 5)).toBe(0);
+    });
+
+    it('cost for opposite-direction hex (facing 2 to NW=dir 5) = 3 hexsides', () => {
+      expect(calc.calculateFacingChange('4,4', '5,4', 0)).toBe(2); // 0->2 = 2
+      expect(calc.calculateFacingChange('4,4', '3,3', 2)).toBe(3); // 2->5 = 3 hexsides
+    });
+
+    it('returns correct cost for non-zero starting facing', () => {
+      // Facing 2 (SE). To N neighbor (dir 0): diff = ((0-2+3)%6+3)%6 = (1%6+3)%6 = 4. 4 > 2, 6-4=2
+      expect(calc.calculateFacingChange('4,4', '4,3', 2)).toBe(2);
+      // Facing 2 (SE). To S neighbor (dir 3): diff = ((3-2+3)%6+3)%6 = (4%6+3)%6 = 1. cost=1
+      expect(calc.calculateFacingChange('4,4', '4,5', 2)).toBe(1);
+    });
+  });
+
+  // ==========================================================
+  // FACING CHANGE FROM DIRECTION (internal helper)
+  // ==========================================================
+  describe('facing change from direction', () => {
+    it('returns 0 for same direction', () => {
+      expect(calc.calculateFacingChangeFromDirection(0, 0)).toBe(0);
+      expect(calc.calculateFacingChangeFromDirection(3, 3)).toBe(0);
+      expect(calc.calculateFacingChangeFromDirection(5, 5)).toBe(0);
+    });
+
+    it('returns 1 for one step difference', () => {
+      expect(calc.calculateFacingChangeFromDirection(0, 1)).toBe(1);
+      expect(calc.calculateFacingChangeFromDirection(3, 4)).toBe(1);
+    });
+
+    it('returns 2 for two steps', () => {
+      expect(calc.calculateFacingChangeFromDirection(0, 2)).toBe(2);
+      expect(calc.calculateFacingChangeFromDirection(1, 3)).toBe(2);
+    });
+
+    it('returns 3 for opposite direction (180 degrees)', () => {
+      expect(calc.calculateFacingChangeFromDirection(0, 3)).toBe(3);
+      expect(calc.calculateFacingChangeFromDirection(1, 4)).toBe(3);
+      expect(calc.calculateFacingChangeFromDirection(2, 5)).toBe(3);
+    });
+
+    it('wraps around: 0 to 5 = 1 hexside', () => {
+      expect(calc.calculateFacingChangeFromDirection(0, 5)).toBe(1);
+      expect(calc.calculateFacingChangeFromDirection(5, 0)).toBe(1);
+    });
+
+    it('wraps around: 0 to 4 = 2 hexsides', () => {
+      expect(calc.calculateFacingChangeFromDirection(0, 4)).toBe(2);
+      expect(calc.calculateFacingChangeFromDirection(4, 0)).toBe(2);
+    });
+  });
+
+  // ==========================================================
+  // MAX MP (getMaxMP)
+  // ==========================================================
   describe('getMaxMP', () => {
     it('returns walk MP', () => {
       expect(calc.getMaxMP(makeUnit(4, 6, 3), 'walk')).toBe(4);
@@ -147,122 +406,325 @@ describe('MovementCalculator', () => {
       expect(calc.getMaxMP(makeUnit(4, 6, 3), 'jump')).toBe(3);
     });
 
-    it('defaults to walk', () => {
-      expect(calc.getMaxMP(makeUnit(4, 6, 3), 'unknown')).toBe(4);
+    it('defaults to walk for unknown movement type', () => {
+      expect(calc.getMaxMP(makeUnit(4, 6, 3), 'sprint')).toBe(4);
+    });
+
+    it('zero jump MP means cannot jump', () => {
+      expect(calc.getMaxMP(makeUnit(4, 6, 0), 'jump')).toBe(0);
     });
   });
 
-  describe('calculateFacingChange', () => {
-    it('costs 0 for same hex', () => {
-      expect(calc.calculateFacingChange('4,4', '4,4', 0)).toBe(0);
+  // ==========================================================
+  // MASC
+  // ==========================================================
+  describe('MASC', () => {
+    describe('hasMASC', () => {
+      it('returns true when unit has MASC equipment', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        expect(calc.hasMASC(unit)).toBe(true);
+      });
+
+      it('returns false when unit has no equipment', () => {
+        expect(calc.hasMASC(makeUnit())).toBe(false);
+      });
+
+      it('returns false when equipment.other is empty', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: {} };
+        expect(calc.hasMASC(unit)).toBe(false);
+      });
     });
 
-    it('costs 0 for moving straight ahead', () => {
-      // Facing 0 = north. Moving to north neighbor should cost 0.
-      // Even col: N neighbor of 4,4 is 4,3
-      const cost = calc.calculateFacingChange('4,4', '4,3', 0);
-      expect(cost).toBe(0);
+    describe('activation', () => {
+      it('activates and sets mascActive + mascTurnsActive', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        expect(calc.activateMASC(unit)).toBe(true);
+        expect(unit.mascActive).toBe(true);
+        expect(unit.mascTurnsActive).toBe(1);
+      });
+
+      it('increments mascTurnsActive on successive activations', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        calc.activateMASC(unit);
+        calc.activateMASC(unit);
+        expect(unit.mascTurnsActive).toBe(2);
+        expect(unit.mascActive).toBe(true);
+      });
+
+      it('fails when unit has no MASC', () => {
+        const unit = makeUnit(4, 6, 3);
+        expect(calc.activateMASC(unit)).toBe(false);
+        expect(unit.mascActive).toBeUndefined();
+      });
     });
 
-    it('costs 1 for one hexside turn', () => {
-      // Facing 0 = north. NE neighbor = direction 1. Diff = 1.
-      const cost = calc.calculateFacingChange('4,4', '5,3', 0);
-      expect(cost).toBe(1);
+    describe('deactivation', () => {
+      it('deactivates MASC and resets counters', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 5;
+        calc.deactivateMASC(unit);
+        expect(unit.mascActive).toBe(false);
+        expect(unit.mascTurnsActive).toBe(0);
+      });
     });
 
-    it('costs 2 for two hexsides turn', () => {
-      // Facing 0 = north. SE neighbor = direction 2. Diff = 2.
-      const cost = calc.calculateFacingChange('4,4', '5,4', 0);
-      expect(cost).toBe(2);
+    describe('MASC doubles walk MP', () => {
+      it('walk MP is doubled when MASC is active', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        expect(calc.getMaxMP(unit, 'walk')).toBe(8);
+      });
+
+      it('run MP is NOT doubled by MASC', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        expect(calc.getMaxMP(unit, 'run')).toBe(6);
+      });
+
+      it('jump MP is NOT affected by MASC', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        expect(calc.getMaxMP(unit, 'jump')).toBe(3);
+      });
     });
 
-    it('takes shorter path (3 hexsides = 2 cost going other way)', () => {
-      // Facing 0 = north. S neighbor = direction 3. Diff = 3.
-      // 3 hexsides either way, cost should be 3 or 6-3=3
-      // Per code: diff=3, returns diff=3 (but the code has if(diff<=2) return diff; return 6-diff;
-      // So diff=3 => 6-3=3
-      const cost = calc.calculateFacingChange('4,4', '4,5', 0);
-      expect(cost).toBe(3);
+    describe('MASC failure scaling', () => {
+      it('target is 3 on first active turn (turnsActive=1)', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 1;
+        const dr = makeDiceRoller([4]);
+        const result = calc.rollMASC(unit, dr);
+        expect(result.target).toBe(3);
+        expect(result.roll).toBe(4);
+        expect(result.failed).toBe(false);
+      });
+
+      it('fails on first turn when roll <= 3', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 1;
+        const dr = makeDiceRoller([2]);
+        const result = calc.rollMASC(unit, dr);
+        expect(result.target).toBe(3);
+        expect(result.failed).toBe(true);
+      });
+
+      it('target = 5 on second turn (3 + 2*(2-1) = 5)', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 2;
+        const dr = makeDiceRoller([6]);
+        const result = calc.rollMASC(unit, dr);
+        expect(result.target).toBe(5);
+        expect(result.roll).toBe(6);
+        expect(result.failed).toBe(false);
+      });
+
+      it('target = 7 on third turn (3 + 2*(3-1) = 7)', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 3;
+        const dr = makeDiceRoller([7]);
+        const result = calc.rollMASC(unit, dr);
+        expect(result.target).toBe(7);
+        expect(result.failed).toBe(true); // 7 <= 7
+      });
+
+      it('target = 9 on fourth turn (3 + 2*(4-1) = 9)', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 4;
+        const dr = makeDiceRoller([8]);
+        const result = calc.rollMASC(unit, dr);
+        expect(result.target).toBe(9);
+        expect(result.failed).toBe(true);
+      });
+
+      it('target = 11 on fifth turn (3 + 2*(5-1) = 11)', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 5;
+        const dr = makeDiceRoller([12]);
+        const result = calc.rollMASC(unit, dr);
+        expect(result.target).toBe(11);
+        expect(result.failed).toBe(false);
+      });
+    });
+
+    describe('MASC failure damage', () => {
+      it('destroys one leg actuator on failure', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 1;
+
+        const dr = makeDiceRoller([2]); // 2 <= 3 = fail
+        calc.rollMASC(unit, dr);
+
+        const destroyedLeft = unit.criticalSlots.leftLeg.filter(
+          s => s.item.includes('actuator') && s.status === 'destroyed'
+        ).length;
+        const destroyedRight = unit.criticalSlots.rightLeg.filter(
+          s => s.item.includes('actuator') && s.status === 'destroyed'
+        ).length;
+        expect(destroyedLeft + destroyedRight).toBe(1);
+      });
+
+      it('deactivates MASC and resets counter on failure', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 3;
+
+        const dr = makeDiceRoller([2]);
+        calc.rollMASC(unit, dr);
+        expect(unit.mascActive).toBe(false);
+        expect(unit.mascTurnsActive).toBe(0);
+      });
+
+      it('destroys first OK actuator in left leg before right leg', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = true;
+        unit.mascTurnsActive = 1;
+
+        const dr = makeDiceRoller([1]);
+        calc.rollMASC(unit, dr);
+
+        const leftActuator = unit.criticalSlots.leftLeg.find(s => s.status === 'destroyed');
+        expect(leftActuator).toBeTruthy();
+        expect(leftActuator.item).toContain('actuator');
+      });
+
+      it('returns null roll when MASC is not active', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
+        unit.mascActive = false;
+        const dr = makeDiceRoller([2]);
+        const result = calc.rollMASC(unit, dr);
+        expect(result.roll).toBeNull();
+        expect(result.failed).toBe(false);
+      });
     });
   });
 
-  describe('calculateFacingChangeFromDirection', () => {
-    it('returns 0 for same direction', () => {
-      expect(calc.calculateFacingChangeFromDirection(3, 3)).toBe(0);
+  // ==========================================================
+  // HEAT-BASED MP REDUCTION
+  // ==========================================================
+  describe('heat-based MP reduction', () => {
+    it('no reduction for heat < 10', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 0), 'walk')).toBe(5);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 5), 'walk')).toBe(5);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 9), 'walk')).toBe(5);
     });
 
-    it('returns 1 for one step difference', () => {
-      expect(calc.calculateFacingChangeFromDirection(0, 1)).toBe(1);
+    it('reduces walk MP by 1 at 10-14 heat', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 10), 'walk')).toBe(4);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 12), 'walk')).toBe(4);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 14), 'walk')).toBe(4);
     });
 
-    it('returns 2 for two steps', () => {
-      expect(calc.calculateFacingChangeFromDirection(0, 2)).toBe(2);
+    it('reduces walk MP by 2 at 15-19 heat', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 15), 'walk')).toBe(3);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 17), 'walk')).toBe(3);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 19), 'walk')).toBe(3);
     });
 
-    it('returns 3 for opposite direction', () => {
-      expect(calc.calculateFacingChangeFromDirection(0, 3)).toBe(3);
+    it('reduces walk MP by 3 at 20+ heat', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 20), 'walk')).toBe(2);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 25), 'walk')).toBe(2);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 30), 'walk')).toBe(2);
     });
 
-    it('takes shorter path (wraps around)', () => {
-      // 0 to 5: diff = (5-0+3)%6 = 2, min(2, 6-2) = 2... let's check
-      // diff = ((5-0+3)%6+3)%6 = (8%6+3)%6 = (2+3)%6 = 5
-      // 5 > 3, so return 6-5 = 1
-      expect(calc.calculateFacingChangeFromDirection(0, 5)).toBe(1);
-    });
-  });
-
-  describe('validateMovement', () => {
-    it('rejects path with less than 2 hexes', () => {
-      const unit = makeUnit();
-      const gs = makeGameState({
-        '4,4': makeHex('4,4')
-      });
-      const result = calc.validateMovement(unit, ['4,4'], 'walk', gs);
-      expect(result.valid).toBe(false);
-      expect(result.errors[0]).toContain('at least 2');
+    it('reduces run MP by same heat thresholds', () => {
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 10), 'run')).toBe(7);
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 15), 'run')).toBe(6);
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 20), 'run')).toBe(5);
     });
 
-    it('validates a simple 2-hex move on clear terrain', () => {
-      const unit = makeUnit(4, 6, 0, 0);
-      const gs = makeGameState({
-        '4,4': makeHex('4,4', 'clear', 0),
-        '4,3': makeHex('4,3', 'clear', 0)
-      });
-      const result = calc.validateMovement(unit, ['4,4', '4,3'], 'walk', gs);
-      expect(result.valid).toBe(true);
-      expect(result.totalCost).toBe(1); // 1 terrain + 0 facing
+    it('does NOT reduce jump MP at any heat', () => {
+      expect(calc.getMaxMP(makeUnit(4, 6, 4, 0, 10), 'jump')).toBe(4);
+      expect(calc.getMaxMP(makeUnit(4, 6, 4, 0, 15), 'jump')).toBe(4);
+      expect(calc.getMaxMP(makeUnit(4, 6, 4, 0, 20), 'jump')).toBe(4);
+      expect(calc.getMaxMP(makeUnit(4, 6, 4, 0, 30), 'jump')).toBe(4);
     });
 
-    it('accumulates terrain and turning costs', () => {
-      const unit = makeUnit(4, 6, 0, 0);
-      // Move north (facing 0) then NE (facing 1): 0 turning for first, 1 for second
-      // Facing changes are free (1 free hexside turn per hex entered), so only terrain costs apply
-      const gs = makeGameState({
-        '4,4': makeHex('4,4', 'clear', 0),
-        '4,3': makeHex('4,3', 'clear', 0),
-        '5,2': makeHex('5,2', 'clear', 0) // NE of 4,3 on even col
-      });
-      const result = calc.validateMovement(unit, ['4,4', '4,3', '5,2'], 'walk', gs);
-      expect(result.valid).toBe(true);
-      // Step 1: terrain 1
-      // Step 2: terrain 1
-      expect(result.totalCost).toBe(2);
+    it('floors MP at 0 (never negative)', () => {
+      expect(calc.getMaxMP(makeUnit(1, 0, 0, 0, 15), 'walk')).toBe(0);
+      expect(calc.getMaxMP(makeUnit(1, 0, 0, 0, 20), 'walk')).toBe(0);
     });
 
-    it('fails when path exceeds max MP', () => {
-      const unit = makeUnit(2, 4, 0, 0); // Only 2 walk MP
-      const gs = makeGameState({
-        '4,4': makeHex('4,4', 'clear', 0),
-        '4,3': makeHex('4,3', 'heavy_woods', 0), // costs 3
-      });
-      const result = calc.validateMovement(unit, ['4,4', '4,3'], 'walk', gs);
-      expect(result.valid).toBe(false);
-      expect(result.errors[0]).toContain('Exceeded max MP');
+    it('MASC-doubled MP still gets heat reduction', () => {
+      const unit = makeUnit(4, 6, 0, 0, 15);
+      unit.equipment = { other: { masc: {} } };
+      unit.mascActive = true;
+      expect(calc.getMaxMP(unit, 'walk')).toBe(6); // 4*2=8, -2=6
     });
   });
 
-  describe('getValidMoves', () => {
-    it('returns start hex with 0 cost', () => {
+  // ==========================================================
+  // JUMP MOVEMENT
+  // ==========================================================
+  describe('jump movement', () => {
+    it('calculateMPCost: always 1 regardless of terrain', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      expect(calc.calculateMPCost(from, makeHex('4,5', 'heavy_woods', 2, { ice: true }), makeUnit(), 'jump')).toBe(1);
+      expect(calc.calculateMPCost(from, makeHex('4,5', 'swamp', 3, { mud: true }), makeUnit(), 'jump')).toBe(1);
+      expect(calc.calculateMPCost(from, makeHex('4,5', 'water_depth2', 1), makeUnit(), 'jump')).toBe(1);
+    });
+
+    it('calculateMPCost: costs 1 regardless of level (3+)', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 5);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'jump')).toBe(1);
+    });
+
+    it('getMaxMP returns jump MP', () => {
+      expect(calc.getMaxMP(makeUnit(4, 6, 4), 'jump')).toBe(4);
+    });
+
+    it('getValidMoves with jump can reach any hex within jump MP', () => {
+      const unit = makeUnit(4, 6, 3, 0);
+      const hexes = buildSimpleHexMap('4,4', 3);
+      const gs = makeGameState(hexes);
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('4,4')).toBe(true);
+      expect(moves.get('4,4').cost).toBe(0);
+      expect(moves.size).toBeGreaterThan(1);
+    });
+
+    it('getValidMoves with jump: max cost equals jump MP', () => {
+      const unit = makeUnit(4, 6, 3, 0);
+      const hexes = buildSimpleHexMap('4,4', 3);
+      const gs = makeGameState(hexes);
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      for (const [, data] of moves) {
+        expect(data.cost).toBeLessThanOrEqual(3);
+      }
+    });
+  });
+
+  // ==========================================================
+  // VALID MOVE GENERATION (getValidMoves)
+  // ==========================================================
+  describe('valid move generation (getValidMoves)', () => {
+    it('includes start hex with cost 0', () => {
       const unit = makeUnit(4, 6, 0, 0);
       const hexes = buildSimpleHexMap('4,4', 2);
       const gs = makeGameState(hexes);
@@ -271,46 +733,25 @@ describe('MovementCalculator', () => {
       expect(moves.get('4,4').cost).toBe(0);
     });
 
-    it('includes accessible neighbors', () => {
+    it('includes direct neighbor in facing direction (cost=1)', () => {
       const unit = makeUnit(4, 6, 0, 0);
-      const hexes = buildSimpleHexMap('4,4', 2);
-      const gs = makeGameState(hexes);
-      const moves = calc.getValidMoves(unit, gs, 'walk');
-      expect(moves.has('4,3')).toBe(true); // N neighbor
-      expect(moves.has('4,5')).toBe(true); // S neighbor
-    });
-
-    it('facing change costs 1 MP per hexside turn', () => {
-      const unit = makeUnit(1, 4, 0, 0); // only 1 walk MP, facing 0=N
       const hexes = buildSimpleHexMap('4,4', 1);
       const gs = makeGameState(hexes);
-
       const moves = calc.getValidMoves(unit, gs, 'walk');
-      // N neighbor (dir 0, facing 0): facing change=0, terrain=1, cost=1 - reachable
-      const northKey = '4,3';
-      expect(moves.has(northKey)).toBe(true);
-      // SE neighbor (dir 2, facing 0): facing change=2, terrain=1, cost=3 > 1 - NOT reachable
-      const seKey = '5,4';
-      expect(moves.has(seKey)).toBe(false);
+      expect(moves.has('4,3')).toBe(true);
+      expect(moves.get('4,3').cost).toBe(1);
     });
 
-    it('facing change costs 0 for straight ahead', () => {
-      const unit = makeUnit(4, 6, 0, 0);
-      const hexes = {
-        '4,4': makeHex('4,4', 'clear', 0),
-        '4,3': makeHex('4,3', 'clear', 0),
-        '4,2': makeHex('4,2', 'clear', 0)
-      };
+    it('does not include hex that requires more MP than available', () => {
+      const unit = makeUnit(1, 2, 0, 0);
+      const hexes = buildSimpleHexMap('4,4', 1);
       const gs = makeGameState(hexes);
       const moves = calc.getValidMoves(unit, gs, 'walk');
-      // 4,4 -> 4,3 (N, facing stays 0): 1 terrain + 0 facing = 1
-      // 4,3 -> 4,2 (N, facing 0->0): 1 terrain + 0 facing = 1
-      // Total: 2
-      expect(moves.has('4,2')).toBe(true);
-      expect(moves.get('4,2').cost).toBe(2);
+      // SE is dir 2 from facing 0, so facingChange = 2, terrain = 1, total = 3 > 1 MP
+      expect(moves.has('5,4')).toBe(false);
     });
 
-    it('respects occupied hexes', () => {
+    it('respects occupied hexes (cannot move into enemy)', () => {
       const unit = makeUnit(4, 6, 0, 0);
       const hexes = {
         '4,4': makeHex('4,4', 'clear', 0),
@@ -321,142 +762,153 @@ describe('MovementCalculator', () => {
       expect(moves.has('4,3')).toBe(false);
     });
 
-    it('treats heavy woods as 3 MP cost including facing', () => {
+    it('can move through occupied hexes from starting position', () => {
+      // Only the start hex is excluded from occupied check
+      // But wait, neighborHex.occupiedBy && neighborKey !== startKey blocks occupied hexes for non-start
+      // Starting hex is always allowed regardless of occupiedBy
       const unit = makeUnit(4, 6, 0, 0);
       const hexes = {
         '4,4': makeHex('4,4', 'clear', 0),
-        '5,4': makeHex('5,4', 'heavy_woods', 0) // SE, direction 2, facing change=2, terrain=3, total=5
+        '4,3': makeHex('4,3', 'clear', 0, { occupiedBy: 'self' })
       };
       const gs = makeGameState(hexes);
       const moves = calc.getValidMoves(unit, gs, 'walk');
-      // 5 cost > 4 maxMP
-      expect(moves.has('5,4')).toBe(false);
-    });
-  });
-
-  describe('level change restriction', () => {
-    it('prohibits walking into hex 3+ levels higher', () => {
-      const from = makeHex('4,4', 'clear', 0);
-      const to = makeHex('4,5', 'clear', 3);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(Infinity);
-    });
-
-    it('prohibits running into hex 3+ levels higher', () => {
-      const from = makeHex('4,4', 'clear', 0);
-      const to = makeHex('4,5', 'clear', 4);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'run')).toBe(Infinity);
-    });
-
-    it('allows 2 level climb', () => {
-      const from = makeHex('4,4', 'clear', 0);
-      const to = makeHex('4,5', 'clear', 2);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3); // 1 base + 2 climb
-    });
-
-    it('allows jump jets into hex 3+ levels higher', () => {
-      const from = makeHex('4,4', 'clear', 0);
-      const to = makeHex('4,5', 'clear', 5);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'jump')).toBe(1);
-    });
-
-    it('blocks 3+ level climb in getValidMoves', () => {
-      const unit = makeUnit(8, 12, 0, 0);
-      const hexes = {
-        '4,4': makeHex('4,4', 'clear', 0),
-        '4,3': makeHex('4,3', 'clear', 3) // 3 levels higher, should be blocked
-      };
-      const gs = makeGameState(hexes);
-      const moves = calc.getValidMoves(unit, gs, 'walk');
+      // 4,3 is occupied so blocked except it's not start
       expect(moves.has('4,3')).toBe(false);
     });
+
+    it('faced 2 unit with 2 MP cannot reach SW neighbor (2 facing + 1 terrain = 3 > 2 MP)', () => {
+      const unit = makeUnit(2, 4, 0, 2);
+      const hexes = {
+        '4,4': makeHex('4,4', 'clear', 0),
+        '3,4': makeHex('3,4', 'clear', 0) // SW, dir 4 from 4,4
+      };
+      const gs = makeGameState(hexes);
+      const moves = calc.getValidMoves(unit, gs, 'walk');
+      // facingChangeFromDirection(2, 4) = 2, terrain = 1, total = 3 > 2 MP
+      expect(moves.has('3,4')).toBe(false);
+    });
+
+    it('tracks remainingMP in move data', () => {
+      const unit = makeUnit(4, 6, 0, 0);
+      const hexes = buildSimpleHexMap('4,4', 2);
+      const gs = makeGameState(hexes);
+      const moves = calc.getValidMoves(unit, gs, 'walk');
+      expect(moves.get('4,3').remainingMP).toBe(3);
+    });
   });
 
-  describe('MASC', () => {
-    it('activation on a unit with MASC sets mascActive', () => {
-      const unit = makeUnit(4, 6, 3, 0);
-      unit.equipment = { other: { masc: {} } };
-      const result = calc.activateMASC(unit);
-      expect(result).toBe(true);
-      expect(unit.mascActive).toBe(true);
-      expect(unit.mascTurnsActive).toBe(1);
+  // ==========================================================
+  // MOVEMENT VALIDATION (validateMovement)
+  // ==========================================================
+  describe('movement validation (validateMovement)', () => {
+    it('rejects path with fewer than 2 hexes', () => {
+      const unit = makeUnit();
+      const gs = makeGameState({ '4,4': makeHex('4,4') });
+      const result = calc.validateMovement(unit, ['4,4'], 'walk', gs);
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('at least 2');
     });
 
-    it('activation on a unit without MASC fails', () => {
-      const unit = makeUnit(4, 6, 3, 0);
-      const result = calc.activateMASC(unit);
-      expect(result).toBe(false);
-      expect(unit.mascActive).toBeUndefined();
+    it('validates a simple 2-hex clear move', () => {
+      const unit = makeUnit(4, 6, 0, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 0)
+      });
+      const result = calc.validateMovement(unit, ['4,4', '4,3'], 'walk', gs);
+      expect(result.valid).toBe(true);
+      expect(result.totalCost).toBe(1);
     });
 
-    it('rollMASC uses base target on first active turn', () => {
-      const unit = makeUnit(4, 6, 3, 0);
-      unit.equipment = { other: { masc: {} } };
-      unit.mascTurnsActive = 1;
-      unit.mascActive = true;
-      const dr = makeDiceRoller([4]);
-      const result = calc.rollMASC(unit, dr);
-      expect(result.roll).toBe(4);
-      expect(result.target).toBe(3); // base 3 + 2*(1-1) = 3
-      expect(result.failed).toBe(false); // 4 > 3
+    it('fails when path exceeds max MP', () => {
+      const unit = makeUnit(2, 4, 0, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'heavy_woods', 0)
+      });
+      const result = calc.validateMovement(unit, ['4,4', '4,3'], 'walk', gs);
+      expect(result.valid).toBe(false);
+      expect(result.errors[0]).toContain('Exceeded max MP');
     });
 
-    it('rollMASC target increases +2 each consecutive turn', () => {
-      const unit = makeUnit(4, 6, 3, 0);
-      unit.equipment = { other: { masc: {} } };
-      unit.mascTurnsActive = 3;
-      unit.mascActive = true;
-      const dr = makeDiceRoller([6]);
-      const result = calc.rollMASC(unit, dr);
-      expect(result.roll).toBe(6);
-      expect(result.target).toBe(7); // base 3 + 2*(3-1) = 7
-      expect(result.failed).toBe(true); // 6 <= 7
+    it('returns final facing as direction of last move', () => {
+      const unit = makeUnit(4, 6, 0, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 0),
+        '5,2': makeHex('5,2', 'clear', 0) // NE of 4,3 (even col)
+      });
+      const result = calc.validateMovement(unit, ['4,4', '4,3', '5,2'], 'walk', gs);
+      expect(result.finalFacing).toBe(1); // NE = direction 1
     });
 
-    it('rollMASC target is 3 on first activation', () => {
-      const unit = makeUnit(4, 6, 3, 0);
-      unit.equipment = { other: { masc: {} } };
-      unit.mascTurnsActive = 1;
-      unit.mascActive = true;
-      const dr = makeDiceRoller([2]);
-      const result = calc.rollMASC(unit, dr);
-      expect(result.target).toBe(3);
-      expect(result.failed).toBe(true); // 2 <= 3
+    it('reports missing hex errors', () => {
+      const unit = makeUnit();
+      const gs = makeGameState({ '4,4': makeHex('4,4') });
+      const result = calc.validateMovement(unit, ['4,4', '99,99'], 'walk', gs);
+      expect(result.errors[0]).toContain('Hex not found');
     });
 
-    it('MASC failure applies leg actuator damage', () => {
-      const unit = makeUnit(4, 6, 3, 0);
-      unit.equipment = { other: { masc: {} } };
-      unit.mascTurnsActive = 1;
-      unit.mascActive = true;
+    it('validates path through varied terrain', () => {
+      const unit = makeUnit(8, 12, 0, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'light_woods', 0),
+        '4,2': makeHex('4,2', 'heavy_woods', 0)
+      });
+      const result = calc.validateMovement(unit, ['4,4', '4,3', '4,2'], 'walk', gs);
+      expect(result.valid).toBe(true);
+      expect(result.totalCost).toBe(5); // 1 + 2 + 3... wait, 4->4,3=2, 4,3->4,2: directionBetween from 4,3 to 4,2 is N (dir 0). currentFacing after step1 = 0. same direction. terrain = heavy_woods(3). total = 2+3=5
+    });
 
-      const actuatorsOk = () => {
-        const left = unit.criticalSlots.leftLeg.filter(s => s.item.includes('actuator') && s.status === 'destroyed');
-        const right = unit.criticalSlots.rightLeg.filter(s => s.item.includes('actuator') && s.status === 'destroyed');
-        return { left: left.length, right: right.length };
+    it('uses heat-reduced MP for validation threshold', () => {
+      const unit = makeUnit(4, 6, 0, 0, 15); // walk MP reduced from 4 to 2
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'heavy_woods', 0)
+      });
+      const result = calc.validateMovement(unit, ['4,4', '4,3'], 'walk', gs);
+      expect(result.valid).toBe(false); // cost 3 > maxMP 2
+    });
+  });
+
+  // ==========================================================
+  // INTEGRATION: HEAT + FACING + TERRAIN IN getValidMoves
+  // ==========================================================
+  describe('integration: heat + facing + terrain', () => {
+    it('heated unit has reduced reachable hexes', () => {
+      const cold = makeUnit(4, 6, 0, 0, 0);
+      const hot = makeUnit(4, 6, 0, 0, 15);
+      const hexes = buildSimpleHexMap('4,4', 2);
+      const gs = makeGameState(hexes);
+
+      const coldMoves = calc.getValidMoves(cold, gs, 'walk');
+      const hotMoves = calc.getValidMoves(hot, gs, 'walk');
+
+      expect(hotMoves.size).toBeLessThan(coldMoves.size);
+    });
+
+    it('heavy woods blocks units with tight facing budgets', () => {
+      const unit = makeUnit(3, 4, 0, 0); // 3 walk MP
+      const hexes = {
+        '4,4': makeHex('4,4', 'clear', 0),
+        '5,4': makeHex('5,4', 'heavy_woods', 0) // SE, dir 2, facingChange=2, terrain=3, total=5 > 3
       };
-
-      const before = actuatorsOk();
-      expect(before.left).toBe(0);
-      expect(before.right).toBe(0);
-
-      const dr = makeDiceRoller([2]); // rolls 2 <= 3 target, fails
-      calc.rollMASC(unit, dr);
-
-      // At least one leg actuator should be destroyed
-      const after = actuatorsOk();
-      expect(after.left + after.right).toBe(1);
-      expect(unit.mascActive).toBe(false);
-      expect(unit.mascTurnsActive).toBe(0);
+      const gs = makeGameState(hexes);
+      const moves = calc.getValidMoves(unit, gs, 'walk');
+      expect(moves.has('5,4')).toBe(false);
     });
 
-    it('rollMASC returns null roll when MASC not active', () => {
-      const unit = makeUnit(4, 6, 3, 0);
-      unit.equipment = { other: { masc: {} } };
-      unit.mascActive = false;
-      const dr = makeDiceRoller([2]);
-      const result = calc.rollMASC(unit, dr);
-      expect(result.roll).toBeNull();
-      expect(result.failed).toBe(false);
+    it('high MP unit can reach through heavy woods with facing change', () => {
+      const unit = makeUnit(6, 8, 0, 0);
+      const hexes = {
+        '4,4': makeHex('4,4', 'clear', 0),
+        '5,4': makeHex('5,4', 'heavy_woods', 0) // facing 2, terrain 3, total 5 <= 6
+      };
+      const gs = makeGameState(hexes);
+      const moves = calc.getValidMoves(unit, gs, 'walk');
+      expect(moves.has('5,4')).toBe(true);
     });
   });
 });

@@ -1,0 +1,52 @@
+{
+  "maps": [
+    {
+      "id": "grassland",
+      "name": "Grassland Fields",
+      "file": "grassland.json",
+      "description": "Rolling green hills with scattered woods, a winding river, and a road.",
+      "width": 17,
+      "height": 15
+    },
+    {
+      "id": "lunar",
+      "name": "Lunar Wastes",
+      "file": "lunar.json",
+      "description": "Barren cratered surface with rough terrain and rubble fields. No atmosphere.",
+      "width": 17,
+      "height": 15
+    },
+    {
+      "id": "urban",
+      "name": "Urban Grid",
+      "file": "urban.json",
+      "description": "A city sector with paved streets, building blocks, and a main boulevard.",
+      "width": 17,
+      "height": 15
+    },
+    {
+      "id": "forest",
+      "name": "Deep Forest",
+      "file": "forest.json",
+      "description": "Dense woods with clearings, a lake, and a winding stream.",
+      "width": 17,
+      "height": 15
+    },
+    {
+      "id": "desert",
+      "name": "Arid Wastes",
+      "file": "desert.json",
+      "description": "Sandy desert with rocky outcrops, dunes, an oasis, and a trade road.",
+      "width": 17,
+      "height": 15
+    },
+    {
+      "id": "tundra",
+      "name": "Frozen Tundra",
+      "file": "tundra.json",
+      "description": "Permafrost plain with frozen ponds, bogs, rocky ridges, and patchy woods.",
+      "width": 17,
+      "height": 15
+    }
+  ]
+}

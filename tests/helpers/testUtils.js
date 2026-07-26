@@ -101,4 +101,105 @@ export function createEngagementMap(distance = 5) {
   return createTestMap(hexDefs);
 }
 
+/**
+ * Creates an engine with per-unit alternation queue active.
+ * Enters the specified phase and builds the alternating unit queue.
+ */
+export function createEngineWithPerUnitAlternation(config = {}) {
+  const engine = createTestEngine(config);
+  const phase = config.phase || 'movement';
+  engine.phaseManager.enterPhase(phase);
+  return engine;
+}
+
+/**
+ * Creates an engine with a specific initiative choice already made.
+ * Rolls initiative and applies the winner's choice of goFirst.
+ */
+export function createEngineWithInitiativeChoice(config = {}) {
+  const engine = createTestEngine(config);
+  const goFirst = config.goFirst !== undefined ? config.goFirst : false;
+  engine.phaseManager.enterPhase('initiative');
+  engine.phaseManager.chooseInitiative(goFirst);
+  return engine;
+}
+
+/**
+ * Returns a dice roller suited for consciousness checks.
+ *
+ * Consciousness thresholds by pilot hits:
+ *   1 hit -> target 3, 2 hits -> target 5,
+ *   3 hits -> target 7, 4 hits -> target 10, 5+ -> auto fail
+ *
+ * Pass: rolls 12 (always >= any target). Fail: rolls 2 (always < any target).
+ */
+export function makeConsciousnessDiceRoller(passOrFail = true) {
+  const roll = passOrFail ? 12 : 2;
+  return makeDiceRoller(roll);
+}
+
+/**
+ * Creates a test unit with a specific heat level preset.
+ */
+export function createHeatTestUnit(mechId, playerId, unitId, heatLevel) {
+  const unit = createTestUnit(mechId, playerId, unitId);
+  unit.heat = heatLevel;
+  return unit;
+}
+
+/**
+ * Advances the engine to a specific phase by calling enterPhase.
+ */
+export function advanceToPhase(engine, phase) {
+  engine.phaseManager.enterPhase(phase);
+  return engine;
+}
+
+/**
+ * Creates a two-unit engagement ready for combat testing.
+ * Returns { engine, attacker, target }.
+ */
+export function createEngagement(config = {}) {
+  const attackerId = config.attackerId || 'atlas-as7d';
+  const targetId = config.targetId || 'jenner-jr7d';
+  const attackerPos = config.attackerPos || { hexKey: '5,7', facing: 0 };
+  const targetPos = config.targetPos || { hexKey: '7,7', facing: 3 };
+  const player1Id = config.player1Id !== undefined ? config.player1Id : 0;
+  const player2Id = config.player2Id !== undefined ? config.player2Id : 1;
+
+  const attacker = createTestUnit(attackerId, player1Id, config.attackerUnitId || 'attacker-0');
+  const target = createTestUnit(targetId, player2Id, config.targetUnitId || 'target-1');
+  attacker.position = { ...attackerPos };
+  target.position = { ...targetPos };
+
+  const engine = createTestEngine({
+    units: { [attacker.id]: attacker, [target.id]: target }
+  });
+
+  return { engine, attacker, target };
+}
+
+/**
+ * Fire a weapon from one unit at another.
+ * Handles phase setup (enters weapon_attack if not already there)
+ * and sets currentPlayer before firing.
+ */
+export function fireWeaponAtTarget(engine, attackerId, targetId, weaponIdOrDef, playerId, weaponLocation = 'rightArm') {
+  const weaponDef = typeof weaponIdOrDef === 'string' ? createWeaponDef(weaponIdOrDef) : weaponIdOrDef;
+
+  if (engine.phaseManager.currentPhase !== 'weapon_attack') {
+    engine.phaseManager.clearQueue();
+    engine.phaseManager.enterPhase('weapon_attack');
+  }
+  engine.stateManager.getState().currentPlayer = playerId;
+
+  return engine.processAction(playerId, {
+    type: 'fire',
+    attackerId,
+    targetId,
+    weapon: weaponDef,
+    weaponLocation
+  });
+}
+
 export { hitTables, weaponsData, mechsData };
