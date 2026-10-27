@@ -498,72 +498,72 @@ describe('MovementCalculator', () => {
     });
 
     describe('MASC failure scaling', () => {
-      it('target is 3 on first active turn (turnsActive=1)', () => {
+      it('target is 2 on first active turn (turnsActive=1)', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
         unit.mascTurnsActive = 1;
         const dr = makeDiceRoller([4]);
         const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(3);
+        expect(result.target).toBe(2);
         expect(result.roll).toBe(4);
         expect(result.failed).toBe(false);
       });
 
-      it('fails on first turn when roll <= 3', () => {
+      it('fails on first turn when roll <= 2', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
         unit.mascTurnsActive = 1;
         const dr = makeDiceRoller([2]);
         const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(3);
+        expect(result.target).toBe(2);
         expect(result.failed).toBe(true);
       });
 
-      it('target = 5 on second turn (3 + 2*(2-1) = 5)', () => {
+      it('target = 4 on second turn (lookup[2,4,6,10])', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
         unit.mascTurnsActive = 2;
         const dr = makeDiceRoller([6]);
         const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(5);
+        expect(result.target).toBe(4);
         expect(result.roll).toBe(6);
         expect(result.failed).toBe(false);
       });
 
-      it('target = 7 on third turn (3 + 2*(3-1) = 7)', () => {
+      it('target = 6 on third turn (lookup[2,4,6,10])', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
         unit.mascTurnsActive = 3;
-        const dr = makeDiceRoller([7]);
+        const dr = makeDiceRoller([6]);
         const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(7);
-        expect(result.failed).toBe(true); // 7 <= 7
+        expect(result.target).toBe(6);
+        expect(result.failed).toBe(true); // 6 <= 6
       });
 
-      it('target = 9 on fourth turn (3 + 2*(4-1) = 9)', () => {
+      it('target = 10 on fourth turn (lookup[2,4,6,10])', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
         unit.mascTurnsActive = 4;
-        const dr = makeDiceRoller([8]);
+        const dr = makeDiceRoller([11]);
         const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(9);
-        expect(result.failed).toBe(true);
+        expect(result.target).toBe(10);
+        expect(result.failed).toBe(false); // 11 > 10, no fail
       });
 
-      it('target = 11 on fifth turn (3 + 2*(5-1) = 11)', () => {
+      it('auto-fail on fifth turn (turnsActive >= 5)', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
         unit.mascTurnsActive = 5;
         const dr = makeDiceRoller([12]);
         const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(11);
-        expect(result.failed).toBe(false);
+        expect(result.target).toBe("auto-fail (turn 5+)");
+        expect(result.failed).toBe(true);
       });
     });
 

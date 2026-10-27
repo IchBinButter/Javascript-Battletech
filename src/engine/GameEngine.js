@@ -132,6 +132,8 @@ export class GameEngine {
         unit.position.facing = validation.finalFacing;
       }
       unit.currentMP = Math.max(0, this.movementCalc.getMaxMP(unit, movementType) - validation.totalCost);
+      unit.hexesMoved = path.length - 1;
+      unit.hexesMoved = path.length - 1;
 
       switch (movementType) {
         case 'walk': unit._movementModifier = 1; break;
@@ -152,7 +154,16 @@ export class GameEngine {
       if (psrTriggers.length > 0) {
         const psrResult = this.psrCalc.makePSR(unit, this.diceRoller, psrTriggers);
         if (!psrResult.passed) {
-          this.psrCalc.resolveFall(unit, unit.position.facing, this.diceRoller);
+          let levelsFallen = 1;
+          if (path.length > 1) {
+            const startHex = state.map.hexes.get(path[0]);
+            const endHex = state.map.hexes.get(path[path.length - 1]);
+            if (startHex && endHex) {
+              const totalDrop = startHex.level - endHex.level;
+              if (totalDrop > 0) levelsFallen = totalDrop;
+            }
+          }
+          this.psrCalc.resolveFall(unit, unit.position.facing, this.diceRoller, levelsFallen);
           unit.prone = true;
         }
       }
@@ -273,7 +284,7 @@ export class GameEngine {
 
       if (result.type === 'dfa' && result.attackerDamage > 0) {
         this.damageResolver.applyDamage(attacker, 'leftLeg', result.attackerDamage, false, this.diceRoller);
-        this.damageResolver.applyDamage(attacker, 'rightLeg', Math.ceil(result.attackerDamage / 2), false, this.diceRoller);
+        this.damageResolver.applyDamage(attacker, 'rightLeg', result.attackerDamage, false, this.diceRoller);
         if (result.attackerProne) {
           attacker.prone = true;
         }

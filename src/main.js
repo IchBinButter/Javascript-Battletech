@@ -26,6 +26,12 @@ const canvas = document.getElementById('map-canvas');
 const app = document.getElementById('app');
 const startMenuOverlay = document.getElementById('start-menu-overlay');
 
+
+/** Reference to the resize handler so it can be removed for cleanup. */
+let _resizeHandler = null;
+/** Reference to the keydown handler so it can be removed for cleanup. */
+let _keydownHandler = null;
+
 function resizeCanvas() {
   const container = document.getElementById('map-container');
   canvas.width = container.clientWidth;
@@ -33,6 +39,19 @@ function resizeCanvas() {
   if (mapRenderer) {
     mapRenderer.canvas = canvas;
     mapRenderer.ctx = canvas.getContext('2d');
+  }
+}
+
+/** Clean up state from a previous game before starting a new one. */
+function teardownGame() {
+  if (gameEngine) {
+    gameEngine.eventBus.removeAllListeners();
+  }
+  gameEngine = null;
+  mapRenderer = null;
+  if (ui) {
+    try { ui.destroy(); } catch (_) { /* ignore */ }
+    ui = null;
   }
 }
 
@@ -53,7 +72,10 @@ function hideGame() {
 }
 
 // ---- Initialize Game with Selected Forces ----
-function startGame(forceBuilder) {
+async function startGame(forceBuilder) {
+  // Clean up any previous game to prevent listener leaks and stale references
+  teardownGame();
+
   const players = forceBuilder.getPlayers();
   const selectedMapId = forceBuilder.selectedMapId;
 
@@ -62,11 +84,6 @@ function startGame(forceBuilder) {
   if (selectedMapId && mapsData) {
     const mapDef = mapsData.maps.find(m => m.id === selectedMapId);
     if (mapDef) {
-      hexGrid = new HexGrid(mapDef.width, mapDef.height);
-      for (const [key, data] of Object.entries(mapDef.hexes)) {
-        hexGrid.setHex(key, new (Object.getPrototypeOf(hexGrid).constructor === Function ? Object : Object).constructor(key, data));
-      }
-      // Use Hex class for proper hex objects
       const { Hex } = await import('./models/Hex.js');
       hexGrid = new HexGrid(mapDef.width, mapDef.height);
       for (const [key, data] of Object.entries(mapDef.hexes)) {
@@ -88,6 +105,7 @@ function startGame(forceBuilder) {
   gameState.map = { width: hexGrid.width, height: hexGrid.height, hexes: hexGrid.hexes };
 
   // Create units from force builder selections
+  // Reuse Unit instances directly instead of double-wrapping them in new Unit()
   let unitIndex = 0;
   for (let playerIdx = 0; playerIdx < 2; playerIdx++) {
     const player = players[playerIdx];
@@ -95,9 +113,8 @@ function startGame(forceBuilder) {
     const units = player.units || [];
 
     for (let i = 0; i < units.length; i++) {
-      const mechDef = units[i];
-      const unitId = `unit-${unitIndex++}`;
-      const unit = new Unit(mechDef, playerIdx, unitId);
+      const unit = units[i]; // already a Unit instance from ForceBuilder
+      unit.id = `unit-${unitIndex++}`;
 
       // Place units in a row at their home edge
       const col = 4 + (i * 3);
@@ -199,8 +216,11 @@ function showForceBuilder() {
     mechsData: mechsData,
     mapsData: mapsData,
     container: builderContainer,
-    onStartGame: (players, selectedMapId) => {
-      forceBuilder.selectedMapId = selectedMapId;
+    onStartGame: (data) => {
+      if (data.error) {
+        alert(data.error);
+        return;
+      }
       builderContainer.remove();
       startGame(forceBuilder);
     },
@@ -214,12 +234,14 @@ function showForceBuilder() {
 // ---- Main Initialization ----
 async function init() {
   resizeCanvas();
-  window.addEventListener('resize', () => {
+  // Store handler references for potential future cleanup
+  _resizeHandler = () => {
     resizeCanvas();
     if (gameEngine && mapRenderer) {
       mapRenderer.render(gameEngine.stateManager.getState());
     }
-  });
+  };
+  window.addEventListener('resize', _resizeHandler);
 
   // Load all data
   try {
@@ -360,8 +382,8 @@ canvas.addEventListener('wheel', (event) => {
   }
 });
 
-// Keyboard shortcuts
-document.addEventListener('keydown', (event) => {
+// Keyboard shortcuts - stored as a named handler for cleanup
+_keydownHandler = (event) => {
   if (!gameEngine) return;
   const state = gameEngine.stateManager.getState();
 
@@ -392,7 +414,8 @@ document.addEventListener('keydown', (event) => {
     default: return;
   }
   mapRenderer.render(state);
-});
+};
+document.addEventListener('keydown', _keydownHandler);
 
 function updateUI() {
   if (!gameEngine) return;

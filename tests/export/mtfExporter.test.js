@@ -311,7 +311,7 @@ describe("mechDefToMTF", () => {
   describe("weapons list output", () => {
     it("counts weapons correctly", () => {
       const mtf = mechDefToMTF(getMechDef("atlas-as7d"));
-      expect(mtf).toContain("Weapons:9");
+      expect(mtf).toContain("Weapons:7");
     });
 
     it("outputs weapon names and location abbreviations", () => {

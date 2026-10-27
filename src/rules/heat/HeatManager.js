@@ -22,15 +22,19 @@ export class HeatManager {
 
     // Movement heat
     switch (movementType) {
+      case 'walk':
+        // Walking generates 1 heat per BMM
+        heat += 1;
+        break;
       case 'run':
         heat += 2; // Running generates 2 heat
         break;
       case 'jump':
-        // Jumping generates 3 heat per hex jumped, minimum 3
-        heat += Math.max(3, jumpHexes * 3);
+        // Jumping generates 1 heat per hex jumped, minimum 3
+        heat += Math.max(3, jumpHexes);
         break;
       default:
-        // Walk or stationary: 0 heat from movement
+        // Stationary: 0 heat from movement
         break;
     }
 
@@ -85,65 +89,39 @@ export class HeatManager {
 
     let mpReduction = 0;
 
-    if (unit.heat <= 13) {
-      // No effects
-    } else if (unit.heat === 14) {
+    if (unit.heat < 5) {
+      // 0-4: No effect
+    } else if (unit.heat < 10) {
+      // 5-9: +1 TN, -1 Walk MP
       effects.push('+1 TN to weapons fire');
-    } else if (unit.heat === 15) {
-      effects.push('+2 TN to weapons fire');
-    } else if (unit.heat === 16) {
-      effects.push('+3 TN to weapons fire');
-    } else if (unit.heat === 17) {
-      effects.push('+4 TN to weapons fire');
-    } else if (unit.heat === 18) {
-      effects.push('+5 TN to weapons fire');
       effects.push('-1 Walk MP');
       mpReduction = 1;
-    } else if (unit.heat === 19) {
-      effects.push('+6 TN to weapons fire');
+    } else if (unit.heat < 15) {
+      // 10-14: +2 TN, -2 Walk MP
+      effects.push('+2 TN to weapons fire');
       effects.push('-2 Walk MP');
       mpReduction = 2;
-      ammoExplosionCheck = true;
-      ammoTarget = 4;
-    } else if (unit.heat === 20) {
-      effects.push('+7 TN to weapons fire');
+    } else if (unit.heat < 20) {
+      // 15-19: +3 TN, -3 Walk MP
+      effects.push('+3 TN to weapons fire');
+      effects.push('-3 Walk MP');
+      mpReduction = 3;
+    } else if (unit.heat < 24) {
+      // 20-23: +4 TN, -3 Walk MP, shutdown 4+ avoid
+      effects.push('+4 TN to weapons fire');
+      effects.push('-3 Walk MP');
+      mpReduction = 3;
+      shutdownCheck = true;
+      shutdownTarget = 4;
+    } else {
+      // 24+: +4 TN, -3 Walk MP, shutdown 4+ avoid, ammo explosion 8+ check
+      effects.push('+4 TN to weapons fire');
       effects.push('-3 Walk MP');
       mpReduction = 3;
       shutdownCheck = true;
       shutdownTarget = 4;
       ammoExplosionCheck = true;
-      ammoTarget = 6;
-    } else if (unit.heat === 21) {
-      effects.push('+8 TN to weapons fire');
-      effects.push('-4 Walk MP');
-      mpReduction = 4;
-      shutdownCheck = true;
-      shutdownTarget = 6;
-      ammoExplosionCheck = true;
       ammoTarget = 8;
-    } else if (unit.heat === 22) {
-      effects.push('+9 TN to weapons fire');
-      effects.push('-5 Walk MP');
-      mpReduction = 5;
-      shutdownCheck = true;
-      shutdownTarget = 8;
-      ammoExplosionCheck = true;
-      ammoTarget = 10;
-    } else if (unit.heat === 23) {
-      effects.push('+10 TN to weapons fire');
-      effects.push('-6 Walk MP');
-      mpReduction = 6;
-      shutdownCheck = true;
-      shutdownTarget = 10;
-      ammoExplosionCheck = true;
-      ammoTarget = 12;
-    } else {
-      // Heat 24+: auto shutdown, auto ammo
-      shutdownCheck = true;
-      shutdownTarget = 'auto';
-      ammoExplosionCheck = true;
-      ammoTarget = 'auto';
-      mpReduction = 999;
     }
 
     // TSM bonus: +2 walk MP at 9+ heat
@@ -191,30 +169,17 @@ export class HeatManager {
       if (heatEffects.shutdownCheck) {
         const shutdownResult = this.checkShutdown(unit, diceRoller, heatEffects.shutdownTarget);
         if (shutdownResult.shutdown) {
-          if (shutdownResult.target === 'auto') {
-            heatEffects.effects.push('Unit AUTO SHUTDOWN');
-          } else {
-            heatEffects.effects.push(`Unit SHUTDOWN (rolled ${shutdownResult.roll} vs ${shutdownResult.target}+)`);
-          }
+          heatEffects.effects.push(`Unit SHUTDOWN (rolled ${shutdownResult.roll} vs ${shutdownResult.target}+)`);
         }
       }
 
       if (heatEffects.ammoExplosionCheck) {
-        if (heatEffects.ammoTarget === 'auto') {
+        const ammoRoll = diceRoller.roll2d6();
+        if (ammoRoll >= heatEffects.ammoTarget) {
           for (const [binName, ammo] of Object.entries(unit.equipment.ammo)) {
             if (ammo.shots > 0) {
-              heatEffects.effects.push(`AMMO EXPLOSION in ${binName}! (auto)`);
+              heatEffects.effects.push(`AMMO EXPLOSION in ${binName}! (rolled ${ammoRoll} vs ${heatEffects.ammoTarget}+)`);
               ammo.shots = 0;
-            }
-          }
-        } else {
-          const ammoRoll = diceRoller.roll2d6();
-          if (ammoRoll >= heatEffects.ammoTarget) {
-            for (const [binName, ammo] of Object.entries(unit.equipment.ammo)) {
-              if (ammo.shots > 0) {
-                heatEffects.effects.push(`AMMO EXPLOSION in ${binName}! (rolled ${ammoRoll} vs ${heatEffects.ammoTarget}+)`);
-                ammo.shots = 0;
-              }
             }
           }
         }

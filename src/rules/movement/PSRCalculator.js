@@ -53,9 +53,6 @@ export class PSRCalculator {
         triggers.push({ trigger: 'Standing Up', baseModifier: 0 });
       }
 
-      if ((movement.type === 'run' || movement.type === 'jump') && unit.heat >= 15) {
-        triggers.push({ trigger: 'Overheating', baseModifier: 0 });
-      }
     }
 
     if (unit._damageThisPhase >= 20) {

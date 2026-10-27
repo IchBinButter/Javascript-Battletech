@@ -50,15 +50,10 @@ export class AttackResolver {
     // Compute distance early for prone and range modifiers
     const distance = hexDistance(attacker.position.hexKey, target.position.hexKey);
 
-    // T - Target prone (adjacent = -2, non-adjacent = +1)
+    // T - Target prone (flat -4, prone = immobile)
     if (target.prone) {
-      if (distance === 1) {
-        tn -= 2;
-        mods.push(`Target prone (adjacent): -2`);
-      } else {
-        tn += 1;
-        mods.push(`Target prone: +1`);
-      }
+      tn -= 4;
+      mods.push(`Target prone: -4`);
     } else if (target.immobile) {
       tn -= 4;
       mods.push(`Target immobile: -4`);
@@ -113,8 +108,8 @@ export class AttackResolver {
     }
 
     // O - Minimum range
-    if (distance < weaponDef.minRange) {
-      const minRangeMod = weaponDef.minRange - distance;
+    if (distance <= weaponDef.minRange) {
+      const minRangeMod = weaponDef.minRange - distance + 1;
       tn += minRangeMod;
       mods.push(`Min range: +${minRangeMod}`);
     }
@@ -134,7 +129,7 @@ export class AttackResolver {
       rangeMod,
       distance,
       losResult,
-      minimumRangeMod: distance < weaponDef.minRange ? weaponDef.minRange - distance : 0
+      minimumRangeMod: distance <= weaponDef.minRange ? weaponDef.minRange - distance + 1 : 0
     };
   }
 
@@ -288,22 +283,30 @@ export class AttackResolver {
   }
 
   /**
+   * Standard TMM from hex-count ladder (0-2→0, 3-4→1, 5-6→2, 7-9→3, 10-17→4, 18-24→5, 25+→6).
+   */
+  _computeStandardTmm(hexesMoved) {
+    if (hexesMoved <= 2) return 0;
+    if (hexesMoved <= 4) return 1;
+    if (hexesMoved <= 6) return 2;
+    if (hexesMoved <= 9) return 3;
+    if (hexesMoved <= 17) return 4;
+    if (hexesMoved <= 24) return 5;
+    return 6;
+  }
+
+  /**
    * Compute target movement modifier from hexes moved.
    * Falls back to unit.getTargetMovementModifier() if hexesMoved not set.
    */
   _getTargetMovementModifier(target) {
     if (target.hexesMoved !== undefined) {
       const hm = target.hexesMoved;
+      const tmm = this._computeStandardTmm(hm);
       if (target.movementMode === 'jump') {
-        return Math.max(1, hm);
+        return Math.max(1, tmm + 1);
       }
-      if (hm <= 2) return 0;
-      if (hm <= 4) return 1;
-      if (hm <= 6) return 2;
-      if (hm <= 9) return 3;
-      if (hm <= 17) return 4;
-      if (hm <= 24) return 5;
-      return 6;
+      return tmm;
     }
     return target.getTargetMovementModifier ? target.getTargetMovementModifier() : 0;
   }

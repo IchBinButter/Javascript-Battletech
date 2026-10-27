@@ -28,24 +28,24 @@ function enterHeatPhaseAndResolve(engine, diceRoller) {
 }
 
 // =========================================================================
-// HEAT THRESHOLDS 14-24+
+// HEAT SCALE - SIMPLIFIED (no auto targets)
 // =========================================================================
 
 describe('Heat thresholds 14-24+ (integration)', () => {
   it.each([
-    [14, 3, 0],
-    [15, 3, 0],
-    [16, 3, 0],
-    [17, 3, 0],
-    [18, 2, 1],
-    [19, 1, 2],
-    [20, 0, 3],
-    [21, 0, 4],
-    [22, 0, 5],
-    [23, 0, 6],
-    [24, 0, 999],
-    [30, 0, 999],
-  ])('heat %i: expectedMP=%i after heat phase (0 sinks)', (heat, expectedMP, _mpLoss) => {
+    [0,  3],
+    [4,  3],
+    [5,  2],
+    [9,  2],
+    [10, 1],
+    [14, 1],
+    [15, 0],
+    [19, 0],
+    [20, 0],
+    [23, 0],
+    [24, 0],
+    [30, 0],
+  ])('heat %i: expectedMP=%i after heat phase (0 sinks)', (heat, expectedMP) => {
     const { engine, mech } = setupHeatTest(heat, 'atlas-as7d', '7,7', 0);
 
     enterHeatPhaseAndResolve(engine, makeDiceRoller(7));

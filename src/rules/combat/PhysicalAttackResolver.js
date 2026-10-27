@@ -139,8 +139,8 @@ export class PhysicalAttackResolver {
 
   /**
    * Resolve a Death From Above (DFA) attack.
-   * TN = piloting + attacker move mod + target move mod.
-   * On hit: target takes damage, attacker takes floor(tonnage/5).
+   * TN = piloting + attacker move mod + target move mod + 4 inherent.
+   * On hit: target takes floor(tonnage/10) + floor(tonnage/5), attacker takes floor(tonnage/10).
    * ALL damage uses the punch location table.
    */
   resolveDFA(attacker, target, diceRoller) {
@@ -160,12 +160,12 @@ export class PhysicalAttackResolver {
     let locations = [];
 
     if (hit) {
-      targetDamage = Math.floor(attacker.tonnage / 10) * 3;
-      attackerDamage = Math.floor(attacker.tonnage / 5);
+      targetDamage = Math.floor(attacker.tonnage / 10) + Math.floor(attacker.tonnage / 5);
+      attackerDamage = Math.floor(attacker.tonnage / 10);
       const locRoll = diceRoller.roll2d6();
       locations = [{ location: this.punchLocation(locRoll), damage: targetDamage }];
     } else {
-      attackerDamage = Math.floor(attacker.tonnage / 5);
+      attackerDamage = Math.floor(attacker.tonnage / 10);
     }
 
     return {
@@ -231,7 +231,7 @@ export class PhysicalAttackResolver {
       case 'charge':
         break;
       case 'dfa':
-        // DFA uses piloting + attacker move mod + target move mod (no flat +4)
+        tn += 4; // inherent DFA difficulty
         break;
       case 'push':
         break;

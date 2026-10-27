@@ -36,6 +36,8 @@ const SECTION_HEADERS = [
   'Right Leg:'
 ];
 
+const LOWER_SECTION_HEADERS = SECTION_HEADERS.map(h => h.toLowerCase());
+
 function normalizeKey(key) {
   return key.trim().toLowerCase();
 }
@@ -55,7 +57,7 @@ function parseHeaderSection(lines, startIdx) {
       continue;
     }
 
-    if (SECTION_HEADERS.some(h => line.toLowerCase().startsWith(h.toLowerCase()))) {
+    if (LOWER_SECTION_HEADERS.some(h => line.toLowerCase().startsWith(h))) {
       break;
     }
 
@@ -98,6 +100,8 @@ function parseArmorLines(lines, armorSectionStart) {
       } else {
         armor[location].front = value;
       }
+    } else {
+      console.warn(`mtfParser: Unknown armor abbreviation "${abbrev}"`);
     }
     i++;
   }
@@ -117,14 +121,16 @@ function parseWeaponsList(lines, startIdx) {
   const weaponCount = parseInt(weaponsHeader[1], 10);
   i++;
 
-  for (let w = 0; w < weaponCount && i < lines.length; w++) {
+  let parsed = 0;
+  while (parsed < weaponCount && i < lines.length) {
     const line = lines[i].trim();
+
     if (line === '') {
       i++;
-      w--;
       continue;
     }
-    if (SECTION_HEADERS.some(h => line.toLowerCase().startsWith(h.toLowerCase()))) {
+
+    if (LOWER_SECTION_HEADERS.some(h => line.toLowerCase().startsWith(h))) {
       break;
     }
 
@@ -136,6 +142,7 @@ function parseWeaponsList(lines, startIdx) {
 
     weapons.push({ name, location, rear });
     i++;
+    parsed++;
   }
 
   return { weapons, nextIdx: i };
@@ -183,8 +190,8 @@ function parseCriticalSections(lines, startIdx) {
       const slotLine = lines[i].trim();
 
       if (slotLine === '') {
-        if (i + 1 < lines.length && SECTION_HEADERS.some(h =>
-          lines[i + 1].trim().toLowerCase().startsWith(h.toLowerCase()))) {
+        if (i + 1 < lines.length && LOWER_SECTION_HEADERS.some(h =>
+          lines[i + 1].trim().toLowerCase().startsWith(h))) {
           i++;
           break;
         }
@@ -192,8 +199,8 @@ function parseCriticalSections(lines, startIdx) {
         continue;
       }
 
-      if (SECTION_HEADERS.some(h =>
-        slotLine.toLowerCase().startsWith(h.toLowerCase()))) {
+      if (LOWER_SECTION_HEADERS.some(h =>
+        slotLine.toLowerCase().startsWith(h))) {
         break;
       }
 
@@ -204,8 +211,10 @@ function parseCriticalSections(lines, startIdx) {
         break;
       }
 
-      const slotNum = criticalSlots[location].length + 1;
-      const item = slotLine === '-Empty-' || slotLine === 'Empty' ? 'empty' : slotLine;
+      const slotMatch = slotLine.match(/^(\d+)[:.\s]+/);
+      const slotNum = slotMatch ? parseInt(slotMatch[1], 10) : criticalSlots[location].length + 1;
+      const rawItem = slotMatch ? slotLine.slice(slotMatch[0].length) : slotLine;
+      const item = rawItem === '-Empty-' || rawItem === 'Empty' ? 'empty' : rawItem;
       criticalSlots[location].push({ slot: slotNum, item, status: 'ok' });
       i++;
     }
@@ -215,17 +224,6 @@ function parseCriticalSections(lines, startIdx) {
 }
 
 function parseArmorSection(lines, startIdx) {
-  const armor = {
-    head: { front: 0, rear: 0 },
-    centerTorso: { front: 0, rear: 0 },
-    leftTorso: { front: 0, rear: 0 },
-    rightTorso: { front: 0, rear: 0 },
-    leftArm: { front: 0, rear: 0 },
-    rightArm: { front: 0, rear: 0 },
-    leftLeg: { front: 0, rear: 0 },
-    rightLeg: { front: 0, rear: 0 }
-  };
-
   let i = startIdx;
   const armorTypeLine = lines[i].trim();
   const armorTypeMatch = armorTypeLine.match(/^Armor:(.+)/i);
@@ -247,9 +245,8 @@ function findSectionStart(lines, regex) {
 
 export function parseMTF(text) {
   const lines = text.split(/\r?\n/);
-  const cleanLines = lines.map(l => l.replace(/\r$/, ''));
 
-  const { header, nextIdx: afterHeader } = parseHeaderSection(cleanLines, 0);
+  const { header, nextIdx: afterHeader } = parseHeaderSection(lines, 0);
 
   const config = header['config'] || 'Biped';
   const chassis = header['chassis'] || '';
@@ -268,12 +265,12 @@ export function parseMTF(text) {
   const hsMatch = heatSinkStr.match(/(\d+)\s*(.*)/);
   const heatSinkCount = hsMatch ? parseInt(hsMatch[1], 10) : 10;
   const heatSinkTypeRaw = hsMatch ? hsMatch[2].trim() : 'Single';
-  const heatSinkType = heatSinkTypeRaw.toLowerCase() === 'double' ? 'double' : 'single';
+  const heatSinkType = heatSinkTypeRaw.toLowerCase().includes('double') ? 'double' : 'single';
 
-  const armorStartIdx = findSectionStart(cleanLines, /^HD\s+Armor:/i);
+  const armorStartIdx = findSectionStart(lines, /^HD\s+Armor:/i);
   let armorResult;
   if (armorStartIdx >= 0) {
-    armorResult = parseArmorSection(cleanLines, armorStartIdx);
+    armorResult = parseArmorSection(lines, armorStartIdx);
   } else {
     armorResult = {
       armor: {
@@ -290,18 +287,18 @@ export function parseMTF(text) {
     };
   }
 
-  const weaponsStartIdx = findSectionStart(cleanLines, /^Weapons:/i);
+  const weaponsStartIdx = findSectionStart(lines, /^Weapons:/i);
   let weaponsResult;
   if (weaponsStartIdx >= 0) {
-    weaponsResult = parseWeaponsList(cleanLines, weaponsStartIdx);
+    weaponsResult = parseWeaponsList(lines, weaponsStartIdx);
   } else {
     weaponsResult = { weapons: [], nextIdx: 0 };
   }
 
-  const critStartIdx = findSectionStart(cleanLines, /^(Head|Center Torso|Left Torso|Right Torso|Left Arm|Right Arm|Left Leg|Right Leg):/i);
+  const critStartIdx = findSectionStart(lines, /^(Head|Center Torso|Left Torso|Right Torso|Left Arm|Right Arm|Left Leg|Right Leg):/i);
   let criticalSlots;
   if (critStartIdx >= 0) {
-    criticalSlots = parseCriticalSections(cleanLines, critStartIdx);
+    criticalSlots = parseCriticalSections(lines, critStartIdx);
   } else {
     criticalSlots = {};
   }
@@ -328,6 +325,7 @@ export function parseMTF(text) {
 
 function mapEngineType(typeStr) {
   const lower = typeStr.toLowerCase().trim();
+  if (lower.includes('xxl')) return 'xxl';
   if (lower.includes('xl') || lower.includes('extra-light')) return 'xl';
   if (lower.includes('light')) return 'light';
   if (lower.includes('compact')) return 'compact';
@@ -336,6 +334,7 @@ function mapEngineType(typeStr) {
 
 function mapGyroType(typeStr) {
   const lower = typeStr.toLowerCase().trim();
+  if (lower.includes('xxl')) return 'xxl';
   if (lower.includes('xl') || lower.includes('extra-light')) return 'xl';
   if (lower.includes('compact')) return 'compact';
   if (lower.includes('heavy duty')) return 'heavy_duty';

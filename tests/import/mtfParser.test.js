@@ -425,7 +425,7 @@ describe('unitConverter', () => {
       expect(mechDef.equipment.ammo.srm6_ammo.shots).toBe(30);
 
       expect(mechDef.equipment.ammo.lrm20_ammo).toBeDefined();
-      expect(mechDef.equipment.ammo.lrm20_ammo.shots).toBe(40);
+      expect(mechDef.equipment.ammo.lrm20_ammo.shots).toBe(12);
     });
 
     it('includes engine and gyro in definition', () => {
@@ -443,7 +443,7 @@ describe('unitConverter', () => {
       const parsed = parseMTF(atlasMTF);
       const mechDef = convertToMechDef(parsed);
 
-      expect(mechDef.heatSinks.count).toBeGreaterThan(20);
+      expect(mechDef.heatSinks.count).toBe(20);
       expect(mechDef.heatSinks.type).toBe('single');
       expect(mechDef.heatSinks.damaged).toBe(0);
     });

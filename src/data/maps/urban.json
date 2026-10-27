@@ -134,11 +134,11 @@
       "level": 0
     },
     "2,2": {
-      "terrain": "clear",
+      "terrain": "light_building",
       "level": 0
     },
     "2,3": {
-      "terrain": "clear",
+      "terrain": "light_building",
       "level": 0
     },
     "2,4": {
@@ -194,11 +194,11 @@
       "level": 0
     },
     "3,2": {
-      "terrain": "clear",
+      "terrain": "light_building",
       "level": 0
     },
     "3,3": {
-      "terrain": "clear",
+      "terrain": "light_building",
       "level": 0
     },
     "3,4": {
@@ -374,11 +374,11 @@
       "level": 0
     },
     "6,2": {
-      "terrain": "clear",
+      "terrain": "medium_building",
       "level": 0
     },
     "6,3": {
-      "terrain": "clear",
+      "terrain": "medium_building",
       "level": 0
     },
     "6,4": {
@@ -434,11 +434,11 @@
       "level": 0
     },
     "7,2": {
-      "terrain": "clear",
+      "terrain": "medium_building",
       "level": 0
     },
     "7,3": {
-      "terrain": "clear",
+      "terrain": "medium_building",
       "level": 0
     },
     "7,4": {
@@ -614,11 +614,11 @@
       "level": 0
     },
     "10,2": {
-      "terrain": "clear",
+      "terrain": "heavy_building",
       "level": 0
     },
     "10,3": {
-      "terrain": "clear",
+      "terrain": "heavy_building",
       "level": 0
     },
     "10,4": {
@@ -674,11 +674,11 @@
       "level": 0
     },
     "11,2": {
-      "terrain": "clear",
+      "terrain": "heavy_building",
       "level": 0
     },
     "11,3": {
-      "terrain": "clear",
+      "terrain": "heavy_building",
       "level": 0
     },
     "11,4": {

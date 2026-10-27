@@ -82,22 +82,22 @@ describe('PhysicalAttackResolver - DFA', () => {
   const resolver = new PhysicalAttackResolver();
   const dice = makeDiceRoller(9); // always hits with 9 vs piloting 5
 
-  it('TN = piloting + attacker move mod + target move mod (no flat +4)', () => {
+  it('TN = piloting + attacker move mod + target move mod + 4 inherent', () => {
     const attacker = makeUnit({ pilot: { piloting: 5, gunnery: 4, hits: 0, conscious: true }, _movementModifier: 2 });
     const target = makeUnit({ _targetMovementModifier: 1 });
     const tn = resolver.calculatePhysicalTN(attacker, target, 'dfa');
-    // 5 (piloting) + 2 (attacker mod) + 1 (target mod) = 8, no flat +4
-    expect(tn).toBe(8);
+    // 5 (piloting) + 2 (attacker mod) + 1 (target mod) + 4 (inherent) = 12
+    expect(tn).toBe(12);
   });
 
-  it('DFA TN does not add flat +4 modifier', () => {
+  it('DFA TN adds flat +4 inherent difficulty modifier', () => {
     const attacker = makeUnit({ pilot: { piloting: 5, gunnery: 4, hits: 0, conscious: true } });
     const target = makeUnit();
     const tn = resolver.calculatePhysicalTN(attacker, target, 'dfa');
-    expect(tn).toBe(5);
+    expect(tn).toBe(9);
   });
 
-  it('attacker takes floor(tonnage/5) self-damage on hit', () => {
+  it('attacker takes floor(tonnage/10) self-damage on hit', () => {
     const attacker = makeUnit({
       tonnage: 50,
       pilot: { piloting: 5, gunnery: 4, hits: 0, conscious: true },
@@ -106,10 +106,10 @@ describe('PhysicalAttackResolver - DFA', () => {
     const target = makeUnit();
     const result = resolver.resolveDFA(attacker, target, dice);
     expect(result.hit).toBe(true);
-    expect(result.attackerDamage).toBe(10); // floor(50/5) = 10
+    expect(result.attackerDamage).toBe(5); // floor(50/10) = 5
   });
 
-  it('attacker takes floor(tonnage/5) self-damage on miss', () => {
+  it('attacker takes floor(tonnage/10) self-damage on miss', () => {
     const attacker = makeUnit({
       tonnage: 55,
       pilot: { piloting: 5, gunnery: 4, hits: 0, conscious: true },
@@ -119,7 +119,7 @@ describe('PhysicalAttackResolver - DFA', () => {
     const missDice = makeDiceRoller(2);
     const result = resolver.resolveDFA(attacker, target, missDice);
     expect(result.hit).toBe(false);
-    expect(result.attackerDamage).toBe(11); // floor(55/5) = 11
+    expect(result.attackerDamage).toBe(5); // floor(55/10) = 5
   });
 
   it('all DFA damage uses punch table only', () => {

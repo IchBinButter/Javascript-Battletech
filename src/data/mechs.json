@@ -91,8 +91,8 @@
         "rightArm": [
           { "slot": 1, "item": "med_laser", "status": "ok" },
           { "slot": 2, "item": "med_laser", "status": "ok" },
-          { "slot": 3, "item": "med_laser", "status": "ok" },
-          { "slot": 4, "item": "med_laser", "status": "ok" },
+          { "slot": 3, "item": "empty", "status": "ok" },
+          { "slot": 4, "item": "empty", "status": "ok" },
           { "slot": 5, "item": "empty", "status": "ok" },
           { "slot": 6, "item": "empty", "status": "ok" },
           { "slot": 7, "item": "empty", "status": "ok" },
@@ -122,8 +122,6 @@
           { "type": "ac20", "location": "rightTorso", "ammoBin": "ac20_ammo" },
           { "type": "med_laser", "location": "rightArm" },
           { "type": "med_laser", "location": "rightArm" },
-          { "type": "med_laser", "location": "rightArm" },
-          { "type": "med_laser", "location": "rightArm" },
           { "type": "med_laser_rear", "location": "centerTorso" },
           { "type": "med_laser_rear", "location": "centerTorso" },
           { "type": "srm6", "location": "leftTorso", "ammoBin": "srm6_ammo" },
@@ -146,10 +144,10 @@
       "tonnage": 35,
       "movement": { "walk": 7, "run": 11, "jump": 5 },
       "armor": {
-        "head": { "front": 7, "rear": 0 },
-        "centerTorso": { "front": 11, "rear": 6 },
-        "leftTorso": { "front": 8, "rear": 4 },
-        "rightTorso": { "front": 8, "rear": 4 },
+        "head": { "front": 6, "rear": 0 },
+        "centerTorso": { "front": 10, "rear": 4 },
+        "leftTorso": { "front": 6, "rear": 4 },
+        "rightTorso": { "front": 6, "rear": 4 },
         "leftArm": { "front": 6, "rear": 0 },
         "rightArm": { "front": 6, "rear": 0 },
         "leftLeg": { "front": 8, "rear": 0 },
@@ -277,7 +275,7 @@
       "movement": { "walk": 5, "run": 8, "jump": 5 },
       "armor": {
         "head": { "front": 9, "rear": 0 },
-        "centerTorso": { "front": 20, "rear": 8 },
+        "centerTorso": { "front": 20, "rear": 6 },
         "leftTorso": { "front": 16, "rear": 6 },
         "rightTorso": { "front": 16, "rear": 6 },
         "leftArm": { "front": 16, "rear": 0 },
@@ -302,7 +300,7 @@
           { "slot": 3, "item": "cockpit", "status": "ok" },
           { "slot": 4, "item": "sensors", "status": "ok" },
           { "slot": 5, "item": "life_support", "status": "ok" },
-          { "slot": 6, "item": "empty", "status": "ok" }
+          { "slot": 6, "item": "med_laser", "status": "ok" }
         ],
         "centerTorso": [
           { "slot": 1, "item": "engine", "status": "ok" },
@@ -339,8 +337,8 @@
           { "slot": 4, "item": "ac5", "status": "ok" },
           { "slot": 5, "item": "jump_jet", "status": "ok" },
           { "slot": 6, "item": "jump_jet", "status": "ok" },
-          { "slot": 7, "item": "empty", "status": "ok" },
-          { "slot": 8, "item": "empty", "status": "ok" },
+          { "slot": 7, "item": "srm6", "status": "ok" },
+          { "slot": 8, "item": "srm6", "status": "ok" },
           { "slot": 9, "item": "empty", "status": "ok" },
           { "slot": 10, "item": "empty", "status": "ok" },
           { "slot": 11, "item": "empty", "status": "ok" },
@@ -359,8 +357,8 @@
           { "slot": 10, "item": "empty", "status": "ok" }
         ],
         "rightArm": [
-          { "slot": 1, "item": "med_laser", "status": "ok" },
-          { "slot": 2, "item": "srm6", "status": "ok" },
+          { "slot": 1, "item": "empty", "status": "ok" },
+          { "slot": 2, "item": "empty", "status": "ok" },
           { "slot": 3, "item": "empty", "status": "ok" },
           { "slot": 4, "item": "empty", "status": "ok" },
           { "slot": 5, "item": "empty", "status": "ok" },
@@ -390,11 +388,11 @@
       "equipment": {
         "weapons": [
           { "type": "ac5", "location": "rightTorso", "ammoBin": "ac5_ammo" },
-          { "type": "med_laser", "location": "rightArm" },
-          { "type": "srm6", "location": "rightArm", "ammoBin": "srm6_ammo" }
+          { "type": "med_laser", "location": "head" },
+          { "type": "srm6", "location": "rightTorso", "ammoBin": "srm6_ammo" }
         ],
         "ammo": {
-          "ac5_ammo": { "type": "ac5", "shots": 20, "explosive": false },
+          "ac5_ammo": { "type": "ac5", "shots": 20, "explosive": true },
           "srm6_ammo": { "type": "srm6", "shots": 15, "explosive": true }
         },
         "other": {}
@@ -410,13 +408,13 @@
       "movement": { "walk": 4, "run": 6, "jump": 0 },
       "armor": {
         "head": { "front": 9, "rear": 0 },
-        "centerTorso": { "front": 30, "rear": 11 },
+        "centerTorso": { "front": 28, "rear": 11 },
         "leftTorso": { "front": 24, "rear": 8 },
         "rightTorso": { "front": 24, "rear": 8 },
         "leftArm": { "front": 20, "rear": 0 },
         "rightArm": { "front": 20, "rear": 0 },
-        "leftLeg": { "front": 29, "rear": 0 },
-        "rightLeg": { "front": 29, "rear": 0 }
+        "leftLeg": { "front": 28, "rear": 0 },
+        "rightLeg": { "front": 28, "rear": 0 }
       },
       "internalStructure": {
         "head": 3,
@@ -445,7 +443,7 @@
           { "slot": 5, "item": "gyro", "status": "ok" },
           { "slot": 6, "item": "gyro", "status": "ok" },
           { "slot": 7, "item": "gyro", "status": "ok" },
-          { "slot": 8, "item": "empty", "status": "ok" },
+          { "slot": 8, "item": "machinegun_ammo", "status": "ok" },
           { "slot": 9, "item": "empty", "status": "ok" },
           { "slot": 10, "item": "empty", "status": "ok" },
           { "slot": 11, "item": "empty", "status": "ok" },
@@ -497,7 +495,7 @@
           { "slot": 3, "item": "med_laser", "status": "ok" },
           { "slot": 4, "item": "machinegun", "status": "ok" },
           { "slot": 5, "item": "machinegun", "status": "ok" },
-          { "slot": 6, "item": "machinegun_ammo", "status": "ok" },
+          { "slot": 6, "item": "empty", "status": "ok" },
           { "slot": 7, "item": "empty", "status": "ok" },
           { "slot": 8, "item": "empty", "status": "ok" },
           { "slot": 9, "item": "empty", "status": "ok" },
@@ -549,13 +547,13 @@
       "movement": { "walk": 8, "run": 12, "jump": 0 },
       "armor": {
         "head": { "front": 8, "rear": 0 },
-        "centerTorso": { "front": 10, "rear": 4 },
+        "centerTorso": { "front": 12, "rear": 4 },
         "leftTorso": { "front": 4, "rear": 2 },
         "rightTorso": { "front": 4, "rear": 2 },
         "leftArm": { "front": 4, "rear": 0 },
         "rightArm": { "front": 4, "rear": 0 },
-        "leftLeg": { "front": 8, "rear": 0 },
-        "rightLeg": { "front": 8, "rear": 0 }
+        "leftLeg": { "front": 10, "rear": 0 },
+        "rightLeg": { "front": 10, "rear": 0 }
       },
       "internalStructure": {
         "head": 3,
@@ -698,7 +696,7 @@
           { "slot": 3, "item": "cockpit", "status": "ok" },
           { "slot": 4, "item": "sensors", "status": "ok" },
           { "slot": 5, "item": "life_support", "status": "ok" },
-          { "slot": 6, "item": "empty", "status": "ok" }
+          { "slot": 6, "item": "srm2", "status": "ok" }
         ],
         "centerTorso": [
           { "slot": 1, "item": "engine", "status": "ok" },
@@ -756,7 +754,7 @@
         ],
         "rightArm": [
           { "slot": 1, "item": "med_laser", "status": "ok" },
-          { "slot": 2, "item": "srm2", "status": "ok" },
+          { "slot": 2, "item": "empty", "status": "ok" },
           { "slot": 3, "item": "empty", "status": "ok" },
           { "slot": 4, "item": "empty", "status": "ok" },
           { "slot": 5, "item": "empty", "status": "ok" },
@@ -787,11 +785,11 @@
         "weapons": [
           { "type": "ac5", "location": "leftTorso", "ammoBin": "ac5_ammo" },
           { "type": "med_laser", "location": "rightArm" },
-          { "type": "srm2", "location": "rightArm", "ammoBin": "srm2_ammo" },
+          { "type": "srm2", "location": "head", "ammoBin": "srm2_ammo" },
           { "type": "lrm5", "location": "rightTorso", "ammoBin": "lrm5_ammo" }
         ],
         "ammo": {
-          "ac5_ammo": { "type": "ac5", "shots": 20, "explosive": false },
+          "ac5_ammo": { "type": "ac5", "shots": 20, "explosive": true },
           "srm2_ammo": { "type": "srm2", "shots": 50, "explosive": true },
           "lrm5_ammo": { "type": "lrm5", "shots": 24, "explosive": true }
         },
@@ -939,7 +937,7 @@
       "movement": { "walk": 4, "run": 6, "jump": 0 },
       "armor": {
         "head": { "front": 9, "rear": 0 },
-        "centerTorso": { "front": 34, "rear": 10 },
+        "centerTorso": { "front": 33, "rear": 10 },
         "leftTorso": { "front": 24, "rear": 6 },
         "rightTorso": { "front": 24, "rear": 6 },
         "leftArm": { "front": 22, "rear": 0 },
@@ -1196,7 +1194,7 @@
         "ammo": {},
         "other": {}
       },
-      "heatSinks": { "count": 16, "type": "single", "damaged": 0 },
+      "heatSinks": { "count": 18, "type": "single", "damaged": 0 },
       "engine": { "type": "standard", "rating": 300, "hits": 0 },
       "gyro": { "type": "standard", "hits": 0 }
     },
@@ -1347,13 +1345,13 @@
       "movement": { "walk": 3, "run": 5, "jump": 0 },
       "armor": {
         "head": { "front": 9, "rear": 0 },
-        "centerTorso": { "front": 43, "rear": 14 },
-        "leftTorso": { "front": 30, "rear": 10 },
-        "rightTorso": { "front": 30, "rear": 10 },
-        "leftArm": { "front": 30, "rear": 0 },
-        "rightArm": { "front": 30, "rear": 0 },
-        "leftLeg": { "front": 38, "rear": 0 },
-        "rightLeg": { "front": 38, "rear": 0 }
+        "centerTorso": { "front": 30, "rear": 10 },
+        "leftTorso": { "front": 22, "rear": 8 },
+        "rightTorso": { "front": 22, "rear": 8 },
+        "leftArm": { "front": 24, "rear": 0 },
+        "rightArm": { "front": 24, "rear": 0 },
+        "leftLeg": { "front": 32, "rear": 0 },
+        "rightLeg": { "front": 32, "rear": 0 }
       },
       "internalStructure": {
         "head": 3,
@@ -1464,11 +1462,11 @@
           { "type": "small_laser", "location": "head" }
         ],
         "ammo": {
-          "ac5_ammo": { "type": "ac5", "shots": 20, "explosive": false }
+          "ac5_ammo": { "type": "ac5", "shots": 20, "explosive": true }
         },
         "other": {}
       },
-      "heatSinks": { "count": 16, "type": "single", "damaged": 0 },
+      "heatSinks": { "count": 18, "type": "single", "damaged": 0 },
       "engine": { "type": "standard", "rating": 285, "hits": 0 },
       "gyro": { "type": "standard", "hits": 0 }
     },
@@ -1543,8 +1541,8 @@
           { "slot": 6, "item": "ppc", "status": "ok" },
           { "slot": 7, "item": "ppc", "status": "ok" },
           { "slot": 8, "item": "ppc", "status": "ok" },
-          { "slot": 9, "item": "empty", "status": "ok" },
-          { "slot": 10, "item": "empty", "status": "ok" },
+          { "slot": 9, "item": "heat_sink", "status": "ok" },
+          { "slot": 10, "item": "heat_sink", "status": "ok" },
           { "slot": 11, "item": "empty", "status": "ok" },
           { "slot": 12, "item": "empty", "status": "ok" }
         ],

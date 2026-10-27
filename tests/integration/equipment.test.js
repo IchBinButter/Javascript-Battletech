@@ -312,14 +312,14 @@ describe('Equipment: MASC', () => {
     expect(unit.mascTurnsActive).toBe(0);
   });
 
-  it('rollMASC succeeds on high roll (first turn, target 3)', () => {
+  it('rollMASC succeeds on high roll (first turn, target 2)', () => {
     const unit = createMASCUnit(true);
     movCalc.activateMASC(unit);
 
     const result = movCalc.rollMASC(unit, makeDiceRoller(8));
     expect(result.failed).toBe(false);
     expect(result.roll).toBe(8);
-    expect(result.target).toBe(3);
+    expect(result.target).toBe(2);
     expect(unit.mascActive).toBe(true);
   });
 
@@ -332,7 +332,7 @@ describe('Equipment: MASC', () => {
     const result = movCalc.rollMASC(unit, makeDiceRoller(2));
     expect(result.failed).toBe(true);
     expect(result.roll).toBe(2);
-    expect(result.target).toBe(3);
+    expect(result.target).toBe(2);
     expect(unit.mascActive).toBe(false);
     expect(unit.mascTurnsActive).toBe(0);
 
@@ -351,17 +351,17 @@ describe('Equipment: MASC', () => {
     movCalc.activateMASC(unit);
 
     let result = movCalc.rollMASC(unit, makeDiceRoller(8));
-    expect(result.target).toBe(3); // turn 1
+    expect(result.target).toBe(2); // turn 1
 
     unit.mascActive = true;
     unit.mascTurnsActive = 2;
     result = movCalc.rollMASC(unit, makeDiceRoller(8));
-    expect(result.target).toBe(5); // turn 2: 3 + 2
+    expect(result.target).toBe(4); // turn 2
 
     unit.mascActive = true;
     unit.mascTurnsActive = 3;
     result = movCalc.rollMASC(unit, makeDiceRoller(8));
-    expect(result.target).toBe(7); // turn 3: 3 + 4
+    expect(result.target).toBe(6); // turn 3
   });
 
   it('rollMASC returns no-op when MASC is not active', () => {

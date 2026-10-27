@@ -83,9 +83,11 @@ export class MovementCalculator {
 
     if (movementType !== 'jump') {
       const heat = unit.heat || 0;
-      if (heat >= 20) mp -= 3;
-      else if (heat >= 15) mp -= 2;
-      else if (heat >= 10) mp -= 1;
+      if (heat >= 25) mp -= 5;
+      else if (heat >= 20) mp -= 4;
+      else if (heat >= 15) mp -= 3;
+      else if (heat >= 10) mp -= 2;
+      else if (heat >= 5) mp -= 1;
     }
 
     return Math.max(0, mp);
@@ -234,7 +236,8 @@ export class MovementCalculator {
       const terrainCost = this.calculateMPCost(fromHex, toHex, unit, movementType);
       const moveDir = directionBetween(fromKey, toKey);
 
-      totalCost += terrainCost;
+      const facingCost = this.calculateFacingChangeFromDirection(currentFacing, moveDir);
+      totalCost += terrainCost + facingCost;
       currentFacing = moveDir;
 
       if (totalCost > maxMP) {
@@ -287,9 +290,18 @@ export class MovementCalculator {
   rollMASC(unit, diceRoller) {
     if (!unit.mascActive) return { roll: null, failed: false };
 
-    const roll = diceRoller.roll2d6();
+    const MASC_FAILURE_TABLE = [2, 4, 6, 10];
     const turnsActive = unit.mascTurnsActive || 1;
-    const failureTarget = MASC_DATA.failureRollTarget + 2 * (turnsActive - 1);
+
+    if (turnsActive >= 5) {
+      unit.mascActive = false;
+      unit.mascTurnsActive = 0;
+      this._applyMASCLegDamage(unit);
+      return { roll: null, failed: true, target: "auto-fail (turn 5+)" };
+    }
+
+    const roll = diceRoller.roll2d6();
+    const failureTarget = MASC_FAILURE_TABLE[turnsActive - 1];
     const failed = roll <= failureTarget;
 
     if (failed) {

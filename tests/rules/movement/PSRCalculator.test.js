@@ -92,63 +92,6 @@ describe('PSRCalculator', () => {
       expect(gyro).toBeUndefined();
     });
 
-    // ── Overheating ──────────────────────────────────────────────
-    it('overheating triggers when running and heat >= 15', () => {
-      const unit = makeUnit(50, 5, { heat: 15 });
-      const movement = { type: 'run' };
-      const triggers = calc.getPSRTriggers(unit, movement, null);
-      const overheat = triggers.find(t => t.trigger === 'Overheating');
-      expect(overheat).toBeDefined();
-      expect(overheat.baseModifier).toBe(0);
-    });
-
-    it('overheating triggers when running and heat > 15', () => {
-      const unit = makeUnit(50, 5, { heat: 30 });
-      const movement = { type: 'run' };
-      const triggers = calc.getPSRTriggers(unit, movement, null);
-      const overheat = triggers.find(t => t.trigger === 'Overheating');
-      expect(overheat).toBeDefined();
-    });
-
-    it('overheating triggers when jumping and heat >= 15', () => {
-      const unit = makeUnit(50, 5, { heat: 15 });
-      const movement = { type: 'jump' };
-      const triggers = calc.getPSRTriggers(unit, movement, null);
-      const overheat = triggers.find(t => t.trigger === 'Overheating');
-      expect(overheat).toBeDefined();
-    });
-
-    it('overheating does NOT trigger when walking even at heat >= 15', () => {
-      const unit = makeUnit(50, 5, { heat: 20 });
-      const movement = { type: 'walk' };
-      const triggers = calc.getPSRTriggers(unit, movement, null);
-      const overheat = triggers.find(t => t.trigger === 'Overheating');
-      expect(overheat).toBeUndefined();
-    });
-
-    it('overheating does NOT trigger when stationary at heat >= 15', () => {
-      const unit = makeUnit(50, 5, { heat: 16 });
-      const triggers = calc.getPSRTriggers(unit, null, null);
-      const overheat = triggers.find(t => t.trigger === 'Overheating');
-      expect(overheat).toBeUndefined();
-    });
-
-    it('overheating does NOT trigger when running and heat < 15', () => {
-      const unit = makeUnit(50, 5, { heat: 14 });
-      const movement = { type: 'run' };
-      const triggers = calc.getPSRTriggers(unit, movement, null);
-      const overheat = triggers.find(t => t.trigger === 'Overheating');
-      expect(overheat).toBeUndefined();
-    });
-
-    it('overheating does NOT trigger when jumping and heat < 15', () => {
-      const unit = makeUnit(50, 5, { heat: 10 });
-      const movement = { type: 'jump' };
-      const triggers = calc.getPSRTriggers(unit, movement, null);
-      const overheat = triggers.find(t => t.trigger === 'Overheating');
-      expect(overheat).toBeUndefined();
-    });
-
     // ── Physical Attack Received ─────────────────────────────────
     it('detects physical attack received', () => {
       const unit = makeUnit(50, 5, { _physicalAttackReceived: true });
@@ -477,7 +420,6 @@ describe('PSRCalculator', () => {
         gyro: { hits: 1 },
         _damageThisPhase: 25,
         _physicalAttackReceived: true,
-        heat: 20,
         isLocationDestroyed: (loc) => loc === 'leftLeg'
       });
       const movement = { type: 'run', enteredWater: true, waterDepth: 2, enteredHeavyWoods: true };
@@ -486,7 +428,6 @@ describe('PSRCalculator', () => {
       expect(triggerNames).toContain('Gyro Damage');
       expect(triggerNames).toContain('20+ Damage Received');
       expect(triggerNames).toContain('Physical Attack Received');
-      expect(triggerNames).toContain('Overheating');
       expect(triggerNames).toContain('Missing Leg');
       expect(triggerNames).toContain('Entered Water');
       expect(triggerNames).toContain('Heavy Woods');

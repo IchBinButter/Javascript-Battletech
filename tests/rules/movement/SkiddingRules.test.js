@@ -302,17 +302,17 @@ describe('SkiddingRules', () => {
       expect(r2.path).toHaveLength(2);
     });
 
-    it('damage = ceil(tonnage/10) * hexesSkidded (fractional tonnage)', () => {
+    it('damage = floor(tonnage/10) * hexesSkidded (fractional tonnage)', () => {
       const hexes = buildLine(0, 2, dir, 6);
       const gs = makeGameState(hexes);
-      // ceil(51/10)=6, ceil(55/10)=6, ceil(59/10)=6
+      // floor(51/10)=5, floor(55/10)=5, floor(59/10)=5
       const u51 = makeUnit(51, dir, '0,2');
       const u55 = makeUnit(55, dir, '0,2');
       const u59 = makeUnit(59, dir, '0,2');
 
-      expect(rules.resolveSkid(u51, 4, gs).damage).toBe(24); // 6 * 4
-      expect(rules.resolveSkid(u55, 4, gs).damage).toBe(24);
-      expect(rules.resolveSkid(u59, 4, gs).damage).toBe(24);
+      expect(rules.resolveSkid(u51, 4, gs).damage).toBe(20); // 5 * 4
+      expect(rules.resolveSkid(u55, 4, gs).damage).toBe(20);
+      expect(rules.resolveSkid(u59, 4, gs).damage).toBe(20);
     });
 
     it('light mech (20 tons): ceil(2)*n', () => {
@@ -386,7 +386,7 @@ describe('SkiddingRules', () => {
       expect(result.collisions[0].damageToSelf).toBe(10);
     });
 
-    it('fractional tonnage (51t): ceil(5.1)=6 → collision at hex 2 = 12', () => {
+    it('fractional tonnage (51t): floor(5.1)=5 → collision at hex 2 = 12', () => {
       const hexes = buildLine(0, 2, dir, 3);
       hexes['0,4'] = makeHex('0,4', 'clear', 0, { occupiedBy: 'enemy_1' });
       const gs = makeGameState(hexes);
@@ -395,11 +395,11 @@ describe('SkiddingRules', () => {
       const result = rules.resolveSkid(unit, 3, gs);
       // path: 0,3; 0,4(collision) = 2 hexes
       expect(result.path).toHaveLength(2);
-      expect(result.collisions[0].damageToTarget).toBe(12); // 6 * 2
-      expect(result.collisions[0].damageToSelf).toBe(12);
+      expect(result.collisions[0].damageToTarget).toBe(10); // 6 * 2
+      expect(result.collisions[0].damageToSelf).toBe(10);
     });
 
-    it('very heavy unit (95t): ceil(9.5)=10 → collision at hex 5 = 50', () => {
+    it('very heavy unit (95t): floor(9.5)=9 → collision at hex 5 = 50', () => {
       const hexes = buildLine(0, 2, dir, 7);
       hexes['0,7'] = makeHex('0,7', 'clear', 0, { occupiedBy: 'enemy_1' });
       const gs = makeGameState(hexes);
@@ -408,7 +408,7 @@ describe('SkiddingRules', () => {
       const result = rules.resolveSkid(unit, 6, gs);
       // path: 0,3; 0,4; 0,5; 0,6; 0,7(collision) = 5 hexes
       expect(result.path).toHaveLength(5);
-      expect(result.collisions[0].damageToTarget).toBe(50); // 10 * 5
+      expect(result.collisions[0].damageToTarget).toBe(45); // 9 * 5
     });
 
     it('building collision: stops skid, reports type but no damage fields', () => {

@@ -1,34 +1,13 @@
 import { parseMTF } from './mtfParser.js';
+import { getInternalStructure } from '../utils/helpers.js';
 
 const ammoShotsPerTon = {
   ac2: 45, ac5: 20, ac10: 10, ac20: 5,
   srm2: 50, srm4: 25, srm6: 15,
-  lrm5: 24, lrm10: 12, lrm15: 8, lrm20: 20,
+  lrm5: 24, lrm10: 12, lrm15: 8, lrm20: 6,
   machinegun: 200,
   flamer: 20
 };
-
-const explosiveAmmo = new Set([
-  'ac2', 'ac5', 'ac10', 'ac20',
-  'srm2', 'srm4', 'srm6',
-  'lrm5', 'lrm10', 'lrm15', 'lrm20',
-  'machinegun', 'flamer'
-]);
-
-const WEAPON_IDS = new Set([
-  'med_laser', 'med_laser_rear', 'large_laser', 'ppc',
-  'ac2', 'ac5', 'ac10', 'ac20',
-  'srm2', 'srm4', 'srm6',
-  'lrm5', 'lrm10', 'lrm15', 'lrm20',
-  'machinegun', 'flamer'
-]);
-
-const AMMO_IDS = new Set([
-  'ac2_ammo', 'ac5_ammo', 'ac10_ammo', 'ac20_ammo',
-  'srm2_ammo', 'srm4_ammo', 'srm6_ammo',
-  'lrm5_ammo', 'lrm10_ammo', 'lrm15_ammo', 'lrm20_ammo',
-  'machinegun_ammo', 'flamer_ammo'
-]);
 
 const EQUIPMENT_NAME_MAP = {
   'heat sink': 'heat_sink',
@@ -171,6 +150,12 @@ const AMMO_NAME_MAP = {
   'mrm 40 ammo': { id: 'mrm40_ammo', type: 'mrm40' }
 };
 
+const WEAPON_IDS = new Set(Object.values(WEAPON_NAME_MAP));
+
+const AMMO_IDS = new Set(Object.values(AMMO_NAME_MAP).map(v => v.id));
+
+const explosiveAmmo = new Set(Object.values(WEAPON_NAME_MAP));
+
 function mapItemName(rawName) {
   const name = rawName.trim().toLowerCase();
   const ammoMatch = name.match(/^(.+?)\s+ammo$/);
@@ -201,20 +186,6 @@ function getAmmoBaseType(ammoId) {
   return ammoId.replace(/_ammo$/, '');
 }
 
-function getInternalStructure(mass) {
-  const t = mass;
-  return {
-    head: 3,
-    centerTorso: t,
-    leftTorso: Math.ceil(t * 0.21),
-    rightTorso: Math.ceil(t * 0.21),
-    leftArm: Math.ceil(t * 0.17),
-    rightArm: Math.ceil(t * 0.17),
-    leftLeg: Math.ceil(t * 0.21),
-    rightLeg: Math.ceil(t * 0.21)
-  };
-}
-
 export function parseAndConvert(mtfText) {
   const parsed = parseMTF(mtfText);
   return convertToMechDef(parsed);
@@ -235,7 +206,7 @@ export function convertToMechDef(parsed) {
   const criticalSlots = convertCriticalSlots(parsed.criticalSlots);
   const { equipment, heatSinkSlots } = buildEquipment(criticalSlots);
 
-  const heatSinkCount = parsed.heatSinks.count + heatSinkSlots;
+  const heatSinkCount = parsed.heatSinks.count;
 
   return {
     id,

@@ -56,7 +56,7 @@ export class SkiddingRules {
 
       if (nextHex.occupiedBy) {
         const hexesSkidded = path.length;
-        const collisionDamage = Math.ceil(unit.tonnage / 10) * hexesSkidded;
+        const collisionDamage = Math.floor(unit.tonnage / 10) * hexesSkidded;
         collisions.push({
           hex: nextKey,
           unitId: nextHex.occupiedBy,
@@ -87,7 +87,7 @@ export class SkiddingRules {
       }
     }
 
-    const damage = Math.ceil(unit.tonnage / 10) * path.length;
+    const damage = Math.floor(unit.tonnage / 10) * path.length;
 
     return {
       path,

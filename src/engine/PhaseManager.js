@@ -240,9 +240,8 @@ export class PhaseManager {
     // Consciousness checks
     for (const unit of Object.values(state.units)) {
       if (unit.pilot.hits > 0 && unit.pilot.conscious) {
-        const consciousnessLabels = ['invalid', 'target3', 'target5', 'target7', 'target10', 'autoFail'];
-        const consciousnessTargets = [0, 3, 5, 7, 10, null];
-        const hits = Math.min(unit.pilot.hits, 5);
+        const consciousnessTargets = [0, 3, 5, 7, 10, null, null];
+        const hits = Math.min(unit.pilot.hits, 6);
         const target = consciousnessTargets[hits];
 
         if (target === null) {

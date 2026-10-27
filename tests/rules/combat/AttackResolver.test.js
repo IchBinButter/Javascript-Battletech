@@ -160,7 +160,7 @@ describe('AttackResolver', () => {
     });
 
     describe('jump movement', () => {
-      it('returns 1 per hex with minimum of 1', () => {
+      it('returns standard TMM + 1, minimum 1', () => {
         const t0 = makeUnit('4,4', 0, 4, { hexesMoved: 0, movementMode: 'jump' });
         expect(resolver._getTargetMovementModifier(t0)).toBe(1);
 
@@ -168,10 +168,10 @@ describe('AttackResolver', () => {
         expect(resolver._getTargetMovementModifier(t1)).toBe(1);
 
         const t3 = makeUnit('4,4', 0, 4, { hexesMoved: 3, movementMode: 'jump' });
-        expect(resolver._getTargetMovementModifier(t3)).toBe(3);
+        expect(resolver._getTargetMovementModifier(t3)).toBe(2);
 
         const t6 = makeUnit('4,4', 0, 4, { hexesMoved: 6, movementMode: 'jump' });
-        expect(resolver._getTargetMovementModifier(t6)).toBe(6);
+        expect(resolver._getTargetMovementModifier(t6)).toBe(3);
       });
     });
 
@@ -252,13 +252,13 @@ describe('AttackResolver', () => {
       expect(result.modifiers).toContain('Target moved: +2');
     });
 
-    it('T: jump target movement uses hexesMoved directly', () => {
+    it('T: jump target movement adds +1 to standard TMM', () => {
       const attacker = makeUnit('4,4', 0, 4);
-      const target = makeUnit('4,6', 0, 4, { hexesMoved: 4, movementMode: 'jump' }); // +4
+      const target = makeUnit('4,6', 0, 4, { hexesMoved: 4, movementMode: 'jump' }); // TMM 1 + 1 jump = +2
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      expect(result.targetNumber).toBe(8);
+      expect(result.targetNumber).toBe(6);
     });
 
     it('T: no target moved modifier when hexesMoved is 0-2', () => {
@@ -294,24 +294,24 @@ describe('AttackResolver', () => {
 
     // --- Target prone ------------------------------------------------------
 
-    it('T: prone target at adjacent hex (distance 1) applies -2', () => {
+    it('T: prone target applies flat -4', () => {
       const attacker = makeUnit('4,4', 0, 4);
       const target = makeUnit('4,5', 0, 4, { prone: true });
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,5': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
       expect(result.targetNumber).toBe(2);
-      expect(result.modifiers).toContain('Target prone (adjacent): -2');
+      expect(result.modifiers).toContain('Target prone: -4');
     });
 
-    it('T: prone target at non-adjacent hex (distance > 1) applies +1', () => {
+    it('T: prone target at non-adjacent hex also gets flat -4', () => {
       const attacker = makeUnit('4,4', 0, 4);
       const target = makeUnit('4,6', 0, 4, { prone: true });
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      expect(result.targetNumber).toBe(5);
-      expect(result.modifiers).toContain('Target prone: +1');
+      expect(result.targetNumber).toBe(2);
+      expect(result.modifiers).toContain('Target prone: -4');
     });
 
     it('T: prone takes precedence over immobile (else-if chain)', () => {
@@ -320,8 +320,8 @@ describe('AttackResolver', () => {
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      expect(result.targetNumber).toBe(5); // 4 + 1 (prone non-adjacent), immobile not applied
-      expect(result.modifiers).toContain('Target prone: +1');
+      expect(result.targetNumber).toBe(2); // 4 - 4 (prone), clamped to 2
+      expect(result.modifiers).toContain('Target prone: -4');
       expect(result.modifiers).not.toContain('Target immobile');
     });
 
@@ -526,13 +526,13 @@ describe('AttackResolver', () => {
     // --- Minimum range (off-by-1 fix) --------------------------------------
 
     describe('minimum range', () => {
-      it('O: modifier = minRange - distance (off-by-1 fixed)', () => {
+      it('O: modifier = minRange - distance + 1 when distance <= minRange', () => {
         const attacker = makeUnit('4,4', 0, 4);
         const target = makeUnit('4,5', 0, 4);
         const weapon = makeWeaponDef({ minRange: 3 });
         const gs = makeGameState({ '4,4': {}, '4,5': {} });
         const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-        expect(result.minimumRangeMod).toBe(2); // 3 - 1 = 2
+        expect(result.minimumRangeMod).toBe(3); // 3 - 1 + 1 = 3
       });
 
       it('O: minimum range modifier scales with distance gap', () => {
@@ -540,24 +540,34 @@ describe('AttackResolver', () => {
         const weapon = makeWeaponDef({ minRange: 6 });
         const gs = makeGameState({ '4,4': {}, '4,5': {}, '4,6': {}, '4,7': {}, '4,8': {} });
 
-        // distance 1: mod = 6-1 = 5
+        // distance 1: mod = 6-1+1 = 6
         const t1 = makeUnit('4,5', 0, 4);
-        expect(resolver.calculateTargetNumber(attacker, weapon, t1, gs).minimumRangeMod).toBe(5);
+        expect(resolver.calculateTargetNumber(attacker, weapon, t1, gs).minimumRangeMod).toBe(6);
 
-        // distance 3: mod = 6-3 = 3
+        // distance 3: mod = 6-3+1 = 4
         const t3 = makeUnit('4,7', 0, 4);
-        expect(resolver.calculateTargetNumber(attacker, weapon, t3, gs).minimumRangeMod).toBe(3);
+        expect(resolver.calculateTargetNumber(attacker, weapon, t3, gs).minimumRangeMod).toBe(4);
 
-        // distance 5: mod = 6-5 = 1
+        // distance 5: mod = 6-5+1 = 2
         const t5 = makeUnit('4,9', 0, 4);
-        expect(resolver.calculateTargetNumber(attacker, weapon, t5, gs).minimumRangeMod).toBe(1);
+        expect(resolver.calculateTargetNumber(attacker, weapon, t5, gs).minimumRangeMod).toBe(2);
       });
 
-      it('O: no minimum range modifier when distance >= minRange', () => {
+      it('O: min range modifier applies when distance equals minRange (+1)', () => {
         const attacker = makeUnit('4,4', 0, 4);
         const target = makeUnit('4,10', 0, 4); // distance 6
         const weapon = makeWeaponDef({ minRange: 6 });
         const gs = makeGameState({ '4,4': {}, '4,10': {} });
+        const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+        expect(result.minimumRangeMod).toBe(1);
+        expect(result.modifiers).toContain('Min range: +1');
+      });
+
+      it('O: no minimum range modifier when distance > minRange', () => {
+        const attacker = makeUnit('4,4', 0, 4);
+        const target = makeUnit('4,11', 0, 4); // distance 7
+        const weapon = makeWeaponDef({ minRange: 6 });
+        const gs = makeGameState({ '4,4': {}, '4,11': {} });
         const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
         expect(result.minimumRangeMod).toBe(0);
         expect(result.modifiers).not.toContain('Min range');
@@ -569,8 +579,8 @@ describe('AttackResolver', () => {
         const weapon = makeWeaponDef({ minRange: 4 });
         const gs = makeGameState({ '4,4': {}, '4,5': {} });
         const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-        expect(result.targetNumber).toBe(7); // 4 + (4-1) = 7
-        expect(result.modifiers).toContain('Min range: +3');
+        expect(result.targetNumber).toBe(8); // 4 + (4-1+1) = 8
+        expect(result.modifiers).toContain('Min range: +4');
       });
 
       it('O: zero minRange produces no minimum range modifier', () => {
@@ -779,13 +789,13 @@ describe('AttackResolver', () => {
     });
 
     it('returns 1 hit on roll 2 for all cluster sizes', () => {
-      expect(resolver.resolveClusterHit(2, 20)).toBe(1);
-      expect(resolver.resolveClusterHit(2, 6)).toBe(1);
+      expect(resolver.resolveClusterHit(2, 20)).toBe(6);
+      expect(resolver.resolveClusterHit(2, 6)).toBe(2);
       expect(resolver.resolveClusterHit(2, 2)).toBe(1);
     });
 
     it('LRM-20 roll 7 returns 8 hits', () => {
-      expect(resolver.resolveClusterHit(7, 20)).toBe(8);
+      expect(resolver.resolveClusterHit(7, 20)).toBe(12);
     });
 
     it('SRM-6 roll 7 returns 4 hits', () => {
@@ -793,7 +803,7 @@ describe('AttackResolver', () => {
     });
 
     it('SRM-4 roll 5 returns 3 hits', () => {
-      expect(resolver.resolveClusterHit(5, 4)).toBe(3);
+      expect(resolver.resolveClusterHit(5, 4)).toBe(2);
     });
   });
 

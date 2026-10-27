@@ -1,118 +1,481 @@
 {
   "hitLocation": {
     "front": {
-      "2": { "location": "centerTorso", "critical": true },
-      "3": { "location": "rightArm" },
-      "4": { "location": "rightArm" },
-      "5": { "location": "rightLeg" },
-      "6": { "location": "rightTorso" },
-      "7": { "location": "centerTorso" },
-      "8": { "location": "leftTorso" },
-      "9": { "location": "leftLeg" },
-      "10": { "location": "leftArm" },
-      "11": { "location": "leftArm" },
-      "12": { "location": "head" }
+      "2": {
+        "location": "centerTorso",
+        "critical": true
+      },
+      "3": {
+        "location": "rightArm"
+      },
+      "4": {
+        "location": "rightArm"
+      },
+      "5": {
+        "location": "rightLeg"
+      },
+      "6": {
+        "location": "rightTorso"
+      },
+      "7": {
+        "location": "centerTorso"
+      },
+      "8": {
+        "location": "leftTorso"
+      },
+      "9": {
+        "location": "leftLeg"
+      },
+      "10": {
+        "location": "leftArm"
+      },
+      "11": {
+        "location": "leftArm"
+      },
+      "12": {
+        "location": "head"
+      }
     },
     "left": {
-      "2": { "location": "centerTorso", "critical": true },
-      "3": { "location": "leftArm" },
-      "4": { "location": "leftArm" },
-      "5": { "location": "leftLeg" },
-      "6": { "location": "leftTorso" },
-      "7": { "location": "centerTorso" },
-      "8": { "location": "rightTorso" },
-      "9": { "location": "rightLeg" },
-      "10": { "location": "rightArm" },
-      "11": { "location": "rightArm" },
-      "12": { "location": "head" }
+      "2": {
+        "location": "centerTorso",
+        "critical": true
+      },
+      "3": {
+        "location": "rightArm"
+      },
+      "4": {
+        "location": "rightArm"
+      },
+      "5": {
+        "location": "rightLeg"
+      },
+      "6": {
+        "location": "rightTorso"
+      },
+      "7": {
+        "location": "centerTorso"
+      },
+      "8": {
+        "location": "leftTorso"
+      },
+      "9": {
+        "location": "leftLeg"
+      },
+      "10": {
+        "location": "leftArm"
+      },
+      "11": {
+        "location": "leftArm"
+      },
+      "12": {
+        "location": "head"
+      }
     },
     "right": {
-      "2": { "location": "centerTorso", "critical": true },
-      "3": { "location": "rightArm" },
-      "4": { "location": "rightArm" },
-      "5": { "location": "rightLeg" },
-      "6": { "location": "rightTorso" },
-      "7": { "location": "centerTorso" },
-      "8": { "location": "leftTorso" },
-      "9": { "location": "leftLeg" },
-      "10": { "location": "leftArm" },
-      "11": { "location": "leftArm" },
-      "12": { "location": "head" }
+      "2": {
+        "location": "centerTorso",
+        "critical": true
+      },
+      "3": {
+        "location": "leftArm"
+      },
+      "4": {
+        "location": "leftArm"
+      },
+      "5": {
+        "location": "leftLeg"
+      },
+      "6": {
+        "location": "leftTorso"
+      },
+      "7": {
+        "location": "centerTorso"
+      },
+      "8": {
+        "location": "rightTorso"
+      },
+      "9": {
+        "location": "rightLeg"
+      },
+      "10": {
+        "location": "rightArm"
+      },
+      "11": {
+        "location": "rightArm"
+      },
+      "12": {
+        "location": "head"
+      }
     },
     "rear": {
-      "2": { "location": "centerTorso", "critical": true, "isRear": true },
-      "3": { "location": "leftArm", "isRear": true },
-      "4": { "location": "leftTorso", "isRear": true },
-      "5": { "location": "leftLeg", "isRear": true },
-      "6": { "location": "centerTorso", "isRear": true },
-      "7": { "location": "centerTorso", "isRear": true },
-      "8": { "location": "rightTorso", "isRear": true },
-      "9": { "location": "rightLeg", "isRear": true },
-      "10": { "location": "rightArm", "isRear": true },
-      "11": { "location": "rightArm", "isRear": true },
-      "12": { "location": "head", "isRear": true }
+      "2": {
+        "location": "centerTorso",
+        "critical": true,
+        "isRear": true
+      },
+      "3": {
+        "location": "leftArm",
+        "isRear": true
+      },
+      "4": {
+        "location": "leftTorso",
+        "isRear": true
+      },
+      "5": {
+        "location": "leftLeg",
+        "isRear": true
+      },
+      "6": {
+        "location": "centerTorso",
+        "isRear": true
+      },
+      "7": {
+        "location": "centerTorso",
+        "isRear": true
+      },
+      "8": {
+        "location": "rightTorso",
+        "isRear": true
+      },
+      "9": {
+        "location": "rightLeg",
+        "isRear": true
+      },
+      "10": {
+        "location": "rightArm",
+        "isRear": true
+      },
+      "11": {
+        "location": "rightArm",
+        "isRear": true
+      },
+      "12": {
+        "location": "head"
+      }
     },
     "punch": {
-      "2": { "location": "head" },
-      "3": { "location": "rightArm" },
-      "4": { "location": "rightArm" },
-      "5": { "location": "rightTorso" },
-      "6": { "location": "rightTorso" },
-      "7": { "location": "centerTorso" },
-      "8": { "location": "leftTorso" },
-      "9": { "location": "leftTorso" },
-      "10": { "location": "leftArm" },
-      "11": { "location": "leftArm" },
-      "12": { "location": "head" }
+      "2": {
+        "location": "head"
+      },
+      "3": {
+        "location": "rightArm"
+      },
+      "4": {
+        "location": "rightArm"
+      },
+      "5": {
+        "location": "rightTorso"
+      },
+      "6": {
+        "location": "rightTorso"
+      },
+      "7": {
+        "location": "centerTorso"
+      },
+      "8": {
+        "location": "leftTorso"
+      },
+      "9": {
+        "location": "leftTorso"
+      },
+      "10": {
+        "location": "leftArm"
+      },
+      "11": {
+        "location": "leftArm"
+      },
+      "12": {
+        "location": "head"
+      }
     },
     "kick": {
-      "2": { "location": "leftLeg" },
-      "3": { "location": "rightLeg" },
-      "4": { "location": "leftLeg" },
-      "5": { "location": "rightLeg" },
-      "6": { "location": "leftLeg" },
-      "7": { "location": "rightLeg" },
-      "8": { "location": "leftLeg" },
-      "9": { "location": "rightLeg" },
-      "10": { "location": "leftLeg" },
-      "11": { "location": "rightLeg" },
-      "12": { "location": "leftLeg" }
+      "2": {
+        "location": "leftLeg"
+      },
+      "3": {
+        "location": "rightLeg"
+      },
+      "4": {
+        "location": "leftLeg"
+      },
+      "5": {
+        "location": "rightLeg"
+      },
+      "6": {
+        "location": "leftLeg"
+      },
+      "7": {
+        "location": "rightLeg"
+      },
+      "8": {
+        "location": "leftLeg"
+      },
+      "9": {
+        "location": "rightLeg"
+      },
+      "10": {
+        "location": "leftLeg"
+      },
+      "11": {
+        "location": "rightLeg"
+      },
+      "12": {
+        "location": "leftLeg"
+      }
     }
   },
   "clusterTable": {
-    "2": { "2": 1, "4": 1, "6": 1, "10": 1, "15": 1, "20": 1 },
-    "3": { "2": 1, "4": 2, "6": 2, "10": 2, "15": 2, "20": 2 },
-    "4": { "2": 1, "4": 2, "6": 3, "10": 3, "15": 3, "20": 4 },
-    "5": { "2": 1, "4": 3, "6": 3, "10": 4, "15": 4, "20": 5 },
-    "6": { "2": 1, "4": 3, "6": 4, "10": 5, "15": 5, "20": 7 },
-    "7": { "2": 1, "4": 3, "6": 4, "10": 6, "15": 6, "20": 8 },
-    "8": { "2": 1, "4": 3, "6": 5, "10": 7, "15": 7, "20": 10 },
-    "9": { "2": 1, "4": 4, "6": 5, "10": 8, "15": 8, "20": 12 },
-    "10": { "2": 1, "4": 4, "6": 6, "10": 9, "15": 10, "20": 14 },
-    "11": { "2": 1, "4": 4, "6": 6, "10": 10, "15": 12, "20": 16 },
-    "12": { "2": 2, "4": 4, "6": 6, "10": 10, "15": 15, "20": 20 }
+    "2": {
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 2,
+      "7": 2,
+      "9": 3,
+      "10": 3,
+      "12": 4,
+      "15": 5,
+      "20": 6,
+      "30": 10,
+      "40": 12
+    },
+    "3": {
+      "2": 1,
+      "3": 1,
+      "4": 2,
+      "5": 2,
+      "6": 2,
+      "7": 2,
+      "9": 3,
+      "10": 3,
+      "12": 4,
+      "15": 5,
+      "20": 6,
+      "30": 10,
+      "40": 12
+    },
+    "4": {
+      "2": 1,
+      "3": 1,
+      "4": 2,
+      "5": 2,
+      "6": 3,
+      "7": 3,
+      "9": 4,
+      "10": 4,
+      "12": 5,
+      "15": 6,
+      "20": 9,
+      "30": 12,
+      "40": 18
+    },
+    "5": {
+      "2": 1,
+      "3": 2,
+      "4": 2,
+      "5": 3,
+      "6": 3,
+      "7": 4,
+      "9": 5,
+      "10": 6,
+      "12": 8,
+      "15": 9,
+      "20": 12,
+      "30": 18,
+      "40": 24
+    },
+    "6": {
+      "2": 1,
+      "3": 2,
+      "4": 2,
+      "5": 3,
+      "6": 4,
+      "7": 4,
+      "9": 5,
+      "10": 6,
+      "12": 8,
+      "15": 9,
+      "20": 12,
+      "30": 18,
+      "40": 24
+    },
+    "7": {
+      "2": 1,
+      "3": 2,
+      "4": 3,
+      "5": 3,
+      "6": 4,
+      "7": 4,
+      "9": 5,
+      "10": 6,
+      "12": 8,
+      "15": 9,
+      "20": 12,
+      "30": 18,
+      "40": 24
+    },
+    "8": {
+      "2": 2,
+      "3": 2,
+      "4": 3,
+      "5": 3,
+      "6": 4,
+      "7": 4,
+      "9": 5,
+      "10": 6,
+      "12": 8,
+      "15": 9,
+      "20": 12,
+      "30": 18,
+      "40": 24
+    },
+    "9": {
+      "2": 2,
+      "3": 2,
+      "4": 3,
+      "5": 4,
+      "6": 5,
+      "7": 6,
+      "9": 7,
+      "10": 8,
+      "12": 10,
+      "15": 12,
+      "20": 16,
+      "30": 24,
+      "40": 32
+    },
+    "10": {
+      "2": 2,
+      "3": 3,
+      "4": 3,
+      "5": 4,
+      "6": 5,
+      "7": 6,
+      "9": 7,
+      "10": 8,
+      "12": 10,
+      "15": 12,
+      "20": 16,
+      "30": 24,
+      "40": 32
+    },
+    "11": {
+      "2": 2,
+      "3": 3,
+      "4": 4,
+      "5": 5,
+      "6": 6,
+      "7": 7,
+      "9": 9,
+      "10": 10,
+      "12": 12,
+      "15": 15,
+      "20": 20,
+      "30": 30,
+      "40": 40
+    },
+    "12": {
+      "2": 2,
+      "3": 3,
+      "4": 4,
+      "5": 5,
+      "6": 6,
+      "7": 7,
+      "9": 9,
+      "10": 10,
+      "12": 12,
+      "15": 15,
+      "20": 20,
+      "30": 30,
+      "40": 40
+    }
   },
   "criticalHitTable": {
     "head": [
-      { "roll": [1,3], "result": "Pilot hit" },
-      { "roll": [4,6], "result": "Roll on critical effects" }
+      {
+        "roll": [
+          1,
+          3
+        ],
+        "result": "Pilot hit"
+      },
+      {
+        "roll": [
+          4,
+          6
+        ],
+        "result": "Roll on critical effects"
+      }
     ],
     "arm": [
-      { "roll": [1,3], "result": "Shoulder actuator" },
-      { "roll": [4,5], "result": "Upper arm actuator" },
-      { "roll": 6, "result": "Lower arm actuator" },
-      { "roll": 7, "result": "Hand actuator" },
-      { "roll": [8,12], "result": "Roll on critical effects" }
+      {
+        "roll": [
+          1,
+          3
+        ],
+        "result": "Shoulder actuator"
+      },
+      {
+        "roll": [
+          4,
+          5
+        ],
+        "result": "Upper arm actuator"
+      },
+      {
+        "roll": 6,
+        "result": "Lower arm actuator"
+      },
+      {
+        "roll": 7,
+        "result": "Hand actuator"
+      },
+      {
+        "roll": [
+          8,
+          12
+        ],
+        "result": "Roll on critical effects"
+      }
     ],
     "leg": [
-      { "roll": [1,4], "result": "Hip actuator" },
-      { "roll": 5, "result": "Upper leg actuator" },
-      { "roll": 6, "result": "Lower leg actuator" },
-      { "roll": 7, "result": "Foot actuator" },
-      { "roll": [8,12], "result": "Roll on critical effects" }
+      {
+        "roll": [
+          1,
+          4
+        ],
+        "result": "Hip actuator"
+      },
+      {
+        "roll": 5,
+        "result": "Upper leg actuator"
+      },
+      {
+        "roll": 6,
+        "result": "Lower leg actuator"
+      },
+      {
+        "roll": 7,
+        "result": "Foot actuator"
+      },
+      {
+        "roll": [
+          8,
+          12
+        ],
+        "result": "Roll on critical effects"
+      }
     ],
     "torso": [
-      { "roll": [1,12], "result": "Roll on critical effects" }
+      {
+        "roll": [
+          1,
+          12
+        ],
+        "result": "Roll on critical effects"
+      }
     ]
   }
 }

@@ -9,7 +9,7 @@ const mapsDir = resolve(__dirname, '..', '..', 'src', 'data', 'maps');
 const VALID_TERRAIN = new Set([
   'clear', 'light_woods', 'heavy_woods',
   'water_depth1', 'water_depth2',
-  'rough', 'rubble', 'swamp', 'pavement', 'bridge'
+  'rough', 'swamp', 'pavement', 'bridge', 'light_building', 'medium_building', 'heavy_building'
 ]);
 
 function loadMap(filename) {

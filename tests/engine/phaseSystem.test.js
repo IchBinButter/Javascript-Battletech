@@ -10,7 +10,7 @@ import { PHASES } from '../../src/models/GameState.js';
 function createTwoMechEngine(opts = {}) {
   const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
   const jenner = createTestUnit('jenner-jr7d', 1, 'jenner-1');
-  atlas.position = opts.atlasHex ? { hexKey: opts.atlasHex, facing: 0 } : { hexKey: '5,7', facing: 0 };
+  atlas.position = opts.atlasHex ? { hexKey: opts.atlasHex, facing: 3 } : { hexKey: '5,7', facing: 3 };
   jenner.position = opts.jennerHex ? { hexKey: opts.jennerHex, facing: 3 } : { hexKey: '10,7', facing: 3 };
 
   const engine = createTestEngine({
@@ -24,7 +24,7 @@ function createThreeMechEngine() {
   const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
   const jenner = createTestUnit('jenner-jr7d', 1, 'jenner-1');
   const wolverine = createTestUnit('wolverine-wvr6r', 0, 'wolverine-0');
-  atlas.position = { hexKey: '5,7', facing: 0 };
+  atlas.position = { hexKey: '5,7', facing: 3 };
   jenner.position = { hexKey: '10,7', facing: 3 };
   wolverine.position = { hexKey: '6,7', facing: 1 };
 

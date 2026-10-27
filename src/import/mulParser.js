@@ -1,5 +1,6 @@
 import { Unit } from '../models/Unit.js';
 import { parseAndConvert } from './unitConverter.js';
+import { getInternalStructure } from '../utils/helpers.js';
 
 const COMMENT_REGEX = /<!--[\s\S]*?-->/g;
 
@@ -151,19 +152,6 @@ function estimateWalkMP(tonnage) {
 
 function estimateEngineRating(tonnage, walkMP) {
   return tonnage * walkMP;
-}
-
-function getInternalStructure(mass) {
-  return {
-    head: 3,
-    centerTorso: mass,
-    leftTorso: Math.ceil(mass * 0.21),
-    rightTorso: Math.ceil(mass * 0.21),
-    leftArm: Math.ceil(mass * 0.17),
-    rightArm: Math.ceil(mass * 0.17),
-    leftLeg: Math.ceil(mass * 0.21),
-    rightLeg: Math.ceil(mass * 0.21)
-  };
 }
 
 function buildStubMechDef(entry) {

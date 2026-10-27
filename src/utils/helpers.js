@@ -85,3 +85,18 @@ export const EventEmitter = {
 export function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));
 }
+
+/** Calculate internal structure armor values for a given mech mass */
+export function getInternalStructure(mass) {
+  const t = mass;
+  return {
+    head: 3,
+    centerTorso: t,
+    leftTorso: Math.ceil(t * 0.21),
+    rightTorso: Math.ceil(t * 0.21),
+    leftArm: Math.ceil(t * 0.17),
+    rightArm: Math.ceil(t * 0.17),
+    leftLeg: Math.ceil(t * 0.21),
+    rightLeg: Math.ceil(t * 0.21)
+  };
+}
