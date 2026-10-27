@@ -4,6 +4,7 @@
  */
 
 import { deepClone } from '../utils/helpers.js';
+import { getMaxMP } from '../rules/movement/maxMP.js';
 
 const LOCATIONS = [
   'head', 'centerTorso', 'leftTorso', 'rightTorso',
@@ -19,7 +20,6 @@ export class Unit {
 
     // Movement
     this.movement = { ...mechDef.movement };
-    this.currentMP = mechDef.movement.walk;
 
     // Pilot
     this.pilot = {
@@ -70,6 +70,14 @@ export class Unit {
 
     // Status flags
     this.initiativeModifier = 0;
+  }
+
+  /**
+   * Current MP for this turn, derived from movement mode, heat, MASC and TSM.
+   * Never stored, so it cannot drift out of sync with the heat scale.
+   */
+  get currentMP() {
+    return getMaxMP(this, this.movementMode || 'walk');
   }
 
   /** Get current armor for a location (front or rear) */

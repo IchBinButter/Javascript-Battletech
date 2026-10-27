@@ -149,14 +149,16 @@ describe('PhaseManager: Per-Unit Alternation Queue', () => {
       expect(state.currentPlayer).toBe(1);
     });
 
-    it('_enterMovement resets all unit currentMP to walk value', () => {
+    it('_enterMovement resets movement mode so MP derives from walk again', () => {
       const { engine, atlas, jenner } = createTwoMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
-      atlas.currentMP = 0;
-      jenner.currentMP = 2;
+      atlas.movementMode = 'jump';
+      jenner.movementMode = 'run';
       engine.phaseManager.enterPhase('initiative');
       engine.phaseManager.enterPhase('movement');
 
+      expect(atlas.movementMode).toBe('walk');
+      expect(jenner.movementMode).toBe('walk');
       expect(atlas.currentMP).toBe(atlas.movement.walk);
       expect(jenner.currentMP).toBe(jenner.movement.walk);
     });

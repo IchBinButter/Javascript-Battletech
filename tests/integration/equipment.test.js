@@ -221,7 +221,7 @@ describe('Equipment: Targeting Computer', () => {
     engine.diceRoller = makeDiceRoller(10);
 
     atlas._movementModifier = 2;
-    atlas.heat = 7;
+    atlas.heat = 8; // +1 TN starts at heat 8 on the record sheet
 
     const medLaser = createWeaponDef('med_laser');
     const result = engine.processAction(0, {
@@ -402,85 +402,55 @@ describe('Equipment: Triple-Strength Myomer (TSM)', () => {
     return atlas;
   }
 
-  it('gives +2 walk MP at heat 9', () => {
+  // Atlas AS7-D walk MP is 3; TSM adds 2 from heat 9 while the record-sheet
+  // heat penalty takes away 1/2/3/4/5 at heat 5/10/15/20/25.
+  it('gives +2 walk MP at heat 9 (3 - 1 + 2 = 4)', () => {
     const unit = createTSMUnit(true);
     unit.heat = 9;
-
-    const heatManager = new HeatManager();
-    const effects = heatManager.applyHeatEffects(unit, makeDiceRoller(7));
-
-    expect(unit.currentMP).toBe(5); // base walk 3 + 2 TSM
+    expect(unit.currentMP).toBe(4);
   });
 
-  it('gives +2 walk MP at heat 15 (no MP reduction at this level)', () => {
+  it('nets out the -2 penalty at heat 10 (3 - 2 + 2 = 3)', () => {
     const unit = createTSMUnit(true);
-    unit.heat = 15;
-
-    const heatManager = new HeatManager();
-    heatManager.applyHeatEffects(unit, makeDiceRoller(7));
-
-    expect(unit.currentMP).toBe(5); // base 3, no MP reduction at heat 15, +2 TSM = 5
+    unit.heat = 10;
+    expect(unit.currentMP).toBe(3);
   });
 
-  it('TSM +2 bonus partially offsets -1 MP reduction at heat 18', () => {
+  it('offsets the -2 penalty at heat 14 (3 - 2 + 2 = 3)', () => {
+    const unit = createTSMUnit(true);
+    unit.heat = 14;
+    expect(unit.currentMP).toBe(3);
+  });
+
+  it('still loses MP against the -3 penalty at heat 18 (3 - 3 + 2 = 2)', () => {
     const unit = createTSMUnit(true);
     unit.heat = 18;
-
-    const heatManager = new HeatManager();
-    heatManager.applyHeatEffects(unit, makeDiceRoller(7));
-
-    expect(unit.currentMP).toBe(4); // base 3 - 1 MP + 2 TSM = 4
+    expect(unit.currentMP).toBe(2);
   });
 
   it('does NOT give TSM bonus below heat 9', () => {
     const unit = createTSMUnit(true);
     unit.heat = 8;
-
-    const heatManager = new HeatManager();
-    heatManager.applyHeatEffects(unit, makeDiceRoller(7));
-
-    expect(unit.currentMP).toBe(3); // base walk 3, no TSM bonus
+    expect(unit.currentMP).toBe(2); // -1 MP, no TSM
   });
 
-  it('does NOT give TSM bonus at heat 0 without TSM equipment', () => {
+  it('does NOT give TSM bonus without TSM equipment', () => {
     const unit = createTSMUnit(false);
     unit.heat = 9;
-
-    const heatManager = new HeatManager();
-    heatManager.applyHeatEffects(unit, makeDiceRoller(7));
-
-    expect(unit.currentMP).toBe(3); // no TSM bonus since no equipment
+    expect(unit.currentMP).toBe(2); // -1 MP, no bonus
   });
 
-  it('TSM bonus persists at extreme heat (20+)', () => {
+  it('TSM bonus persists at extreme heat (3 - 4 + 2 = 1)', () => {
     const unit = createTSMUnit(true);
     unit.heat = 21;
-
-    const heatManager = new HeatManager();
-    heatManager.applyHeatEffects(unit, makeDiceRoller(7));
-
-    expect(unit.currentMP).toBe(1); // base 3 - 4 MP + 2 TSM = 1
+    expect(unit.currentMP).toBe(1);
   });
 
-  it('TSM at heat 14 with no MP reduction gives full bonus', () => {
-    const unit = createTSMUnit(true);
-    unit.heat = 14;
-
-    const heatManager = new HeatManager();
-    heatManager.applyHeatEffects(unit, makeDiceRoller(7));
-
-    expect(unit.currentMP).toBe(5); // base 3 + 2 TSM, no MP reduction at 14
-  });
-
-  it('TSM with Jenner at heat 9+ provides +2 MP on top of base 7 walk', () => {
+  it('TSM with Jenner at heat 9: 7 - 1 + 2 = 8', () => {
     const jenner = createTestUnit('jenner-jr7d', 0, 'jenner-tsm');
     jenner.position = { hexKey: '5,7', facing: 0 };
     jenner.equipment.other.tsm = { installed: true };
     jenner.heat = 9;
-
-    const heatManager = new HeatManager();
-    heatManager.applyHeatEffects(jenner, makeDiceRoller(7));
-
-    expect(jenner.currentMP).toBe(9); // base walk 7 + 2 TSM
+    expect(jenner.currentMP).toBe(8);
   });
 });

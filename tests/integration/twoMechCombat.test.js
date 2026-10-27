@@ -272,7 +272,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       setupWeaponPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(8);
 
-      atlas.heat = 12; // +2 heat modifier
+      atlas.heat = 13; // +2 heat modifier (starts at heat 13)
 
       const medLaser = createWeaponDef('med_laser');
       const result = engine.processAction(0, {
@@ -333,7 +333,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       setupWeaponPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(8);
 
-      atlas.heat = 7;
+      atlas.heat = 8;
 
       const medLaser = createWeaponDef('med_laser');
       const result = engine.processAction(0, {
@@ -373,7 +373,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       setupWeaponPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(10);
 
-      atlas.heat = 22;
+      atlas.heat = 24;
 
       const medLaser = createWeaponDef('med_laser');
       const result = engine.processAction(0, {
@@ -694,7 +694,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       engine.diceRoller = makeDiceRoller(12);
 
       atlas._movementModifier = 2; // +2 attacker moved
-      atlas.heat = 7;              // +1 heat
+      atlas.heat = 8;              // +1 heat (starts at 8)
       jenner.hexesMoved = 5;       // +2 target moved
 
       const medLaser = createWeaponDef('med_laser');
@@ -919,7 +919,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       setupWeaponPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(8);
 
-      atlas.heat = 15; // +3 heat mod
+      atlas.heat = 17; // +3 heat mod (starts at 17)
 
       const medLaser = createWeaponDef('med_laser');
       const result = engine.processAction(0, {

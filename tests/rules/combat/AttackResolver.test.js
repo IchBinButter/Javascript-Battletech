@@ -91,28 +91,28 @@ describe('AttackResolver', () => {
   // =========================================================================
 
   describe('getHeatModifier', () => {
-    it('returns 0 for heat < 5', () => {
+    it('returns 0 for heat < 8', () => {
       expect(resolver.getHeatModifier(0)).toBe(0);
-      expect(resolver.getHeatModifier(4)).toBe(0);
+      expect(resolver.getHeatModifier(7)).toBe(0);
     });
 
-    it('returns 1 for heat 5-9', () => {
-      expect(resolver.getHeatModifier(5)).toBe(1);
-      expect(resolver.getHeatModifier(9)).toBe(1);
+    it('returns 1 for heat 8-12', () => {
+      expect(resolver.getHeatModifier(8)).toBe(1);
+      expect(resolver.getHeatModifier(12)).toBe(1);
     });
 
-    it('returns 2 for heat 10-14', () => {
-      expect(resolver.getHeatModifier(10)).toBe(2);
-      expect(resolver.getHeatModifier(14)).toBe(2);
+    it('returns 2 for heat 13-16', () => {
+      expect(resolver.getHeatModifier(13)).toBe(2);
+      expect(resolver.getHeatModifier(16)).toBe(2);
     });
 
-    it('returns 3 for heat 15-19', () => {
-      expect(resolver.getHeatModifier(15)).toBe(3);
-      expect(resolver.getHeatModifier(19)).toBe(3);
+    it('returns 3 for heat 17-23', () => {
+      expect(resolver.getHeatModifier(17)).toBe(3);
+      expect(resolver.getHeatModifier(23)).toBe(3);
     });
 
-    it('returns 4 for heat 20+', () => {
-      expect(resolver.getHeatModifier(20)).toBe(4);
+    it('returns 4 for heat 24+', () => {
+      expect(resolver.getHeatModifier(24)).toBe(4);
       expect(resolver.getHeatModifier(30)).toBe(4);
     });
   });
@@ -350,7 +350,7 @@ describe('AttackResolver', () => {
     // --- Other: heat -------------------------------------------------------
 
     it('O: attacker heat modifier is added', () => {
-      const attacker = makeUnit('4,4', 0, 4, { heat: 12 });
+      const attacker = makeUnit('4,4', 0, 4, { heat: 13 });
       const target = makeUnit('4,6', 0, 4);
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
@@ -359,8 +359,8 @@ describe('AttackResolver', () => {
       expect(result.modifiers).toContain('Attacker heat: +2');
     });
 
-    it('O: no heat modifier added when heat < 5', () => {
-      const attacker = makeUnit('4,4', 0, 4, { heat: 4 });
+    it('O: no heat modifier added when heat < 8', () => {
+      const attacker = makeUnit('4,4', 0, 4, { heat: 7 });
       const target = makeUnit('4,6', 0, 4);
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });

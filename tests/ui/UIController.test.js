@@ -293,14 +293,14 @@ describe('UIController', () => {
       atlas.heat = 12;
       ui.updateUnitPanel(atlas);
 
-      expect(ui.unitDetails.innerHTML).toContain('-2 MP');
+      expect(ui.unitDetails.innerHTML).toContain('-2 Walk MP');
     });
 
     it('shows shutdown warning at high heat', () => {
       atlas.heat = 26;
       ui.updateUnitPanel(atlas);
 
-      expect(ui.unitDetails.innerHTML).toContain('Shutdown 4+');
+      expect(ui.unitDetails.innerHTML).toContain('Shutdown check: avoid on 10+');
     });
   });
 
@@ -392,13 +392,12 @@ describe('UIController', () => {
   describe('unit moved event', () => {
     it('updates unit panel if selected unit moved', () => {
       ui.updateUnitPanel(atlas);
-      const mp = atlas.currentMP;
-      atlas.currentMP = 1; // Simulate movement cost
+      atlas.heat = 10; // Atlas walk 3, -2 MP at this heat
 
       engine.eventBus.emit('unitMoved', { unitId: 'atlas-0', hexKey: '6,7', facing: 3 });
 
       expect(ui.unitDetails.innerHTML).toContain('MP: 1/3');
-      atlas.currentMP = mp;
+      atlas.heat = 0;
     });
   });
 

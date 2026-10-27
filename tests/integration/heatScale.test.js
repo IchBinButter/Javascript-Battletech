@@ -36,13 +36,13 @@ describe('Heat thresholds 14-24+ (integration)', () => {
     [0,  3],
     [4,  3],
     [5,  2],
-    [9,  2],
+    [7,  2],
     [10, 1],
+    [12, 1],
     [14, 1],
     [15, 0],
     [19, 0],
     [20, 0],
-    [23, 0],
     [24, 0],
     [30, 0],
   ])('heat %i: expectedMP=%i after heat phase (0 sinks)', (heat, expectedMP) => {
@@ -53,15 +53,15 @@ describe('Heat thresholds 14-24+ (integration)', () => {
     expect(mech.currentMP).toBe(expectedMP);
   });
 
-  it('heat 24: auto shutdown + auto ammo, MP clamped to 0', () => {
-    const { engine, mech } = setupHeatTest(24, 'atlas-as7d', '7,7', 0);
+  it('heat 30: automatic shutdown, MP clamped to 0, ammo check fires', () => {
+    const { engine, mech } = setupHeatTest(30, 'atlas-as7d', '7,7', 0);
     mech.equipment.ammo = { ac5: { shots: 5 } };
 
     enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
 
     expect(mech.shutdown).toBe(true);
     expect(mech.currentMP).toBe(0);
-    expect(mech.equipment.ammo.ac5.shots).toBe(0);
+    expect(mech.equipment.ammo.ac5.shots).toBe(0); // roll 7 vs avoid 8+ explodes
   });
 
   it('heat 30: auto shutdown + auto ammo, all bins drained', () => {
@@ -76,8 +76,10 @@ describe('Heat thresholds 14-24+ (integration)', () => {
     expect(mech.equipment.ammo.sr6.shots).toBe(0);
   });
 
-  it('heat 0-13: no shutdown, no ammo, full MP preserved', () => {
-    for (const heat of [0, 5, 8, 10, 13]) {
+  it('heat 0-13: no shutdown, no ammo check, only MP penalties', () => {
+    // Atlas walk 3: -1 MP from heat 5, -2 from heat 10
+    const expectedMP = { 0: 3, 5: 2, 8: 2, 10: 1, 13: 1 };
+    for (const heat of Object.keys(expectedMP).map(Number)) {
       const { engine, mech } = setupHeatTest(heat, 'atlas-as7d', '7,7', 0);
       mech.equipment.ammo = { lrm15: { shots: 10 } };
 
@@ -85,7 +87,7 @@ describe('Heat thresholds 14-24+ (integration)', () => {
 
       expect(mech.shutdown, `heat=${heat} shutdown`).toBe(false);
       expect(mech.equipment.ammo.lrm15.shots, `heat=${heat} ammo`).toBe(10);
-      expect(mech.currentMP, `heat=${heat} MP`).toBe(3);
+      expect(mech.currentMP, `heat=${heat} MP`).toBe(expectedMP[heat]);
     }
   });
 
@@ -121,7 +123,7 @@ describe('Heat thresholds 14-24+ (integration)', () => {
 // AMMO EXPLOSION ROLLS (escalating targets)
 // =========================================================================
 
-describe('Ammo explosion escalating targets (integration)', () => {
+describe('Ammo explosion checks (record sheet thresholds)', () => {
   function setupAmmoMech(heatLevel) {
     const mech = createTestUnit('atlas-as7d', 0, 'ammo-mech');
     mech.heat = heatLevel;
@@ -136,99 +138,51 @@ describe('Ammo explosion escalating targets (integration)', () => {
     return { engine, mech };
   }
 
-  it('heat 19 (ammo target 4+): roll 4 triggers, roll 3 does not', () => {
-    const { engine } = setupAmmoMech(19);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(4));
+  function shotsAfter(heat, roll) {
+    const { engine } = setupAmmoMech(heat);
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(roll));
     const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.equipment.ammo.lrm15.shots).toBe(0);
+    return mech.equipment.ammo.lrm15.shots;
+  }
 
-    const { engine: engine2 } = setupAmmoMech(19);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(3));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.equipment.ammo.lrm15.shots).toBe(10);
+  it('heat 18: below the first threshold, no check at all', () => {
+    expect(shotsAfter(18, 2)).toBe(10);
   });
 
-  it('heat 20 (ammo target 6+): roll 6 triggers, roll 5 does not', () => {
-    const { engine } = setupAmmoMech(20);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(6));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.equipment.ammo.lrm15.shots).toBe(0);
-
-    const { engine: engine2 } = setupAmmoMech(20);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(5));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.equipment.ammo.lrm15.shots).toBe(10);
+  it('heat 19 (avoid on 4+): roll 3 explodes, roll 4 survives', () => {
+    expect(shotsAfter(19, 3)).toBe(0);
+    expect(shotsAfter(19, 4)).toBe(10);
   });
 
-  it('heat 21 (ammo target 8+): roll 8 triggers, roll 7 does not', () => {
-    const { engine } = setupAmmoMech(21);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(8));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.equipment.ammo.lrm15.shots).toBe(0);
-
-    const { engine: engine2 } = setupAmmoMech(21);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(7));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.equipment.ammo.lrm15.shots).toBe(10);
+  it('heat 23 (avoid on 6+): roll 5 explodes, roll 6 survives', () => {
+    expect(shotsAfter(23, 5)).toBe(0);
+    expect(shotsAfter(23, 6)).toBe(10);
   });
 
-  it('heat 22 (ammo target 10+): roll 10 triggers, roll 9 does not', () => {
-    const { engine } = setupAmmoMech(22);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(10));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.equipment.ammo.lrm15.shots).toBe(0);
-
-    const { engine: engine2 } = setupAmmoMech(22);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(9));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.equipment.ammo.lrm15.shots).toBe(10);
-  });
-
-  it('heat 23 (ammo target 12+): roll 12 triggers, roll 11 does not', () => {
-    const { engine } = setupAmmoMech(23);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(12));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.equipment.ammo.lrm15.shots).toBe(0);
-
-    const { engine: engine2 } = setupAmmoMech(23);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(11));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.equipment.ammo.lrm15.shots).toBe(10);
-  });
-
-  it('heat 24+ auto ammo: all bins drained regardless of roll', () => {
-    const { engine, mech } = setupAmmoMech(26);
-    mech.equipment.ammo = { ac5: { shots: 10 }, lrm15: { shots: 15 }, sr6: { shots: 20 } };
-
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(12));
-
-    expect(mech.equipment.ammo.ac5.shots).toBe(0);
-    expect(mech.equipment.ammo.lrm15.shots).toBe(0);
-    expect(mech.equipment.ammo.sr6.shots).toBe(0);
+  it('heat 28 (avoid on 8+): roll 7 explodes, roll 8 survives', () => {
+    expect(shotsAfter(28, 7)).toBe(0);
+    expect(shotsAfter(28, 8)).toBe(10);
   });
 
   it('ammo bins with 0 shots are skipped', () => {
-    const { engine, mech } = setupAmmoMech(24);
-    mech.equipment.ammo = {
-      empty: { shots: 0 },
-      lrm15: { shots: 10 }
-    };
+    const { engine, mech } = setupAmmoMech(19);
+    mech.equipment.ammo = { empty: { shots: 0 }, lrm15: { shots: 10 } };
 
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(12));
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(2));
 
     expect(mech.equipment.ammo.empty.shots).toBe(0);
     expect(mech.equipment.ammo.lrm15.shots).toBe(0);
   });
 
   it('ammo explosion drains all ammo types', () => {
-    const { engine, mech } = setupAmmoMech(24);
+    const { engine, mech } = setupAmmoMech(19);
     mech.equipment.ammo = {
       ac5: { shots: 10 },
       lrm15: { shots: 15 },
       sr4: { shots: 25 }
     };
 
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(2));
 
     expect(mech.equipment.ammo.ac5.shots).toBe(0);
     expect(mech.equipment.ammo.lrm15.shots).toBe(0);
@@ -240,7 +194,7 @@ describe('Ammo explosion escalating targets (integration)', () => {
 // SHUTDOWN ROLLS (escalating targets)
 // =========================================================================
 
-describe('Shutdown escalating targets (integration)', () => {
+describe('Shutdown checks (record sheet thresholds)', () => {
   function setupShutdownMech(heatLevel) {
     const mech = createTestUnit('atlas-as7d', 0, 'sd-mech');
     mech.heat = heatLevel;
@@ -254,73 +208,46 @@ describe('Shutdown escalating targets (integration)', () => {
     return { engine, mech };
   }
 
-  it('heat 20 (target 4+): roll 3 < 4 causes shutdown, roll 4 avoids', () => {
-    const { engine } = setupShutdownMech(20);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(3));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.shutdown).toBe(true);
+  function shutdownAfter(heat, roll) {
+    const { engine } = setupShutdownMech(heat);
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(roll));
+    return Object.values(engine.stateManager.getState().units)[0].shutdown;
+  }
 
-    const { engine: engine2 } = setupShutdownMech(20);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(4));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.shutdown).toBe(false);
+  it('heat 13: below the first threshold, never shuts down', () => {
+    expect(shutdownAfter(13, 2)).toBe(false);
   });
 
-  it('heat 21 (target 6+): roll 5 < 6 shutdown, roll 6 avoids', () => {
-    const { engine } = setupShutdownMech(21);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(5));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.shutdown).toBe(true);
-
-    const { engine: engine2 } = setupShutdownMech(21);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(6));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.shutdown).toBe(false);
+  it('heat 14 (avoid on 4+): roll 3 shuts down, roll 4 does not', () => {
+    expect(shutdownAfter(14, 3)).toBe(true);
+    expect(shutdownAfter(14, 4)).toBe(false);
   });
 
-  it('heat 22 (target 8+): roll 7 < 8 shutdown, roll 8 avoids', () => {
-    const { engine } = setupShutdownMech(22);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.shutdown).toBe(true);
-
-    const { engine: engine2 } = setupShutdownMech(22);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(8));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.shutdown).toBe(false);
+  it('heat 18 (avoid on 6+): roll 5 shuts down, roll 6 does not', () => {
+    expect(shutdownAfter(18, 5)).toBe(true);
+    expect(shutdownAfter(18, 6)).toBe(false);
   });
 
-  it('heat 23 (target 10+): roll 9 < 10 shutdown, roll 10 avoids', () => {
-    const { engine } = setupShutdownMech(23);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(9));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.shutdown).toBe(true);
-
-    const { engine: engine2 } = setupShutdownMech(23);
-    enterHeatPhaseAndResolve(engine2, makeDiceRoller(10));
-    const mech2 = Object.values(engine2.stateManager.getState().units)[0];
-    expect(mech2.shutdown).toBe(false);
+  it('heat 22 (avoid on 8+): roll 7 shuts down, roll 8 does not', () => {
+    expect(shutdownAfter(22, 7)).toBe(true);
+    expect(shutdownAfter(22, 8)).toBe(false);
   });
 
-  it('heat 24+ targets: auto shutdown regardless of roll', () => {
-    const { engine } = setupShutdownMech(30);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(12));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.shutdown).toBe(true);
+  it('heat 26 (avoid on 10+): roll 9 shuts down, roll 10 does not', () => {
+    expect(shutdownAfter(26, 9)).toBe(true);
+    expect(shutdownAfter(26, 10)).toBe(false);
+  });
+
+  it('heat 30: automatic shutdown regardless of roll', () => {
+    expect(shutdownAfter(30, 12)).toBe(true);
   });
 
   it('roll 12 always avoids shutdown for numeric targets', () => {
-    const { engine } = setupShutdownMech(23);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(12));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.shutdown).toBe(false);
+    expect(shutdownAfter(26, 12)).toBe(false);
   });
 
   it('roll 2 always fails to avoid shutdown for any numeric target', () => {
-    const { engine } = setupShutdownMech(20);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(2));
-    const mech = Object.values(engine.stateManager.getState().units)[0];
-    expect(mech.shutdown).toBe(true);
+    expect(shutdownAfter(14, 2)).toBe(true);
   });
 });
 
@@ -328,7 +255,7 @@ describe('Shutdown escalating targets (integration)', () => {
 // TSM (TRIPLE STRENGTH MYOMER) +2 WALK MP
 // =========================================================================
 
-describe('TSM +2 walk MP (integration through engine)', () => {
+describe('TSM walk MP (integration through engine)', () => {
   function setupTSMMech(heatLevel) {
     const mech = createTestUnit('atlas-as7d', 0, 'tsm-mech');
     mech.heat = heatLevel;
@@ -343,86 +270,61 @@ describe('TSM +2 walk MP (integration through engine)', () => {
     return { engine, mech };
   }
 
-  it('heat 9 (exact activation): walk MP 3 + 2 = 5', () => {
-    const { engine, mech } = setupTSMMech(9);
+  function walkMPAfterHeatPhase(heat) {
+    const { engine, mech } = setupTSMMech(heat);
     enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(5);
+    return mech.currentMP;
+  }
+
+  // Atlas walk 3, TSM +2 from heat 9, penalty -1/-2/-3/-4/-5 at 5/10/15/20/25
+  it('heat 9: 3 - 1 + 2 = 4', () => {
+    expect(walkMPAfterHeatPhase(9)).toBe(4);
   });
 
-  it('heat 10 (above threshold): walk MP 3 + 2 = 5', () => {
-    const { engine, mech } = setupTSMMech(10);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(5);
+  it('heat 10: 3 - 2 + 2 = 3', () => {
+    expect(walkMPAfterHeatPhase(10)).toBe(3);
   });
 
-  it('heat 13 (max before MP penalties): walk MP 3 + 2 = 5', () => {
-    const { engine, mech } = setupTSMMech(13);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(5);
+  it('heat 13: 3 - 2 + 2 = 3', () => {
+    expect(walkMPAfterHeatPhase(13)).toBe(3);
   });
 
-  it('heat 8 (below activation): no TSM bonus, MP stays at 3', () => {
-    const { engine, mech } = setupTSMMech(8);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(3);
+  it('heat 8: below activation, 3 - 1 = 2', () => {
+    expect(walkMPAfterHeatPhase(8)).toBe(2);
   });
 
-  it('heat 0: no TSM, MP stays at 3', () => {
-    const { engine, mech } = setupTSMMech(0);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(3);
+  it('heat 0: no penalty and no bonus, 3', () => {
+    expect(walkMPAfterHeatPhase(0)).toBe(3);
   });
 
-  it('heat 18: offsets penalty (3 - 1 + 2 = 4)', () => {
-    const { engine, mech } = setupTSMMech(18);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(4);
+  it('heat 18: 3 - 3 + 2 = 2', () => {
+    expect(walkMPAfterHeatPhase(18)).toBe(2);
   });
 
-  it('heat 19: offsets penalty (3 - 2 + 2 = 3)', () => {
-    const { engine, mech } = setupTSMMech(19);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(3);
+  it('heat 19: 3 - 3 + 2 = 2', () => {
+    expect(walkMPAfterHeatPhase(19)).toBe(2);
   });
 
-  it('heat 20: offsets penalty (3 - 3 + 2 = 2)', () => {
-    const { engine, mech } = setupTSMMech(20);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(2);
+  it('heat 20: 3 - 4 + 2 = 1', () => {
+    expect(walkMPAfterHeatPhase(20)).toBe(1);
   });
 
-  it('heat 21: offsets penalty (3 - 4 + 2 = 1)', () => {
-    const { engine, mech } = setupTSMMech(21);
+  it('heat 25: 3 - 5 + 2 = 0', () => {
+    expect(walkMPAfterHeatPhase(25)).toBe(0);
+  });
+
+  it('heat 30: 3 - 5 + 2 = 0', () => {
+    expect(walkMPAfterHeatPhase(30)).toBe(0);
+  });
+
+  it('no TSM equipment: heat 12 gives 3 - 2 = 1', () => {
+    const { engine, mech } = setupTSMMech(12);
+    mech.equipment.other = {};
     enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
     expect(mech.currentMP).toBe(1);
   });
 
-  it('heat 22+: flooring to 0 (3 - 5 + 2 = 0)', () => {
-    const { engine, mech } = setupTSMMech(22);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(0);
-  });
-
-  it('heat 23+: flooring to 0 (3 - 6 + 2 = 0)', () => {
-    const { engine, mech } = setupTSMMech(23);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(0);
-  });
-
-  it('heat 24+: cannot overcome MP floor of 0', () => {
-    const { engine, mech } = setupTSMMech(25);
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(0);
-  });
-
-  it('no TSM equipment: heat 12 gives no bonus', () => {
-    const { engine, mech } = setupTSMMech(12);
-    mech.equipment.other = {};
-    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(3);
-  });
-
-  it('Jenner with TSM at heat 9: walk MP 7 + 2 = 9', () => {
+  it('Jenner with TSM at heat 9: 7 - 1 + 2 = 8', () => {
     const mech = createTestUnit('jenner-jr7d', 0, 'tsm-jenner');
     mech.heat = 9;
     mech.position = { hexKey: '7,7', facing: 0 };
@@ -434,7 +336,7 @@ describe('TSM +2 walk MP (integration through engine)', () => {
     });
 
     enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
-    expect(mech.currentMP).toBe(9);
+    expect(mech.currentMP).toBe(8);
   });
 });
 
@@ -603,7 +505,7 @@ describe('Combined heat scale scenarios', () => {
 
     enterHeatPhaseAndResolve(engine, makeDiceRoller(4));
 
-    expect(mech.currentMP).toBe(2);
+    expect(mech.currentMP).toBe(1); // 3 - 4 (heat 20) + 2 (TSM)
     expect(mech.equipment.ammo.lrm15.shots).toBe(10);
   });
 
@@ -662,18 +564,18 @@ describe('Combined heat scale scenarios', () => {
   });
 
   it('heat modifier adds to TN during weapon attack phase', () => {
-    // getHeatModifier: <5=0, <10=+1, <15=+2, <20=+3, >=20=+4
+    // record-sheet to-hit ladder: +1 at 8, +2 at 13, +3 at 17, +4 at 24
     const heatTests = [
       [0, 0],
-      [4, 0],
-      [5, 1],
-      [9, 1],
-      [10, 2],
-      [14, 2],
-      [15, 3],
-      [19, 3],
-      [20, 4],
+      [7, 0],
+      [8, 1],
+      [12, 1],
+      [13, 2],
+      [16, 2],
+      [17, 3],
+      [23, 3],
       [24, 4],
+      [30, 4],
     ];
 
     for (const [heat, expectedMod] of heatTests) {

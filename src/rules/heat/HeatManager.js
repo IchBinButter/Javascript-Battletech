@@ -1,7 +1,10 @@
 /**
  * HeatManager - BattleTech heat tracking and effects.
  * Manages heat generation, dissipation, and heat level effects.
+ * Heat level effects come from HeatScale (src/data/heatScale.json).
  */
+
+import { getHeatEffects, describeHeatEffects } from './HeatScale.js';
 
 export class HeatManager {
   /**
@@ -75,66 +78,36 @@ export class HeatManager {
   }
 
   /**
-   * Apply heat level effects based on current heat (BMM full heat scale, 20+ thresholds).
-   * @returns {{ effects: string[], shutdownCheck: boolean, shutdownTarget: number|string, ammoExplosionCheck: boolean, ammoTarget: number|string }}
+   * Heat level effects for the unit's current heat.
+   * MP is not written here: it is derived by getMaxMP from the same scale.
+   * @returns {{
+   *   effects: string[],
+   *   shutdownCheck: boolean,
+   *   shutdownTarget: number|null,
+   *   ammoExplosionCheck: boolean,
+   *   ammoTarget: number|null,
+   *   autoShutdown: boolean
+   * }}
    */
-  applyHeatEffects(unit, diceRoller) {
-    const effects = [];
-    let shutdownCheck = false;
-    let shutdownTarget = null;
-    let ammoExplosionCheck = false;
-    let ammoTarget = null;
-
+  applyHeatEffects(unit) {
     unit._movementModifier = 0;
 
-    let mpReduction = 0;
+    const scale = getHeatEffects(unit.heat);
+    const effects = describeHeatEffects(unit.heat);
 
-    if (unit.heat < 5) {
-      // 0-4: No effect
-    } else if (unit.heat < 10) {
-      // 5-9: +1 TN, -1 Walk MP
-      effects.push('+1 TN to weapons fire');
-      effects.push('-1 Walk MP');
-      mpReduction = 1;
-    } else if (unit.heat < 15) {
-      // 10-14: +2 TN, -2 Walk MP
-      effects.push('+2 TN to weapons fire');
-      effects.push('-2 Walk MP');
-      mpReduction = 2;
-    } else if (unit.heat < 20) {
-      // 15-19: +3 TN, -3 Walk MP
-      effects.push('+3 TN to weapons fire');
-      effects.push('-3 Walk MP');
-      mpReduction = 3;
-    } else if (unit.heat < 24) {
-      // 20-23: +4 TN, -3 Walk MP, shutdown 4+ avoid
-      effects.push('+4 TN to weapons fire');
-      effects.push('-3 Walk MP');
-      mpReduction = 3;
-      shutdownCheck = true;
-      shutdownTarget = 4;
-    } else {
-      // 24+: +4 TN, -3 Walk MP, shutdown 4+ avoid, ammo explosion 8+ check
-      effects.push('+4 TN to weapons fire');
-      effects.push('-3 Walk MP');
-      mpReduction = 3;
-      shutdownCheck = true;
-      shutdownTarget = 4;
-      ammoExplosionCheck = true;
-      ammoTarget = 8;
-    }
-
-    // TSM bonus: +2 walk MP at 9+ heat
-    const hasTSM = unit.equipment?.other?.tsm;
-    const tsmBonus = (hasTSM && unit.heat >= 9) ? 2 : 0;
-
-    unit.currentMP = Math.max(0, unit.movement.walk - mpReduction + tsmBonus);
-
-    return { effects, shutdownCheck, shutdownTarget, ammoExplosionCheck, ammoTarget };
+    return {
+      effects,
+      shutdownCheck: scale.shutdownAvoid !== null,
+      shutdownTarget: scale.shutdownAvoid,
+      ammoExplosionCheck: scale.ammoExplosionAvoid !== null,
+      ammoTarget: scale.ammoExplosionAvoid,
+      autoShutdown: scale.autoShutdown
+    };
   }
 
   /**
    * Check for involuntary shutdown.
+   * The target is an avoid target: roll 2d6 and meet or beat it.
    * @param {number|string} shutdownTarget - Target number needed to avoid shutdown, or 'auto'
    * @returns {{ shutdown: boolean, roll: number, target: number|string }}
    */
@@ -157,6 +130,20 @@ export class HeatManager {
   }
 
   /**
+   * Check for a heat-induced ammo explosion.
+   * The target is an avoid target: roll 2d6 and meet or beat it.
+   * @returns {{ exploded: boolean, roll: number, target: number }}
+   */
+  checkAmmoExplosion(unit, diceRoller, ammoTarget) {
+    if (!ammoTarget) return { exploded: false, roll: 0, target: 0 };
+
+    const roll = diceRoller.roll2d6();
+    const exploded = roll < ammoTarget;
+
+    return { exploded, roll, target: ammoTarget };
+  }
+
+  /**
    * Resolve heat phase for all units.
    */
   resolveHeatPhase(gameState, diceRoller) {
@@ -164,21 +151,24 @@ export class HeatManager {
 
     for (const unit of Object.values(gameState.units)) {
       const dissipation = this.applyHeatDissipation(unit, gameState);
-      const heatEffects = this.applyHeatEffects(unit, diceRoller);
+      const heatEffects = this.applyHeatEffects(unit);
 
-      if (heatEffects.shutdownCheck) {
+      if (heatEffects.autoShutdown) {
+        unit.shutdown = true;
+        heatEffects.effects.push('Unit AUTO SHUTDOWN');
+      } else if (heatEffects.shutdownCheck) {
         const shutdownResult = this.checkShutdown(unit, diceRoller, heatEffects.shutdownTarget);
         if (shutdownResult.shutdown) {
-          heatEffects.effects.push(`Unit SHUTDOWN (rolled ${shutdownResult.roll} vs ${shutdownResult.target}+)`);
+          heatEffects.effects.push(`Unit SHUTDOWN (rolled ${shutdownResult.roll}, needed ${shutdownResult.target}+)`);
         }
       }
 
       if (heatEffects.ammoExplosionCheck) {
-        const ammoRoll = diceRoller.roll2d6();
-        if (ammoRoll >= heatEffects.ammoTarget) {
+        const ammoResult = this.checkAmmoExplosion(unit, diceRoller, heatEffects.ammoTarget);
+        if (ammoResult.exploded) {
           for (const [binName, ammo] of Object.entries(unit.equipment.ammo)) {
             if (ammo.shots > 0) {
-              heatEffects.effects.push(`AMMO EXPLOSION in ${binName}! (rolled ${ammoRoll} vs ${heatEffects.ammoTarget}+)`);
+              heatEffects.effects.push(`AMMO EXPLOSION in ${binName}! (rolled ${ammoResult.roll}, needed ${ammoResult.target}+)`);
               ammo.shots = 0;
             }
           }

@@ -628,34 +628,40 @@ describe('MovementCalculator', () => {
   // HEAT-BASED MP REDUCTION
   // ==========================================================
   describe('heat-based MP reduction', () => {
-    it('no reduction for heat < 10', () => {
+    it('no reduction below heat 5', () => {
       expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 0), 'walk')).toBe(5);
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 5), 'walk')).toBe(5);
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 9), 'walk')).toBe(5);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 4), 'walk')).toBe(5);
     });
 
-    it('reduces walk MP by 1 at 10-14 heat', () => {
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 10), 'walk')).toBe(4);
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 12), 'walk')).toBe(4);
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 14), 'walk')).toBe(4);
+    it('reduces walk MP by 1 at 5-9 heat', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 5), 'walk')).toBe(4);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 7), 'walk')).toBe(4);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 9), 'walk')).toBe(4);
     });
 
-    it('reduces walk MP by 2 at 15-19 heat', () => {
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 15), 'walk')).toBe(3);
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 17), 'walk')).toBe(3);
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 19), 'walk')).toBe(3);
+    it('reduces walk MP by 2 at 10-14 heat', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 10), 'walk')).toBe(3);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 12), 'walk')).toBe(3);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 14), 'walk')).toBe(3);
     });
 
-    it('reduces walk MP by 3 at 20+ heat', () => {
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 20), 'walk')).toBe(2);
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 25), 'walk')).toBe(2);
-      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 30), 'walk')).toBe(2);
+    it('reduces walk MP by 3 at 15-19 heat', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 15), 'walk')).toBe(2);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 17), 'walk')).toBe(2);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 19), 'walk')).toBe(2);
     });
 
-    it('reduces run MP by same heat thresholds', () => {
-      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 10), 'run')).toBe(7);
-      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 15), 'run')).toBe(6);
-      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 20), 'run')).toBe(5);
+    it('reduces walk MP by 4 at 20-24 and by 5 from 25', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 20), 'walk')).toBe(1);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 24), 'walk')).toBe(1);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 25), 'walk')).toBe(0);
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 30), 'walk')).toBe(0);
+    });
+
+    it('reduces run MP by the same penalties', () => {
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 10), 'run')).toBe(6);
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 15), 'run')).toBe(5);
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 20), 'run')).toBe(4);
     });
 
     it('does NOT reduce jump MP at any heat', () => {
@@ -672,9 +678,47 @@ describe('MovementCalculator', () => {
 
     it('MASC-doubled MP still gets heat reduction', () => {
       const unit = makeUnit(4, 6, 0, 0, 15);
-      unit.equipment = { other: { masc: {} } };
       unit.mascActive = true;
-      expect(calc.getMaxMP(unit, 'walk')).toBe(6); // 4*2=8, -2=6
+      expect(calc.getMaxMP(unit, 'walk')).toBe(5); // 4*2=8, -3 at heat 15
+    });
+  });
+
+  // ==========================================================
+  // TSM (moved here from HeatManager, which no longer computes MP)
+  // ==========================================================
+  describe('TSM walk MP bonus', () => {
+    function withTSM(walk, heat) {
+      const unit = makeUnit(walk, Math.ceil(walk * 1.5), 0, 0, heat);
+      unit.equipment = { other: { tsm: true } };
+      return unit;
+    }
+
+    it('adds 2 walk MP at heat 9 (5 - 1 + 2 = 6)', () => {
+      expect(calc.getMaxMP(withTSM(5, 9), 'walk')).toBe(6);
+    });
+
+    it('nets out the -2 at heat 10 (5 - 2 + 2 = 5)', () => {
+      expect(calc.getMaxMP(withTSM(5, 10), 'walk')).toBe(5);
+    });
+
+    it('still loses MP at heat 18 (5 - 3 + 2 = 4)', () => {
+      expect(calc.getMaxMP(withTSM(5, 18), 'walk')).toBe(4);
+    });
+
+    it('applies at extreme heat (5 - 5 + 2 = 2)', () => {
+      expect(calc.getMaxMP(withTSM(5, 25), 'walk')).toBe(2);
+    });
+
+    it('does not activate below heat 9', () => {
+      expect(calc.getMaxMP(withTSM(5, 8), 'walk')).toBe(4); // -1 MP, no bonus
+    });
+
+    it('does nothing without the equipment', () => {
+      expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 9), 'walk')).toBe(4);
+    });
+
+    it('floors at 0', () => {
+      expect(calc.getMaxMP(withTSM(1, 25), 'walk')).toBe(0);
     });
   });
 

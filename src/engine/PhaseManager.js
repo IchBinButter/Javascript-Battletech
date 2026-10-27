@@ -162,9 +162,9 @@ export class PhaseManager {
     this.phaseUnitQueue = this.buildUnitQueue(first, second);
     this.phaseUnitIndex = 0;
 
-    // Reset unit MP for all units
+    // MP is derived (getMaxMP); only the mode it is based on needs resetting
     for (const unit of Object.values(state.units)) {
-      unit.currentMP = unit.movement.walk;
+      unit.movementMode = 'walk';
     }
 
     // Set current player from queue

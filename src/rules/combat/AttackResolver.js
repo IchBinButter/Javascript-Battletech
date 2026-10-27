@@ -5,6 +5,7 @@
 
 import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { LineOfSight } from './LineOfSight.js';
+import { getHeatEffects } from '../heat/HeatScale.js';
 
 export class AttackResolver {
   constructor(hitTables) {
@@ -275,11 +276,7 @@ export class AttackResolver {
    * Heat modifier based on attacker heat level.
    */
   getHeatModifier(heat) {
-    if (heat < 5) return 0;
-    if (heat < 10) return 1;
-    if (heat < 15) return 2;
-    if (heat < 20) return 3;
-    return 4;
+    return getHeatEffects(heat).toHitModifier;
   }
 
   /**

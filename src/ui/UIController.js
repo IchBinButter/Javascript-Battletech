@@ -3,6 +3,8 @@
  * Handles unit panel, action buttons, dice log, and phase display.
  */
 
+import { describeHeatEffects } from '../rules/heat/HeatScale.js';
+
 export class UIController {
   constructor() {
     this.gameEngine = null;
@@ -268,14 +270,7 @@ export class UIController {
   }
 
   _getHeatEffects(unit) {
-    if (unit.heat < 5) return '';
-    const effects = [];
-    if (unit.heat >= 5) effects.push('-1 MP');
-    if (unit.heat >= 10) effects.push('-2 MP');
-    if (unit.heat >= 15) effects.push('+1 to-hit');
-    if (unit.heat >= 20) effects.push('Ammo explosion 4+');
-    if (unit.heat >= 25) effects.push('Shutdown 4+');
-    if (unit.heat >= 30) effects.push('AUTO SHUTDOWN');
+    const effects = describeHeatEffects(unit.heat);
     return effects.length ? ` (${effects.join(', ')})` : '';
   }
 

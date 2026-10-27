@@ -8,6 +8,7 @@
 import { hexToPixel, hexDistance, directionBetween, getNeighborInDirection, hexKey } from '../../hex/HexMath.js';
 import { parseHexKey } from '../../utils/helpers.js';
 import equipmentData from '../../data/equipment.json' with { type: 'json' };
+import { getMaxMP as computeMaxMP } from './maxMP.js';
 
 const MASC_DATA = equipmentData.equipment.find(e => e.id === 'masc') || { mpMultiplier: 2, failureRollTarget: 3 };
 
@@ -67,30 +68,7 @@ export class MovementCalculator {
    * Get the maximum MP available for a movement type.
    */
   getMaxMP(unit, movementType) {
-    const base = unit.movement;
-    let mp;
-    switch (movementType) {
-      case 'walk':
-        mp = base.walk;
-        if (unit.mascActive) {
-          mp = Math.floor(mp * MASC_DATA.mpMultiplier);
-        }
-        break;
-      case 'run': mp = base.run; break;
-      case 'jump': mp = base.jump; break;
-      default: mp = base.walk; break;
-    }
-
-    if (movementType !== 'jump') {
-      const heat = unit.heat || 0;
-      if (heat >= 25) mp -= 5;
-      else if (heat >= 20) mp -= 4;
-      else if (heat >= 15) mp -= 3;
-      else if (heat >= 10) mp -= 2;
-      else if (heat >= 5) mp -= 1;
-    }
-
-    return Math.max(0, mp);
+    return computeMaxMP(unit, movementType);
   }
 
   /**

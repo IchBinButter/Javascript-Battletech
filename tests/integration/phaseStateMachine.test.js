@@ -225,8 +225,8 @@ describe('Per-unit alternation', () => {
 
   it('movement phase resets unit MP for all units', () => {
     const { engine, atlas, jenner } = twoMechEngine([8, 5]);
-    atlas.currentMP = 0;
-    jenner.currentMP = 2;
+    atlas.movementMode = 'jump';
+    jenner.movementMode = 'run';
     engine.phaseManager.enterPhase('initiative');
     engine.phaseManager.enterPhase('movement');
 
@@ -384,13 +384,13 @@ describe('Heat phase', () => {
     expect(atlas.shutdown).toBe(true);
   });
 
-  it('heat at 24+ causes auto shutdown', () => {
+  it('heat at 30 causes auto shutdown', () => {
     const { engine, atlas } = twoMechEngine([8, 5]);
     const totalSinks = atlas.heatSinks.type === 'double'
       ? atlas.heatSinks.count * 2
       : atlas.heatSinks.count;
 
-    atlas.heat = totalSinks + 24;
+    atlas.heat = totalSinks + 30;
     engine.phaseManager.enterPhase('heat');
 
     expect(atlas.shutdown).toBe(true);

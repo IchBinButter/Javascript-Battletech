@@ -60,7 +60,7 @@
       "description": "Doubles physical attack damage and walk MP at 9+ heat.",
       "weight": null,
       "heatThreshold": 9,
-      "walkMPBonus": 1,
+      "walkMPBonus": 2,
       "physicalDamageMultiplier": 2
     }
   ]

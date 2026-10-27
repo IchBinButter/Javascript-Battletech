@@ -173,14 +173,14 @@ describe('Integration: Full Turn Simulation', () => {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
     atlas.position = { hexKey: '5,7', facing: 0 };
     // Atlas has 20 single heat sinks. Set heat to 40 so after
-    // dissipating 20, 20 remains -> shutdown check at target 4.
+    // dissipating 20, 20 remains -> shutdown check at avoid target 6+.
     atlas.heat = 40;
 
     const engine = createTestEngine({
       units: { 'atlas-0': atlas }
     });
 
-    // Roll low (2): fails shutdown check (target 4)
+    // Roll low (2): fails the shutdown check (avoid on 6+)
     engine.diceRoller = makeDiceRoller(2);
 
     const heatResults = [];
@@ -194,7 +194,7 @@ describe('Integration: Full Turn Simulation', () => {
     expect(atlas.heat).toBe(20);
     expect(atlas.shutdown).toBe(true);
     expect(heatResults.length).toBe(1);
-    expect(heatResults[0][0].effects).toContain('Unit SHUTDOWN (rolled 2 vs 4+)');
+    expect(heatResults[0][0].effects).toContain('Unit SHUTDOWN (rolled 2, needed 6+)');
   });
 
   it('handles consciousness checks in end phase', () => {

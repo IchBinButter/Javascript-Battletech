@@ -131,8 +131,6 @@ export class GameEngine {
       if (validation.finalFacing !== undefined) {
         unit.position.facing = validation.finalFacing;
       }
-      unit.currentMP = Math.max(0, this.movementCalc.getMaxMP(unit, movementType) - validation.totalCost);
-      unit.hexesMoved = path.length - 1;
       unit.hexesMoved = path.length - 1;
 
       switch (movementType) {
@@ -175,7 +173,7 @@ export class GameEngine {
       success: true,
       unitId: unit.id,
       finalHex: unit.position.hexKey,
-      remainingMP: unit.currentMP,
+      remainingMP: Math.max(0, this.movementCalc.getMaxMP(unit, movementType) - validation.totalCost),
       facing: unit.position.facing
     };
   }
