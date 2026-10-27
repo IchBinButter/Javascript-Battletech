@@ -244,7 +244,8 @@ describe('partial cover absorbs leg hits', () => {
 
   function makeTarget(hexKey) {
     return {
-      position: { hexKey, facing: 3 },
+      // Facing north, with the attacker to the north: attack direction is front.
+      position: { hexKey, facing: 0 },
       prone: false,
       hexesMoved: 0,
       equipment: { ammo: {}, other: {} },

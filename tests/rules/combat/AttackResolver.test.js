@@ -813,16 +813,38 @@ describe('AttackResolver', () => {
   // =========================================================================
 
   describe('getAttackDirection', () => {
-    it('returns rear when attacker is behind target', () => {
+    // Target at 4,4 facing north. Direction is the side of the target the fire
+    // comes from (p32): an attacker to the north is in front of it.
+    it('returns front when the attacker is in front of the target', () => {
       const attacker = makeUnit('4,2', 0);
+      const target = makeUnit('4,4', 0);
+      expect(resolver.getAttackDirection(attacker, target)).toBe('front');
+    });
+
+    it('returns rear when the attacker is behind the target', () => {
+      const attacker = makeUnit('4,6', 0);
       const target = makeUnit('4,4', 0);
       expect(resolver.getAttackDirection(attacker, target)).toBe('rear');
     });
 
-    it('returns front when attacker is in front of target', () => {
-      const attacker = makeUnit('4,6', 0);
+    it('returns right when the attacker is in the right side arc', () => {
+      const attacker = makeUnit('5,4', 0);
       const target = makeUnit('4,4', 0);
-      expect(resolver.getAttackDirection(attacker, target)).toBe('front');
+      expect(resolver.getAttackDirection(attacker, target)).toBe('right');
+    });
+
+    it('returns left when the attacker is in the left side arc', () => {
+      const attacker = makeUnit('3,4', 0);
+      const target = makeUnit('4,4', 0);
+      expect(resolver.getAttackDirection(attacker, target)).toBe('left');
+    });
+
+    it('follows the target facing', () => {
+      // Facing south: an attacker to the north is behind it, one to the south
+      // is in front of it.
+      const target = makeUnit('4,4', 3);
+      expect(resolver.getAttackDirection(makeUnit('4,2', 0), target)).toBe('rear');
+      expect(resolver.getAttackDirection(makeUnit('4,6', 0), target)).toBe('front');
     });
 
     it('returns front for same hex', () => {

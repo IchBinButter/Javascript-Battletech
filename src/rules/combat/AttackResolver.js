@@ -297,16 +297,20 @@ export class AttackResolver {
   }
 
   /**
-   * Get attack direction (front/left/right/rear) from attacker to target.
+   * Attack direction (front/left/right/rear) - the side of the target the fire
+   * comes from (p32).
+   *
+   * Use the bearing from the target TO the attacker. The direction the shot
+   * travels is the opposite vector, and using it resolved every front hit on
+   * the rear hit location table.
    */
   getAttackDirection(attacker, target) {
-    // directionBetween imported at top of file
-    const attackerToTarget = directionBetween(attacker.position.hexKey, target.position.hexKey);
+    const bearing = directionBetween(target.position.hexKey, attacker.position.hexKey);
     const targetFacing = target.position.facing;
 
-    if (attackerToTarget === -1) return 'front';
+    if (bearing === -1) return 'front';
 
-    const diff = ((attackerToTarget - targetFacing + 3) % 6 + 3) % 6;
+    const diff = ((bearing - targetFacing + 3) % 6 + 3) % 6;
 
     if (diff <= 1 || diff >= 5) return 'front';
     if (diff === 3) return 'rear';
