@@ -785,23 +785,27 @@ describe('PhaseManager: Dice Re-Seeding', () => {
 
   it('uses turn number in dice seed for different rolls', () => {
     const { engine } = createTwoMechEngine();
-    engine.diceRoller = makeSequencedDiceRoller([8, 5, 8, 5, 8, 5, 8, 5, 8, 5]);
+    // Pin the game id: it normally contains Date.now(), so this test used to
+    // compare two time-dependent seeds and failed whenever the first roll of
+    // both streams happened to match. With a fixed id the turn number is the
+    // only variable, which is what the test is about.
+    engine.gameId = 'seed-test-game';
 
     for (let i = 0; i < PHASES.length; i++) {
       engine.phaseManager.nextPhase();
     }
 
     engine.diceRoller.reset();
-    const roll1 = engine.diceRoller.roll2d6();
+    const first = [1, 2, 3, 4].map(() => engine.diceRoller.roll2d6()).join(',');
 
     for (let i = 0; i < PHASES.length; i++) {
       engine.phaseManager.nextPhase();
     }
 
     engine.diceRoller.reset();
-    const roll2 = engine.diceRoller.roll2d6();
+    const second = [1, 2, 3, 4].map(() => engine.diceRoller.roll2d6()).join(',');
 
-    expect(roll1).not.toBe(roll2);
+    expect(first).not.toBe(second);
   });
 
   it('new turn dice roller is a DiceRoller instance', () => {

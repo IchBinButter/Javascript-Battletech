@@ -80,6 +80,22 @@ export class Unit {
     return getMaxMP(this, this.movementMode || 'walk');
   }
 
+  /**
+   * How tall the Mech itself is, in levels (BMM p22).
+   * Standing Mechs are two levels tall, prone Mechs one.
+   */
+  getHeightLevels() {
+    return this.prone ? 1 : 2;
+  }
+
+  /**
+   * LOS level: the Mech's height plus the level of the hex it stands in (p22).
+   * @param {number} hexLevel - level of the underlying hex (building level excluded)
+   */
+  getLOSLevel(hexLevel = 0) {
+    return hexLevel + this.getHeightLevels();
+  }
+
   /** Get current armor for a location (front or rear) */
   getArmor(location, isRear = false) {
     const loc = this.armor[location];

@@ -436,9 +436,10 @@ describe('AttackResolver', () => {
       const attacker = makeUnit('4,4', 0, 4);
       const target = makeUnit('4,6', 0, 4);
       const weapon = makeWeaponDef();
+      // A Level 1 hex adjacent to the target, along the LOS (p26).
       const gs = makeGameState({
-        '4,4': { level: 2 },
-        '4,5': { level: 2 },
+        '4,4': { level: 0 },
+        '4,5': { level: 1 },
         '4,6': { level: 0 }
       });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
@@ -451,8 +452,8 @@ describe('AttackResolver', () => {
       const target = makeUnit('4,6', 0, 4);
       const weapon = makeWeaponDef();
       const gs = makeGameState({
-        '4,4': { level: 2 },
-        '4,5': { level: 2 },
+        '4,4': { level: 0 },
+        '4,5': { level: 1 },
         '4,6': { level: 0 }
       });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);

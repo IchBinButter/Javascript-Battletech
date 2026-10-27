@@ -13,8 +13,8 @@ audit of the current engine. Page references are BMM pages.
 | GATOR movement + range + heat + woods | ✅ matches p28 | `AttackResolver.calculateTargetNumber` |
 | Cluster hits, hit location, kick/punch tables | ✅ matches p33/137 | `src/data/hitTables.json` |
 | **Firing arcs** | ✅ 1.1 done | `src/rules/combat/ArcRules.js`, enforced in `AttackResolver` and `GameEngine` |
-| **LOS height / partial cover** | ❌ wrong model | LOS compares hex heights only; no 2-level 'Mech height |
-| **Partial cover hit rule** | ❌ missing | +1 TN applied, but leg hits are not negated (p26) |
+| **LOS height / partial cover** | ✅ 1.2/1.3 done | `Unit.getLOSLevel`, `LineOfSight` rewritten against p22/p26 |
+| **Partial cover hit rule** | ✅ 1.3 done | leg hits strike the cover and do no damage (p26/p32) |
 | **Prone target modifier** | ❌ wrong | flat −4; rule is −2 adjacent / +1 otherwise (p28) |
 | **Pilot damage** | ❌ dead code | `pilot.hits` is read in `PhaseManager` but never incremented |
 | **Actuator / hip / shoulder crits** | ❌ no effect | `DamageResolver` has engine, gyro, sensors, life support, sinks only |
@@ -49,27 +49,31 @@ Acceptance: a weapon in the left arm cannot hit a unit in the right side arc; fl
 arms moves arm weapons to the rear arc; twisting ±1 shifts arm and torso arcs but not
 facing.
 
-### 1.2 'Mech height in LOS (`LineOfSight`, p22)
+### 1.2 'Mech height in LOS (`LineOfSight`, p22)  ✅ done
 
-- Add `Unit.getLOSLevel()` = hex level + 2 standing / + 1 prone.
-- Use LOS level (not hex level) for the attacker, the target and the intervening-hex
-  comparisons. `getHeight()` stays for terrain only.
+- `Unit.getLOSLevel()` = hex level + 2 standing / + 1 prone; `getHeightLevels()` exposes
+  the Mech's own height.
+- LOS level drives the attacker, the target and the intervening comparison: a hex blocks
+  when its height reaches the **lower** of the two LOS levels. That threshold is what
+  makes a Level 1 hex cover rather than a wall, and what hides a prone Mech behind one.
+- `getHeight()` stays the terrain/building height.
 
 Acceptance: a 'Mech on Level 0 can see over a Level 1 hill it could not see over before;
 a prone 'Mech behind a Level 1 hex is not visible to a Level 0 attacker.
 
-### 1.3 Partial cover, corrected (p26)
+### 1.3 Partial cover, corrected (p26)  ✅ done
 
-Current test `ihex.level >= targetHeight + 2` over the last two hexes is wrong. Rule:
-target standing, adjacent to a hex **one level higher than the target's hex**, that hex
-lies along the LOS, and the attacker's LOS level is **≤** the target's. Prone targets get
-none. Depth-1 water always gives it.
+The old test (`ihex.level >= targetHeight + 2` over the last two hexes) is replaced:
+target standing, the hex adjacent along the LOS one level higher than the target's hex,
+and the attacker's LOS level not higher. Prone targets get none. Depth-1 water always
+gives it. The result reports `partialCoverHex` and `partialCoverKind`
+(`hill` / `building` / `water`).
 
-### 1.4 Partial cover hit rule (p26, p32; misconception 8, p130)
+### 1.4 Partial cover hit rule (p26, p32; misconception 8, p130)  ✅ done
 
-With partial cover, if the hit location is a leg the attack strikes the cover: damage the
-building if it is a building, otherwise no damage. **Do not re-roll** and **do not** use
-the punch table — that is the pre-2006 rule.
+With partial cover, a leg hit strikes the cover instead: absorbed, no damage, no re-roll,
+and the cover hex is recorded for building damage later. **Not** the punch table — that
+is the pre-2006 rule.
 
 ### 1.5 Target state modifiers (p28)
 
@@ -171,12 +175,6 @@ data-driven win — the tables are already in the KB).
 
 ## Recommended next slice
 
-1.1 is in. **Phase 1.2 + 1.3 are next**, rules-only and headless:
-
-1. `Unit.getLOSLevel()` and the LOS rewrite (2 levels standing, 1 prone).
-2. Partial cover detection (adjacent hex one level higher, along the LOS,
-   attacker's LOS level not higher) and the leg-hit-negation rule.
-
-Then 1.5–1.9 in the following PR, with the twist/flip declaration UI last
-(`torsoTwist` and `armsReversed` already drive the arc rules once something
-sets them).
+1.1–1.4 are in. **1.5–1.7 are next** (target state modifiers, attacker damage modifiers,
+multiple targets), then 1.8–1.9 with the twist/flip declaration UI last — `torsoTwist`
+and `armsReversed` already drive the arc rules once something sets them.

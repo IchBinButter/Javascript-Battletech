@@ -191,7 +191,9 @@ export class GameEngine {
     if (!attacker) return { success: false, error: 'Attacker not found' };
     if (!target) return { success: false, error: 'Target not found' };
 
-    const losResult = this.los.calculateLOS(attacker.position.hexKey, target.position.hexKey, state);
+    const losResult = this.los.calculateLOS(
+      attacker.position.hexKey, target.position.hexKey, state, { attacker, target }
+    );
     if (losResult.blocked) {
       return { success: false, error: `LOS blocked: ${losResult.reason}` };
     }
@@ -225,6 +227,11 @@ export class GameEngine {
 
       if (result.hit) {
         for (const hitLoc of result.hitLocations) {
+          // A hit absorbed by partial cover does nothing to the Mech (p26).
+          if (hitLoc.absorbedByCover) {
+            hitLoc.damageResult = { absorbedByCover: true, coverHex: hitLoc.coverHex };
+            continue;
+          }
           const damageResult = this.damageResolver.applyDamage(
             target, hitLoc.location, hitLoc.damage, hitLoc.isRear, this.diceRoller
           );

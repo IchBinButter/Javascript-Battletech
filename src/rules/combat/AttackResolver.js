@@ -5,7 +5,7 @@
 
 import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { LineOfSight } from './LineOfSight.js';
-import { canWeaponFireAt } from './ArcRules.js';
+import { canWeaponFireAt, isLegLocation } from './ArcRules.js';
 import { getHeatEffects } from '../heat/HeatScale.js';
 
 export class AttackResolver {
@@ -106,7 +106,8 @@ export class AttackResolver {
     const losResult = this.los.calculateLOS(
       attacker.position.hexKey,
       target.position.hexKey,
-      gameState
+      gameState,
+      { attacker, target }
     );
     if (losResult.woodsCount > 0) {
       tn += losResult.woodsCount;
@@ -219,11 +220,25 @@ export class AttackResolver {
       for (let i = 0; i < result.clusterHits; i++) {
         const locRoll = diceRoller.roll2d6();
         const location = this.determineHitLocation(locRoll, attackDirection);
+
+        // Partial cover (p26/p32): a leg hit strikes the cover instead. The
+        // hit is not re-rolled and does no damage to the Mech; if the cover is
+        // a building, the building takes it (urban combat, later).
+        const absorbedByCover = Boolean(
+          calc.losResult && calc.losResult.partialCover && isLegLocation(location.location)
+        );
+
+        if (absorbedByCover) {
+          result.details += `\n        Leg hit (${location.location}) absorbed by partial cover`;
+        }
+
         result.hitLocations.push({
           location: location.location,
           isRear: location.isRear || false,
-          damage: weaponDef.damage,
-          roll: locRoll
+          damage: absorbedByCover ? 0 : weaponDef.damage,
+          roll: locRoll,
+          absorbedByCover,
+          coverHex: absorbedByCover ? calc.losResult.partialCoverHex : undefined
         });
       }
     }
