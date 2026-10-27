@@ -11,8 +11,9 @@ describe('Integration: GameEngine Action Processing Flow', () => {
   function createEngineWithUnits() {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
     const jenner = createTestUnit('jenner-jr7d', 1, 'jenner-1');
-    atlas.position = { hexKey: '5,7', facing: 3 };
-    jenner.position = { hexKey: '7,7', facing: 0 };
+    // Facing each other, so weapon attacks are in arc (BMM p24).
+    atlas.position = { hexKey: '5,7', facing: 1 };
+    jenner.position = { hexKey: '7,7', facing: 4 };
 
     const engine = createTestEngine({
       units: { 'atlas-0': atlas, 'jenner-1': jenner }
@@ -390,11 +391,12 @@ describe('Integration: GameEngine Action Processing Flow', () => {
         if (!entry) break;
         const targetId = entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
 
-        engine.processAction(entry.playerId, {
+        const result = engine.processAction(entry.playerId, {
           type: 'fire', attackerId: entry.unitId, targetId,
           weapon: createWeaponDef('med_laser'), weaponLocation: 'rightArm'
         });
         turnOrder.push({ playerId: entry.playerId, unitId: entry.unitId });
+        if (!result.success) break; // never spin if the action was refused
       }
 
       expect(turnOrder).toHaveLength(2);
@@ -457,11 +459,12 @@ describe('Integration: GameEngine Action Processing Flow', () => {
         if (!entry) break;
         const targetId = entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
 
-        engine.processAction(entry.playerId, {
+        const result = engine.processAction(entry.playerId, {
           type: 'physicalAttack', attackerId: entry.unitId, targetId,
           attackType: 'punch'
         });
         turnOrder.push({ playerId: entry.playerId, unitId: entry.unitId });
+        if (!result.success) break;
       }
 
       expect(turnOrder).toHaveLength(2);
@@ -499,7 +502,13 @@ describe('Integration: GameEngine Action Processing Flow', () => {
           const startHex = unit.position.hexKey;
           const [col, row] = startHex.split(',').map(Number);
 
-          engine.processAction(entry.playerId, actionBuilder(entry, unit, col, row));
+          const result = engine.processAction(entry.playerId, actionBuilder(entry, unit, col, row));
+          if (!result || result.success === false) {
+            // Refused action (for example a shot with no firing arc): move the
+            // phase along so the flow itself is still exercised.
+            engine.processAction(entry.playerId, { type: 'endPhase' });
+            break;
+          }
         }
         phasesSeen.push(engine.phaseManager.currentPhase);
       }

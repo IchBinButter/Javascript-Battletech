@@ -12,7 +12,7 @@ audit of the current engine. Page references are BMM pages.
 | MP / TSM / MASC | ✅ complete | `src/rules/movement/maxMP.js` |
 | GATOR movement + range + heat + woods | ✅ matches p28 | `AttackResolver.calculateTargetNumber` |
 | Cluster hits, hit location, kick/punch tables | ✅ matches p33/137 | `src/data/hitTables.json` |
-| **Firing arcs** | ❌ **absent** | `torsoTwist` / `armsReversed` are stored and reset, never read |
+| **Firing arcs** | ✅ 1.1 done | `src/rules/combat/ArcRules.js`, enforced in `AttackResolver` and `GameEngine` |
 | **LOS height / partial cover** | ❌ wrong model | LOS compares hex heights only; no 2-level 'Mech height |
 | **Partial cover hit rule** | ❌ missing | +1 TN applied, but leg hits are not negated (p26) |
 | **Prone target modifier** | ❌ wrong | flat −4; rule is −2 adjacent / +1 otherwise (p28) |
@@ -35,7 +35,7 @@ between a dice calculator and a game.
 Nothing else matters until attacks care about direction. Every later feature
 (rear-mounted weapons, AMS arcs, physical attacks, indirect fire) depends on this.
 
-### 1.1 Firing arcs — new `src/rules/combat/ArcRules.js`
+### 1.1 Firing arcs — new `src/rules/combat/ArcRules.js`  ✅ done
 
 - `getArc(attacker, weaponLocation, targetHex, { torsoTwist, armsReversed })` returns
   `forward | left | right | rear`.
@@ -171,13 +171,12 @@ data-driven win — the tables are already in the KB).
 
 ## Recommended next slice
 
-**Phase 1.1 + 1.2 + 1.3 in one PR**, rules-only and headless:
+1.1 is in. **Phase 1.2 + 1.3 are next**, rules-only and headless:
 
-1. `ArcRules.js` + gate in `AttackResolver` and `GameEngine._handleFire`.
-2. `Unit.getLOSLevel()` and the LOS rewrite.
-3. Partial cover detection and the leg-hit-negation rule.
+1. `Unit.getLOSLevel()` and the LOS rewrite (2 levels standing, 1 prone).
+2. Partial cover detection (adjacent hex one level higher, along the LOS,
+   attacker's LOS level not higher) and the leg-hit-negation rule.
 
-That is the smallest change that makes the game *behave* like BattleTech. It needs no UI
-work, it is covered by pure unit tests, and every later phase builds on it.
-
-Then 1.4–1.9 in the following PR, with the twist/flip UI last.
+Then 1.5–1.9 in the following PR, with the twist/flip declaration UI last
+(`torsoTwist` and `armsReversed` already drive the arc rules once something
+sets them).

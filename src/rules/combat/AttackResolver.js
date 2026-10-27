@@ -5,6 +5,7 @@
 
 import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { LineOfSight } from './LineOfSight.js';
+import { canWeaponFireAt } from './ArcRules.js';
 import { getHeatEffects } from '../heat/HeatScale.js';
 
 export class AttackResolver {
@@ -21,10 +22,30 @@ export class AttackResolver {
    * O = Other mods (heat, damage, pilot hits, woods)
    * R = Range modifier
    */
-  calculateTargetNumber(attacker, weaponDef, target, gameState) {
+  calculateTargetNumber(attacker, weaponDef, target, gameState, options = {}) {
     const mods = [];
     let tn = attacker.pilot.gunnery;
     mods.push(`Gunnery: ${tn}`);
+
+    // F - Firing arc (p24). A weapon can only fire into arcs it bears on, so an
+    // out-of-arc shot is not a hard shot: it is not a shot at all.
+    let arcInfo = null;
+    if (options.weaponLocation) {
+      arcInfo = canWeaponFireAt(attacker, weaponDef, target.position.hexKey, {
+        weaponLocation: options.weaponLocation,
+        mount: weaponDef ? weaponDef.mount : undefined
+      });
+      if (!arcInfo.legal) {
+        return {
+          canFire: false,
+          outOfArc: true,
+          arc: arcInfo.arc,
+          targetNumber: 999,
+          modifiers: mods,
+          reason: arcInfo.reason
+        };
+      }
+    }
 
     // A - Attacker movement modifier
     const attackerMod = attacker.getAttackerMovementModifier();
@@ -125,6 +146,7 @@ export class AttackResolver {
 
     return {
       canFire: true,
+      arc: arcInfo ? arcInfo.arc : undefined,
       targetNumber: Math.max(2, tn),
       modifiers: mods,
       rangeMod,
@@ -146,11 +168,16 @@ export class AttackResolver {
    * }}
    */
   resolveWeaponAttack(attacker, weaponDef, weaponInstance, target, gameState, diceRoller) {
-    const calc = this.calculateTargetNumber(attacker, weaponDef, target, gameState);
+    const calc = this.calculateTargetNumber(attacker, weaponDef, target, gameState, {
+      weaponLocation: weaponInstance ? weaponInstance.location : undefined
+    });
 
     if (!calc.canFire) {
       return {
         hit: false,
+        canFire: false,
+        outOfArc: calc.outOfArc === true,
+        arc: calc.arc,
         roll: 0,
         targetNumber: 999,
         hitLocations: [],
@@ -165,6 +192,7 @@ export class AttackResolver {
 
     const result = {
       hit,
+      arc: calc.arc,
       roll,
       targetNumber: calc.targetNumber,
       hitLocations: [],

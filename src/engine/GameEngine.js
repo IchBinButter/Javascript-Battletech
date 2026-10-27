@@ -13,6 +13,7 @@ import { SkiddingRules } from '../rules/movement/SkiddingRules.js';
 import { FacingRules } from '../rules/movement/FacingRules.js';
 import { LineOfSight } from '../rules/combat/LineOfSight.js';
 import { AttackResolver } from '../rules/combat/AttackResolver.js';
+import { canWeaponFireAt } from '../rules/combat/ArcRules.js';
 import { DamageResolver } from '../rules/combat/DamageResolver.js';
 import { PhysicalAttackResolver } from '../rules/combat/PhysicalAttackResolver.js';
 import { HeatManager } from '../rules/heat/HeatManager.js';
@@ -196,6 +197,17 @@ export class GameEngine {
     }
 
     const weaponDef = action.weapon;
+
+    // Firing arcs (p24): reject an out-of-arc shot before any ammo or heat is
+    // spent, so an illegal declaration costs nothing.
+    if (action.weaponLocation) {
+      const arcCheck = canWeaponFireAt(attacker, weaponDef, target.position.hexKey, {
+        weaponLocation: action.weaponLocation
+      });
+      if (!arcCheck.legal) {
+        return { success: false, error: `Weapon cannot fire: ${arcCheck.reason}` };
+      }
+    }
 
     if (weaponDef.usesAmmo() && action.ammoBin) {
       const hasAmmo = attacker.consumeAmmo(action.ammoBin, weaponDef.ammoPerShot);

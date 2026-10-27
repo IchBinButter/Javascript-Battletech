@@ -715,7 +715,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
     });
 
     it('TN is clamped to minimum 2', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+      const { engine, atlas, jenner } = setupEngagement('5,7', '5,6');
       setupWeaponPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(8);
 

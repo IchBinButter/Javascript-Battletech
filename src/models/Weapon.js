@@ -17,6 +17,8 @@ export class Weapon {
     this.cluster = def.cluster || false;
     this.clusterSize = def.clusterSize || null;
     this.ammoPerShot = def.ammoPerShot || 0;
+    // 'front' | 'rear'; rear-mounted weapons carry an (R) on the record sheet
+    this.mount = def.mount || (def.special && def.special.rear ? 'rear' : 'front');
     this.special = def.special || {};
   }
 
