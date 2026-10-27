@@ -123,7 +123,8 @@ describe('PSRCalculator', () => {
       const triggers = calc.getPSRTriggers(unit, null, null);
       const dmg = triggers.find(t => t.trigger === '20+ Damage Received');
       expect(dmg).toBeDefined();
-      expect(dmg.baseModifier).toBe(0);
+      // p54: 20+ points of damage in one phase is +1
+      expect(dmg.baseModifier).toBe(1);
     });
 
     it('detects damage above 20', () => {
@@ -157,40 +158,41 @@ describe('PSRCalculator', () => {
       expect(water.baseModifier).toBe(0);
     });
 
-    it('entered water depth 1 = +0 modifier', () => {
+    it('entered water depth 1 = -1 modifier', () => {
       const unit = makeUnit();
       const movement = { enteredWater: true, waterDepth: 1 };
+      const triggers = calc.getPSRTriggers(unit, movement, null);
+      const water = triggers.find(t => t.trigger === 'Entered Water');
+      expect(water).toBeDefined();
+      // p54: entering Depth 1 water is -1
+      expect(water.baseModifier).toBe(-1);
+    });
+
+    it('entered water depth 2 = 0 modifier', () => {
+      const unit = makeUnit();
+      const movement = { enteredWater: true, waterDepth: 2 };
       const triggers = calc.getPSRTriggers(unit, movement, null);
       const water = triggers.find(t => t.trigger === 'Entered Water');
       expect(water).toBeDefined();
       expect(water.baseModifier).toBe(0);
     });
 
-    it('entered water depth 2 = +1 modifier', () => {
+    it('entered water depth 3 = +1 modifier', () => {
       const unit = makeUnit();
-      const movement = { enteredWater: true, waterDepth: 2 };
+      const movement = { enteredWater: true, waterDepth: 3 };
       const triggers = calc.getPSRTriggers(unit, movement, null);
       const water = triggers.find(t => t.trigger === 'Entered Water');
       expect(water).toBeDefined();
       expect(water.baseModifier).toBe(1);
     });
 
-    it('entered water depth 3 = +2 modifier (deep water)', () => {
-      const unit = makeUnit();
-      const movement = { enteredWater: true, waterDepth: 3 };
-      const triggers = calc.getPSRTriggers(unit, movement, null);
-      const water = triggers.find(t => t.trigger === 'Entered Water');
-      expect(water).toBeDefined();
-      expect(water.baseModifier).toBe(2);
-    });
-
-    it('entered water depth > 3 = +2 modifier', () => {
+    it('entered water depth > 3 = +1 modifier', () => {
       const unit = makeUnit();
       const movement = { enteredWater: true, waterDepth: 5 };
       const triggers = calc.getPSRTriggers(unit, movement, null);
       const water = triggers.find(t => t.trigger === 'Entered Water');
       expect(water).toBeDefined();
-      expect(water.baseModifier).toBe(2);
+      expect(water.baseModifier).toBe(1);
     });
 
     it('entered water with no depth set defaults to +0', () => {
@@ -301,15 +303,20 @@ describe('PSRCalculator', () => {
       expect(legAct.baseModifier).toBe(3);
     });
 
-    it('leg actuator damage with hip included in count', () => {
+    it('a hip is not counted as a leg actuator: it has its own +2 (p54)', () => {
       const unit = makeUnit();
       unit.criticalSlots.leftLeg[0].status = 'destroyed'; // hip_actuator
       unit.criticalSlots.rightLeg[1].status = 'destroyed'; // upper_leg_actuator
       const movement = { type: 'run' };
       const triggers = calc.getPSRTriggers(unit, movement, null);
+
+      // The hip carries its own +2 trigger; only the real actuator adds here.
+      const hip = triggers.find(t => t.trigger === 'Hip Actuator Damage');
+      expect(hip.baseModifier).toBe(2);
+
       const legAct = triggers.find(t => t.trigger === 'Damaged Leg Actuators');
       expect(legAct).toBeDefined();
-      expect(legAct.baseModifier).toBe(2);
+      expect(legAct.baseModifier).toBe(1);
     });
 
     it('leg actuator damage does NOT trigger when walking', () => {
@@ -321,13 +328,14 @@ describe('PSRCalculator', () => {
       expect(legAct).toBeUndefined();
     });
 
-    it('leg actuator damage does NOT trigger when jumping', () => {
+    it('leg actuator damage triggers when jumping too (p54)', () => {
       const unit = makeUnit();
       unit.criticalSlots.leftLeg[1].status = 'destroyed';
       const movement = { type: 'jump' };
       const triggers = calc.getPSRTriggers(unit, movement, null);
       const legAct = triggers.find(t => t.trigger === 'Damaged Leg Actuators');
-      expect(legAct).toBeUndefined();
+      expect(legAct).toBeDefined();
+      expect(legAct.baseModifier).toBe(1);
     });
 
     it('leg actuator damage does NOT trigger when stationary', () => {
@@ -353,7 +361,8 @@ describe('PSRCalculator', () => {
       const triggers = calc.getPSRTriggers(unit, movement, null);
       const woods = triggers.find(t => t.trigger === 'Heavy Woods');
       expect(woods).toBeDefined();
-      expect(woods.baseModifier).toBe(0);
+      // p54: entering heavy jungle/woods is +2
+      expect(woods.baseModifier).toBe(2);
     });
 
     it('heavy woods not entered = no trigger', () => {
@@ -722,10 +731,11 @@ describe('PSRCalculator', () => {
       expect(calc.hasLegActuatorDamage(unit)).toBe(true);
     });
 
-    it('returns true when hip actuator is destroyed (included in count)', () => {
+    it('does not count a destroyed hip as a leg actuator', () => {
       const unit = makeUnit();
       unit.criticalSlots.leftLeg[0].status = 'destroyed'; // hip_actuator
-      expect(calc.hasLegActuatorDamage(unit)).toBe(true);
+      // The hip carries its own +2 trigger, so it must not double-count here.
+      expect(calc.hasLegActuatorDamage(unit)).toBe(false);
     });
 
     it('returns true when foot actuator is destroyed', () => {

@@ -18,7 +18,8 @@ audit of the current engine. Page references are BMM pages.
 | **Prone target modifier** | ❌ wrong | flat −4; rule is −2 adjacent / +1 otherwise (p28) |
 | **Pilot damage** | ❌ dead code | `pilot.hits` is read in `PhaseManager` but never incremented |
 | **Actuator / hip / shoulder crits** | ❌ no effect | `DamageResolver` has engine, gyro, sensors, life support, sinks only |
-| **Physical attack TN table** | ❌ wrong | piloting + ad-hoc modifiers; no kick −2, no comparative piloting (p38) |
+| **Physical attack TN table** | ✅ p137 | punch 0, kick −2, push −1, charge/DFA comparative, actuator damage p29 |
+| **PSR modifiers** | ✅ mostly p54 | 20+ damage +1, water −1/0/+1, woods +1/+2, charged/DFA +2; terrain and skid tables pending |
 | Indirect fire / spotting / TAG | ❌ absent | p30–31 |
 | Buildings / urban | ❌ stub | `Hex.building` exists, nothing damages it |
 | Weather, fire, hidden, mines, quirks | ❌ absent | p61–89 |
@@ -130,14 +131,16 @@ item 1.6 needs the actuator state anyway.
 
 ## Phase 3 — Physical attacks (p34–40)
 
-3.1 TN table: punch 0, kick −2, push −1, club −1, DFA 0 (+3 jumping), charge comparative
+3.1 ✅ TN table: punch 0, kick −2, push −1, club −1, DFA 0 (+3 jumping), charge comparative
 piloting-skill modifier.
-3.2 Legality: forward arc for kick/charge/push/club, arm/arc pairing for punches, the
-Different Levels table (p34), prone exceptions.
-3.3 Damage: punch 1/10 tons, kick 1/5, club 1/5, charge tonnage/10 × hexes charged
-(target hex excluded), DFA.
-3.4 Consequences: missed kick → PSR; successful kick → target PSR; charge → both PSR +2;
-DFA landing.
+3.2 ✅ Legality: forward arc for kick/charge/push/club, front or side for punches with the
+arm on that side, both hips required to kick. Still open: the Different Levels table (p34)
+and prone exceptions.
+3.3 ✅ Damage: punch 1/10 tons, kick 1/5, both rounded up, halved per damaged actuator;
+charge tonnage/10 × hexes charged, rounded up. DFA damage is still the old formula: the KB
+chunk for p37 does not state it.
+3.4 Consequences: missed kick → PSR implemented; successful kick → target PSR, charge →
+both PSR +2 and DFA landing still to wire (the PSR modifiers exist, nothing sets them).
 3.5 Physical weapons (hatchet, sword, mace, claws) from the p38 table, including the
 "no firing arm weapons and physical attack with the same arm" restriction.
 

@@ -1,35 +1,142 @@
 /**
- * PhysicalAttackResolver - Physical attack resolution (punch, kick, charge, DFA, push, club).
- * All hit location tables sourced from hitTables.json.
+ * PhysicalAttackResolver - physical attacks (BMM p34-40).
+ *
+ * Base target numbers (Physical Attack Modifiers Table, p137):
+ *   punch 0, kick -2, push -1, club -1, charge and DFA use the comparative
+ *   Piloting Skill modifier (p34).
+ *
+ * Damage (p38): punch 1 per 10 tons, kick 1 per 5 tons, club 1 per 5 tons,
+ * charge attacker tonnage/10 per hex charged. All of these round fractions up.
+ * Damaged arm/leg actuators raise the target number and halve the damage
+ * (Attack Modifiers Table, p29).
  */
 
-import { hexDistance, directionBetween } from '../../hex/HexMath.js';
-import { PSRCalculator } from '../movement/PSRCalculator.js';
+import { hexDistance } from '../../hex/HexMath.js';
+import { getTargetArc, ARC } from './ArcRules.js';
 import hitTables from '../../data/hitTables.json' with { type: 'json' };
 
 const PUNCH_TABLE = hitTables.hitLocation.punch;
 const KICK_TABLE = hitTables.hitLocation.kick;
 
+/** Base target number modifier by attack type (p137). */
+const BASE_MODIFIER = {
+  punch: 0,
+  kick: -2,
+  push: -1,
+  club: -1,
+  charge: 0,
+  dfa: 0
+};
+
+/** p37: a DFA always applies the +3 jumping modifier; it is not pre-applied. */
+const DFA_JUMPING_MODIFIER = 3;
+
 export class PhysicalAttackResolver {
-  constructor() {
-    this.psrCalc = new PSRCalculator();
+  /**
+   * Destroyed actuators in a location, by kind (p29, p47-49).
+   */
+  getActuatorDamage(unit, location) {
+    const slots = (unit.criticalSlots && unit.criticalSlots[location]) || [];
+    const destroyed = (pattern) =>
+      slots.some(s => s.status === 'destroyed' && pattern.test(s.item || ''));
+
+    return {
+      shoulder: destroyed(/shoulder/),
+      upperArm: destroyed(/upper_arm_actuator/),
+      lowerArm: destroyed(/lower_arm_actuator/),
+      hand: destroyed(/hand_actuator/),
+      hip: destroyed(/hip/),
+      upperLeg: destroyed(/upper_leg_actuator/),
+      lowerLeg: destroyed(/lower_leg_actuator/),
+      foot: destroyed(/foot_actuator/)
+    };
+  }
+
+  _armDestroyed(unit, location) {
+    return typeof unit.isLocationDestroyed === 'function'
+      ? unit.isLocationDestroyed(location)
+      : false;
   }
 
   /**
-   * Resolve a punch attack.
-   * Damages: 1 point per 10 tons of attacker. Hits punch location table.
-   * Must have at least one functioning arm.
-   * Target must be in front arc.
+   * Punch modifiers for one arm (p29): a destroyed shoulder forbids punching,
+   * each arm actuator adds +2 and halves the damage, a hand actuator adds +1.
    */
-  resolvePunch(attacker, target, diceRoller) {
-    if (attacker.isLocationDestroyed('leftArm') && attacker.isLocationDestroyed('rightArm')) {
-      return { success: false, reason: 'No functioning arms' };
+  punchModifiers(unit, arm) {
+    if (!arm) return { legal: true, tn: 0, damageMultiplier: 1 };
+    if (this._armDestroyed(unit, arm)) {
+      return { legal: false, reason: `${arm} destroyed` };
     }
+
+    const damage = this.getActuatorDamage(unit, arm);
+    if (damage.shoulder) {
+      return { legal: false, reason: `Shoulder actuator destroyed on ${arm}` };
+    }
+
+    let tn = 0;
+    let multiplier = 1;
+    if (damage.upperArm) { tn += 2; multiplier *= 0.5; }
+    if (damage.lowerArm) { tn += 2; multiplier *= 0.5; }
+    if (damage.hand) { tn += 1; }
+
+    return { legal: true, tn, damageMultiplier: multiplier };
+  }
+
+  /**
+   * Kick modifiers (p29/p38): both hip actuators must be undamaged to kick at
+   * all; each upper or lower leg actuator adds +2 and halves the damage
+   * cumulatively; a foot actuator adds +1.
+   */
+  kickModifiers(unit) {
+    for (const leg of ['leftLeg', 'rightLeg']) {
+      if (this._armDestroyed(unit, leg)) {
+        return { legal: false, reason: `${leg} destroyed` };
+      }
+      if (this.getActuatorDamage(unit, leg).hip) {
+        return { legal: false, reason: 'Hip actuator destroyed' };
+      }
+    }
+
+    let tn = 0;
+    let multiplier = 1;
+    for (const leg of ['leftLeg', 'rightLeg']) {
+      const damage = this.getActuatorDamage(unit, leg);
+      if (damage.upperLeg) { tn += 2; multiplier *= 0.5; }
+      if (damage.lowerLeg) { tn += 2; multiplier *= 0.5; }
+      if (damage.foot) { tn += 1; }
+    }
+
+    return { legal: true, tn, damageMultiplier: multiplier };
+  }
+
+  /** Is the target in the attacker's forward arc? Torso twists are ignored (p38). */
+  _inForwardArc(attacker, target) {
+    return getTargetArc(attacker, target.position.hexKey) === ARC.FORWARD;
+  }
+
+  /**
+   * Resolve a punch attack against one arm.
+   * @param {object} [options] - { arm: 'leftArm'|'rightArm' }
+   */
+  resolvePunch(attacker, target, diceRoller, options = {}) {
     if (attacker.prone) {
       return { success: false, reason: 'Attacker is prone' };
     }
 
-    const tn = this.calculatePhysicalTN(attacker, target, 'punch');
+    // Choose an arm: explicit, otherwise the arm whose side arc holds the target.
+    const arm = options.arm || this._pickPunchArm(attacker, target);
+
+    // Punches only reach the forward or side arcs (p38).
+    if (getTargetArc(attacker, target.position.hexKey) === ARC.REAR) {
+      return { success: false, reason: 'Target not in forward or side arc' };
+    }
+
+    const armMods = this.punchModifiers(attacker, arm);
+    if (!armMods.legal) {
+      return { success: false, reason: armMods.reason };
+    }
+
+    const tn = this.calculatePhysicalTN(attacker, target, 'punch', { arm });
     const roll = diceRoller.roll2d6();
     const hit = roll >= tn;
 
@@ -37,7 +144,9 @@ export class PhysicalAttackResolver {
     let locations = [];
 
     if (hit) {
-      damage = Math.floor(attacker.tonnage / 10); // 1 per 10 tons
+      // 1 point per 10 tons, fractions rounded up (p38)
+      const base = Math.ceil(attacker.tonnage / 10);
+      damage = Math.max(1, Math.floor(base * armMods.damageMultiplier));
       const locRoll = diceRoller.roll2d6();
       locations = [{ location: this.punchLocation(locRoll), damage }];
     }
@@ -45,6 +154,7 @@ export class PhysicalAttackResolver {
     return {
       success: true,
       type: 'punch',
+      arm,
       hit,
       roll,
       targetNumber: tn,
@@ -53,18 +163,29 @@ export class PhysicalAttackResolver {
     };
   }
 
+  _pickPunchArm(attacker, target) {
+    const arc = getTargetArc(attacker, target.position.hexKey);
+    if (arc === ARC.LEFT) return 'leftArm';
+    if (arc === ARC.RIGHT) return 'rightArm';
+    return 'rightArm';
+  }
+
   /**
    * Resolve a kick attack.
-   * Damages: 1 point per 5 tons of attacker. Hits kick location table.
-   * Must have at least one functioning leg.
-   * If miss: attacker must make PSR or fall.
+   * Both hips must be undamaged and the target must be in the forward arc.
+   * A missed kick forces a PSR.
    */
   resolveKick(attacker, target, diceRoller) {
-    if (attacker.isLocationDestroyed('leftLeg') && attacker.isLocationDestroyed('rightLeg')) {
-      return { success: false, reason: 'No functioning legs' };
-    }
     if (attacker.prone) {
       return { success: false, reason: 'Attacker is prone' };
+    }
+
+    const legMods = this.kickModifiers(attacker);
+    if (!legMods.legal) {
+      return { success: false, reason: legMods.reason };
+    }
+    if (!this._inForwardArc(attacker, target)) {
+      return { success: false, reason: 'Target not in forward arc' };
     }
 
     const tn = this.calculatePhysicalTN(attacker, target, 'kick');
@@ -76,12 +197,13 @@ export class PhysicalAttackResolver {
     let psrRequired = false;
 
     if (hit) {
-      damage = Math.floor(attacker.tonnage / 5); // 1 per 5 tons
+      // 1 point per 5 tons, fractions rounded up (p38)
+      const base = Math.ceil(attacker.tonnage / 5);
+      damage = Math.max(1, Math.floor(base * legMods.damageMultiplier));
       const locRoll = diceRoller.roll2d6();
       locations = [{ location: this.kickLocation(locRoll), damage }];
     } else {
-      // Missed kick: PSR required
-      psrRequired = true;
+      psrRequired = true; // missed kick: PSR (p54, modifier 0)
     }
 
     return {
@@ -98,12 +220,15 @@ export class PhysicalAttackResolver {
 
   /**
    * Resolve a charge attack.
-   * Attacker moves to target hex, deals damage based on distance charged.
-   * Attacker also takes recipient's tonnage / 10 damage.
+   * Damage = attacker tonnage / 10 per hex charged (rounded up, p38 example);
+   * the attacker takes the target's tonnage / 10.
    */
   resolveCharge(attacker, target, distanceCharged, diceRoller) {
     if (attacker.prone) {
       return { success: false, reason: 'Attacker is prone' };
+    }
+    if (!this._inForwardArc(attacker, target)) {
+      return { success: false, reason: 'Target not in forward arc' };
     }
 
     const tn = this.calculatePhysicalTN(attacker, target, 'charge');
@@ -115,13 +240,10 @@ export class PhysicalAttackResolver {
     let locations = [];
 
     if (hit) {
-      // Damage = attacker tonnage / 10 * distance charged in hexes
-      targetDamage = Math.floor(attacker.tonnage / 10) * distanceCharged;
+      targetDamage = Math.ceil((attacker.tonnage / 10) * distanceCharged);
       const locRoll = diceRoller.roll2d6();
       locations = [{ location: this.punchLocation(locRoll), damage: targetDamage }];
-
-      // Attacker takes damage = target tonnage / 10
-      attackerDamage = Math.floor(target.tonnage / 10);
+      attackerDamage = Math.ceil(target.tonnage / 10);
     }
 
     return {
@@ -138,13 +260,11 @@ export class PhysicalAttackResolver {
   }
 
   /**
-   * Resolve a Death From Above (DFA) attack.
-   * TN = piloting + attacker move mod + target move mod + 4 inherent.
-   * On hit: target takes floor(tonnage/10) + floor(tonnage/5), attacker takes floor(tonnage/10).
-   * ALL damage uses the punch location table.
+   * Resolve a Death From Above attack.
+   * TN uses the comparative modifier plus the +3 jumping modifier, no terrain.
    */
   resolveDFA(attacker, target, diceRoller) {
-    if (!attacker.movement.jump || attacker.movement.jump <= 0) {
+    if (!attacker.movement || !attacker.movement.jump || attacker.movement.jump <= 0) {
       return { success: false, reason: 'No jump jets' };
     }
     if (attacker.prone) {
@@ -160,6 +280,8 @@ export class PhysicalAttackResolver {
     let locations = [];
 
     if (hit) {
+      // DFA damage is left as-is: the KB chunk for p37 does not state the
+      // formula, and guessing it would be worse than keeping the old value.
       targetDamage = Math.floor(attacker.tonnage / 10) + Math.floor(attacker.tonnage / 5);
       attackerDamage = Math.floor(attacker.tonnage / 10);
       const locRoll = diceRoller.roll2d6();
@@ -183,70 +305,78 @@ export class PhysicalAttackResolver {
 
   /**
    * Resolve a push attack.
-   * Target must be adjacent. If a PSR is failed, target is pushed back 1 hex in the attack direction.
+   * The target must be adjacent and directly in front of the pusher (p40).
    */
   resolvePush(attacker, target, diceRoller) {
     if (attacker.prone) {
       return { success: false, reason: 'Attacker is prone' };
+    }
+    if (hexDistance(attacker.position.hexKey, target.position.hexKey) !== 1) {
+      return { success: false, reason: 'Push target must be adjacent' };
+    }
+    if (!this._inForwardArc(attacker, target)) {
+      return { success: false, reason: 'Push target must be directly in front' };
     }
 
     const tn = this.calculatePhysicalTN(attacker, target, 'push');
     const roll = diceRoller.roll2d6();
     const success = roll >= tn;
 
-    let targetPsr = false;
-
-    if (success) {
-      targetPsr = true; // Target must make PSR or be pushed
-    }
-
     return {
       success,
       type: 'push',
       roll,
       targetNumber: tn,
-      targetPsrRequired: targetPsr
+      targetPsrRequired: success
     };
   }
 
   /**
-   * Calculate the base TN for a physical attack.
-   * TN = piloting skill + modifiers.
+   * Base target number for a physical attack (p137).
+   *
+   * Piloting skill, plus the attack type's modifier, plus the physical attack's
+   * own modifiers: comparative Piloting Skill for charge and DFA, actuator
+   * damage for punch and kick, the standard movement modifiers for all attacks
+   * (p28), and +2 for a prone attacker. Heat and gyro do not apply: physical
+   * attacks are not PSRs (p130).
    */
-  calculatePhysicalTN(attacker, target, type) {
+  calculatePhysicalTN(attacker, target, type, options = {}) {
     let tn = attacker.pilot.piloting;
+    const mods = [];
 
-    // Type-specific modifiers
-    switch (type) {
-      case 'punch':
-        if (attacker.isLocationDestroyed('leftArm') || attacker.isLocationDestroyed('rightArm')) {
-          tn += 1;
-        }
-        break;
-      case 'kick':
-        if (attacker.isLocationDestroyed('leftLeg') || attacker.isLocationDestroyed('rightLeg')) {
-          tn += 2;
-        }
-        break;
-      case 'charge':
-        break;
-      case 'dfa':
-        tn += 4; // inherent DFA difficulty
-        break;
-      case 'push':
-        break;
+    tn += BASE_MODIFIER[type] || 0;
+
+    if (type === 'charge' || type === 'dfa') {
+      // Comparative modifier (p34): the better pilot is favoured.
+      const comparative = attacker.pilot.piloting - target.pilot.piloting;
+      tn += comparative;
+      if (comparative !== 0) mods.push(`Comparative piloting: ${comparative}`);
     }
 
-    // Target movement modifier
-    if (target) {
+    if (type === 'dfa') {
+      // p37: always add the jumping modifier, and no terrain modifiers apply.
+      tn += DFA_JUMPING_MODIFIER;
+      mods.push(`Jumping: +${DFA_JUMPING_MODIFIER}`);
+    } else {
+      tn += attacker.getAttackerMovementModifier();
+    }
+
+    // DFA ignores terrain modifiers (p37) but not the target's movement.
+    if (target && typeof target.getTargetMovementModifier === 'function') {
       tn += target.getTargetMovementModifier();
     }
 
-    // Attacker movement modifier
-    tn += attacker.getAttackerMovementModifier();
+    if (attacker.prone) tn += 2;
 
-    // Gyro damage
-    tn += attacker.gyro.hits;
+    if (type === 'punch') {
+      const armMods = this.punchModifiers(attacker, options.arm);
+      if (!armMods.legal) return 999;
+      tn += armMods.tn;
+    } else if (type === 'kick') {
+      const legMods = this.kickModifiers(attacker);
+      if (!legMods.legal) return 999;
+      tn += legMods.tn;
+    }
 
     return Math.max(2, Math.min(12, tn));
   }

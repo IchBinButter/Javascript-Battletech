@@ -14,8 +14,13 @@ export class PSRCalculator {
     const triggers = [];
 
     if (movement) {
+      // p54: entering light jungle/woods +1, heavy +2
+      if (movement.enteredLightWoods) {
+        triggers.push({ trigger: 'Light Woods', baseModifier: 1 });
+      }
+
       if (movement.enteredHeavyWoods) {
-        triggers.push({ trigger: 'Heavy Woods', baseModifier: 0 });
+        triggers.push({ trigger: 'Heavy Woods', baseModifier: 2 });
       }
 
       if (movement.enteredRubble) {
@@ -34,9 +39,12 @@ export class PSRCalculator {
         triggers.push({ trigger: 'Rapid Turn (Running)', baseModifier: 0 });
       }
 
-      if (movement.type === 'run' && this.hasLegActuatorDamage(unit)) {
+      // p54: running or jumping with damaged leg/foot actuators, +1 each
+      if ((movement.type === 'run' || movement.type === 'jump') && this.hasLegActuatorDamage(unit)) {
         const legHits = this._countActuatorHits(unit, 'leftLeg') + this._countActuatorHits(unit, 'rightLeg');
-        triggers.push({ trigger: 'Damaged Leg Actuators', baseModifier: legHits });
+        if (legHits > 0) {
+          triggers.push({ trigger: 'Damaged Leg Actuators', baseModifier: legHits });
+        }
       }
 
       if (movement.jumpedIntoWoods) {
@@ -44,8 +52,9 @@ export class PSRCalculator {
       }
 
       if (movement.enteredWater) {
+        // p54: entering Depth 1 water is -1, Depth 2 is 0, Depth 3+ is +1
         const depth = movement.waterDepth || 0;
-        const waterMod = depth <= 1 ? 0 : depth === 2 ? 1 : 2;
+        const waterMod = depth === 1 ? -1 : depth >= 3 ? 1 : 0;
         triggers.push({ trigger: 'Entered Water', baseModifier: waterMod });
       }
 
@@ -56,11 +65,17 @@ export class PSRCalculator {
     }
 
     if (unit._damageThisPhase >= 20) {
-      triggers.push({ trigger: '20+ Damage Received', baseModifier: 0 });
+      // p54: 20+ points of damage in one phase is +1, once, however much it is
+      triggers.push({ trigger: '20+ Damage Received', baseModifier: 1 });
     }
 
     if (unit._physicalAttackReceived) {
-      triggers.push({ trigger: 'Physical Attack Received', baseModifier: 0 });
+      // p54: being kicked or pushed is 0, being charged or hit by a DFA is +2
+      const kind = typeof unit._physicalAttackReceived === 'string'
+        ? unit._physicalAttackReceived
+        : '';
+      const physicalMod = kind === 'charge' || kind === 'dfa' ? 2 : 0;
+      triggers.push({ trigger: 'Physical Attack Received', baseModifier: physicalMod });
     }
 
     if (unit.gyro.hits >= 1) {
@@ -169,7 +184,7 @@ export class PSRCalculator {
     const left = unit.criticalSlots.leftLeg || [];
     const right = unit.criticalSlots.rightLeg || [];
     for (const slot of [...left, ...right]) {
-      if (slot.item === 'hip_actuator' && slot.status === 'destroyed') return true;
+      if ((slot.item || '').includes('hip') && slot.status === 'destroyed') return true;
     }
     return false;
   }
@@ -180,8 +195,12 @@ export class PSRCalculator {
 
   _countActuatorHits(unit, leg) {
     const slots = unit.criticalSlots[leg] || [];
+    // A hip has its own +2 modifier and replaces the other leg modifiers
+    // (p54, footnote 3), so it must not also count as a leg/foot actuator.
     return slots.filter(s =>
-      s.item.includes('actuator') && s.status === 'destroyed'
+      (s.item || '').includes('actuator') &&
+      !(s.item || '').includes('hip') &&
+      s.status === 'destroyed'
     ).length;
   }
 }

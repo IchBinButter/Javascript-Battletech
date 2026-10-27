@@ -395,7 +395,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
 
   describe('physical attacks', () => {
     it('punch uses punch hit table (head on roll 2 and 12, no legs)', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+      const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
 
       const sequencer = makeSequencedDiceRoller([8, 2]); // hit on roll 8, loc roll 2
@@ -424,7 +424,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
     });
 
     it('kick uses kick table (legs only)', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+      const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
 
       const sequencer = makeSequencedDiceRoller([8, 3]); // hit on roll 8, loc roll 3
@@ -466,7 +466,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
     });
 
     it('punch is rejected when both arms are destroyed', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+      const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(8);
 
@@ -481,11 +481,11 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.reason).toBe('No functioning arms');
+      expect(result.reason).toContain('destroyed');
     });
 
     it('kick is rejected when both legs are destroyed', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+      const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(8);
 
@@ -500,11 +500,11 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.reason).toBe('No functioning legs');
+      expect(result.reason).toContain('destroyed');
     });
 
     it('missed kick requires PSR', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+      const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(2); // always miss
 
@@ -519,8 +519,8 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       expect(result.psrRequired).toBe(true);
     });
 
-    it('Jenner punch damage = floor(35/10) = 3', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+    it('Jenner punch damage = ceil(35/10) = 4', () => {
+      const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
       engine.phaseManager.clearQueue();
       engine.stateManager.getState().currentPlayer = 1;
@@ -536,12 +536,12 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
 
       expect(result.success).toBe(true);
       if (result.hit) {
-        expect(result.damage).toBe(3);
+        expect(result.damage).toBe(4);
       }
     });
 
     it('Jenner kick damage = floor(35/5) = 7', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+      const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
       engine.phaseManager.clearQueue();
       engine.stateManager.getState().currentPlayer = 1;
@@ -855,7 +855,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
     });
 
     it('physical attack also resolves damage', () => {
-      const { engine, atlas, jenner } = setupEngagement('5,7', '5,8');
+      const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
 
       const initialArmor = jenner.getArmor('centerTorso');
