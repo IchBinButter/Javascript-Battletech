@@ -153,12 +153,21 @@ yet, so the rules are tested but unreachable in play).
 
 ---
 
-## Phase 4 — Indirect fire and spotting (p30–31)
+## Phase 4 — Indirect fire and spotting (p30–31)  ✅ done
 
-Spotter declaration, +1 indirect modifier, spotter movement and terrain from the
-spotter's LOS, cannot fire indirectly with LOS to the target, aimed shots vs immobile.
+- LRMs may fire at a target the attacker cannot see, provided a friendly spotter can;
+  a Mech with its own line of sight cannot fire indirectly
+- target number: +1 indirect, the spotter's own movement modifier, terrain and partial
+  cover taken from the spotter's line of sight, +1 more when the spotter also attacked
+- a Mech that spots and attacks takes +1 on its own attacks
+- indirect damage always strikes the target, including on a leg hit, unless the cover is
+  water (p30)
+- aimed shots (p30): immobile targets only, no cluster weapons, never with indirect fire;
+  a 6–8 on the follow-up roll lands the shot on the designated location
 
-**Size:** M. Needs Phase 1 arcs and LOS height.
+Still open: TAG designation and Narc spotting (no equipment data for either), the Artemis
+bonus suppression (no Artemis in the data), and the rule that a spotter may not have
+charged or launched a DFA that turn (needs declaration tracking).
 
 ---
 

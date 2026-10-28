@@ -181,6 +181,12 @@ export class PhaseManager {
     const state = this.engine.stateManager.getState();
     state.phase = 'weapon_attack';
 
+    // Spotting and attacking are per-phase (p30).
+    for (const unit of Object.values(state.units)) {
+      unit.spottedThisPhase = null;
+      unit.attackedThisPhase = false;
+    }
+
     const winner = state.initiativeWinner;
     const players = state.players;
     const loser = players.find(p => p.id !== winner) || players[0];

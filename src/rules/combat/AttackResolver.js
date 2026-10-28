@@ -102,16 +102,48 @@ export class AttackResolver {
       mods.push(`Pilot hits: +${attacker.pilot.hits}`);
     }
 
-    // O - Woods between attacker and target
+    // O - Terrain and woods come from the line of sight that matters: the
+    // attacker's own, or the spotter's for indirect fire (p30).
+    const isIndirect = Boolean(options.indirect);
+    const spotter = options.spotter || null;
+    const losSource = isIndirect && spotter ? spotter : attacker;
+
     const losResult = this.los.calculateLOS(
-      attacker.position.hexKey,
+      losSource.position.hexKey,
       target.position.hexKey,
       gameState,
-      { attacker, target }
+      { attacker: losSource, target }
     );
     if (losResult.woodsCount > 0) {
       tn += losResult.woodsCount;
       mods.push(`Woods between: +${losResult.woodsCount}`);
+    }
+
+    if (isIndirect) {
+      // p30: +1 for indirect fire, plus the spotter's own movement modifier.
+      tn += 1;
+      mods.push('Indirect fire: +1');
+
+      if (spotter) {
+        const spotterMove = typeof spotter.getAttackerMovementModifier === 'function'
+          ? spotter.getAttackerMovementModifier()
+          : 0;
+        if (spotterMove > 0) {
+          tn += spotterMove;
+          mods.push(`Spotter moved: +${spotterMove}`);
+        }
+      }
+
+      if (options.spotterAttacked) {
+        tn += 1;
+        mods.push('Spotter attacked: +1');
+      }
+    }
+
+    // p30: a Mech that spots and also attacks takes +1 on its own attacks.
+    if (attacker.spottedThisPhase) {
+      tn += 1;
+      mods.push('Spotting for indirect fire: +1');
     }
 
     // O - Targeting Computer
@@ -148,6 +180,8 @@ export class AttackResolver {
     return {
       canFire: true,
       arc: arcInfo ? arcInfo.arc : undefined,
+      indirect: isIndirect,
+      partialCoverKind: losResult.partialCoverKind,
       targetNumber: Math.max(2, tn),
       modifiers: mods,
       rangeMod,
@@ -168,9 +202,38 @@ export class AttackResolver {
    *   clusterHits: number
    * }}
    */
-  resolveWeaponAttack(attacker, weaponDef, weaponInstance, target, gameState, diceRoller) {
+  resolveWeaponAttack(attacker, weaponDef, weaponInstance, target, gameState, diceRoller, options = {}) {
+    const isIndirect = Boolean(options.indirect);
+    const isAimed = Boolean(options.aimedLocation);
+
+    // Aimed shots (p30): immobile targets only, no cluster weapons, and never
+    // combined with indirect fire.
+    if (isAimed) {
+      if (!target.immobile) {
+        return {
+          hit: false, canFire: false, roll: 0, targetNumber: 999, hitLocations: [],
+          clusterHits: 0, details: 'Aimed shots require an immobile target', modifiers: []
+        };
+      }
+      if (weaponDef.cluster) {
+        return {
+          hit: false, canFire: false, roll: 0, targetNumber: 999, hitLocations: [],
+          clusterHits: 0, details: 'Cluster weapons cannot make aimed shots', modifiers: []
+        };
+      }
+      if (isIndirect) {
+        return {
+          hit: false, canFire: false, roll: 0, targetNumber: 999, hitLocations: [],
+          clusterHits: 0, details: 'No aimed shots with indirect fire', modifiers: []
+        };
+      }
+    }
+
     const calc = this.calculateTargetNumber(attacker, weaponDef, target, gameState, {
-      weaponLocation: weaponInstance ? weaponInstance.location : undefined
+      weaponLocation: weaponInstance ? weaponInstance.location : undefined,
+      indirect: isIndirect,
+      spotter: options.spotter,
+      spotterAttacked: options.spotterAttacked
     });
 
     if (!calc.canFire) {
@@ -179,6 +242,7 @@ export class AttackResolver {
         canFire: false,
         outOfArc: calc.outOfArc === true,
         arc: calc.arc,
+        indirect: isIndirect,
         roll: 0,
         targetNumber: 999,
         hitLocations: [],
@@ -194,6 +258,7 @@ export class AttackResolver {
     const result = {
       hit,
       arc: calc.arc,
+      indirect: isIndirect,
       roll,
       targetNumber: calc.targetNumber,
       hitLocations: [],
@@ -219,14 +284,27 @@ export class AttackResolver {
       const attackDirection = this.getAttackDirection(attacker, target);
       for (let i = 0; i < result.clusterHits; i++) {
         const locRoll = diceRoller.roll2d6();
-        const location = this.determineHitLocation(locRoll, attackDirection);
+        let location = this.determineHitLocation(locRoll, attackDirection);
 
-        // Partial cover (p26/p32): a leg hit strikes the cover instead. The
-        // hit is not re-rolled and does no damage to the Mech; if the cover is
-        // a building, the building takes it (urban combat, later).
-        const absorbedByCover = Boolean(
-          calc.losResult && calc.losResult.partialCover && isLegLocation(location.location)
+        // Aimed shot (p30): on 6, 7 or 8 the shot lands on the designated spot.
+        if (isAimed && i === 0) {
+          const aimRoll = diceRoller.roll2d6();
+          result.aimRoll = aimRoll;
+          if (aimRoll >= 6 && aimRoll <= 8) {
+            location = { location: options.aimedLocation, isRear: false };
+            result.details += `\n        Aimed shot (${aimRoll}) hits ${options.aimedLocation}`;
+          } else {
+            result.details += `\n        Aimed shot (${aimRoll}) misses the mark`;
+          }
+        }
+
+        // Partial cover (p26/p32): a leg hit strikes the cover instead. Indirect
+        // fire always strikes the target unless the cover is water (p30).
+        const coverApplies = Boolean(
+          calc.losResult && calc.losResult.partialCover &&
+          (!isIndirect || calc.losResult.partialCoverKind === 'water')
         );
+        const absorbedByCover = Boolean(coverApplies && isLegLocation(location.location));
 
         if (absorbedByCover) {
           result.details += `\n        Leg hit (${location.location}) absorbed by partial cover`;

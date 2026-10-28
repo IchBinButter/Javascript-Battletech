@@ -191,14 +191,22 @@ export class GameEngine {
     if (!attacker) return { success: false, error: 'Attacker not found' };
     if (!target) return { success: false, error: 'Target not found' };
 
-    const losResult = this.los.calculateLOS(
-      attacker.position.hexKey, target.position.hexKey, state, { attacker, target }
-    );
-    if (losResult.blocked) {
-      return { success: false, error: `LOS blocked: ${losResult.reason}` };
-    }
-
     const weaponDef = action.weapon;
+
+    // Indirect fire (p30) needs a friendly spotter with line of sight, and the
+    // attacker must not have a line of sight of its own.
+    let indirect = null;
+    if (action.indirect) {
+      indirect = this._validateIndirectFire(attacker, target, weaponDef, action.spotterId, state);
+      if (!indirect.valid) return { success: false, error: indirect.reason };
+    } else {
+      const losResult = this.los.calculateLOS(
+        attacker.position.hexKey, target.position.hexKey, state, { attacker, target }
+      );
+      if (losResult.blocked) {
+        return { success: false, error: `LOS blocked: ${losResult.reason}` };
+      }
+    }
 
     // Firing arcs (p24): reject an out-of-arc shot before any ammo or heat is
     // spent, so an illegal declaration costs nothing.
@@ -219,11 +227,23 @@ export class GameEngine {
     }
 
     const result = this.attackResolver.resolveWeaponAttack(
-      attacker, weaponDef, { location: action.weaponLocation }, target, state, this.diceRoller
+      attacker, weaponDef, { location: action.weaponLocation }, target, state, this.diceRoller,
+      {
+        indirect: Boolean(action.indirect),
+        spotter: indirect ? indirect.spotter : null,
+        spotterAttacked: Boolean(indirect && indirect.spotter.attackedThisPhase),
+        aimedLocation: action.aimedLocation
+      }
     );
 
     this.stateManager.applyStateChange(() => {
       attacker.heat += weaponDef.heat;
+
+      // Attack and spotting records for the rest of this phase (p30).
+      attacker.attackedThisPhase = true;
+      if (indirect && indirect.spotter) {
+        indirect.spotter.spottedThisPhase = target.id;
+      }
 
       // Remember which arms fired: a physical attack cannot use that arm (p38).
       if (action.weaponLocation) {
@@ -267,6 +287,40 @@ export class GameEngine {
 
     result.success = true;
     return result;
+  }
+
+  /**
+   * Indirect fire validation (p30). LRMs may be fired at a target the attacker
+   * cannot see, provided a friendly spotter can.
+   */
+  _validateIndirectFire(attacker, target, weaponDef, spotterId, state) {
+    if (!weaponDef || weaponDef.type !== 'LRM') {
+      return { valid: false, reason: 'Only LRM launchers may fire indirectly' };
+    }
+
+    const spotter = spotterId ? state.getUnit(spotterId) : null;
+    if (!spotter) return { valid: false, reason: 'Indirect fire needs a spotter' };
+    if (spotter.id === attacker.id) return { valid: false, reason: 'A Mech cannot spot for itself' };
+    if (spotter.player !== attacker.player) return { valid: false, reason: 'The spotter must be friendly' };
+    if (typeof spotter.isDestroyed === 'function' && spotter.isDestroyed()) {
+      return { valid: false, reason: 'The spotter is destroyed' };
+    }
+
+    const attackerLOS = this.los.calculateLOS(
+      attacker.position.hexKey, target.position.hexKey, state, { attacker, target }
+    );
+    if (!attackerLOS.blocked) {
+      return { valid: false, reason: 'A Mech with line of sight cannot fire indirectly' };
+    }
+
+    const spotterLOS = this.los.calculateLOS(
+      spotter.position.hexKey, target.position.hexKey, state, { attacker: spotter, target }
+    );
+    if (spotterLOS.blocked) {
+      return { valid: false, reason: 'The spotter has no line of sight to the target' };
+    }
+
+    return { valid: true, spotter };
   }
 
   _handlePhysicalAttack(playerId, action) {
