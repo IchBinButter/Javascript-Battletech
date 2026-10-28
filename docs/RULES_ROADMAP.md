@@ -134,15 +134,20 @@ item 1.6 needs the actuator state anyway.
 3.1 ✅ TN table: punch 0, kick −2, push −1, club −1, DFA 0 (+3 jumping), charge comparative
 piloting-skill modifier.
 3.2 ✅ Legality: forward arc for kick/charge/push/club, front or side for punches with the
-arm on that side, both hips required to kick. Still open: the Different Levels table (p34)
-and prone exceptions.
+arm on that side, both hips required to kick, the Different Levels table (p140) and prone
+targets (a prone Mech can be punched or clubbed at or above its level, only DFA below).
 3.3 ✅ Damage: punch 1/10 tons, kick 1/5, both rounded up, halved per damaged actuator;
 charge tonnage/10 × hexes charged, rounded up. DFA damage is still the old formula: the KB
 chunk for p37 does not state it.
-3.4 Consequences: missed kick → PSR implemented; successful kick → target PSR, charge →
-both PSR +2 and DFA landing still to wire (the PSR modifiers exist, nothing sets them).
-3.5 Physical weapons (hatchet, sword, mace, claws) from the p38 table, including the
-"no firing arm weapons and physical attack with the same arm" restriction.
+3.4 ✅ Consequences: successful kick → target PSR; missed kick → attacker PSR; charge →
+both PSR +2; missed DFA → automatic fall; successful DFA → attacker PSR +4.
+3.5 ✅ Physical weapons (claws, flail, hatchet, lance, mace, retractable blade, sword) from
+the p38 table as `src/data/physicalWeapons.json`, with TSM doubling, the +4 option-table
+declaration, and the "no physical attack from an arm that fired" restriction.
+
+Still open in this phase: applying the charge self-damage to the attacker, clubs found on
+the battlefield, and a UI action for physical weapons (no Mech in `mechs.json` mounts one
+yet, so the rules are tested but unreachable in play).
 
 **Size:** M.
 

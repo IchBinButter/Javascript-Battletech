@@ -165,6 +165,7 @@ export class PhaseManager {
     // MP is derived (getMaxMP); only the mode it is based on needs resetting
     for (const unit of Object.values(state.units)) {
       unit.movementMode = 'walk';
+      unit.firedThisTurn = new Set();
     }
 
     // Set current player from queue

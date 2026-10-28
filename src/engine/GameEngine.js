@@ -225,6 +225,12 @@ export class GameEngine {
     this.stateManager.applyStateChange(() => {
       attacker.heat += weaponDef.heat;
 
+      // Remember which arms fired: a physical attack cannot use that arm (p38).
+      if (action.weaponLocation) {
+        if (!(attacker.firedThisTurn instanceof Set)) attacker.firedThisTurn = new Set();
+        attacker.firedThisTurn.add(action.weaponLocation);
+      }
+
       if (result.hit) {
         for (const hitLoc of result.hitLocations) {
           // A hit absorbed by partial cover does nothing to the Mech (p26).
@@ -270,27 +276,41 @@ export class GameEngine {
 
     if (!attacker || !target) return { success: false, error: 'Unit not found' };
 
+    // Attacking across levels changes what is legal and which hit table
+    // applies (Different Levels table, p140).
+    const levelDifference = this._levelDifference(attacker, target, state);
+    const options = {
+      arm: action.arm,
+      levelDifference,
+      usePunchTable: Boolean(action.usePunchTable)
+    };
+
     let result;
 
     switch (action.attackType) {
       case 'punch':
-        result = this.physicalResolver.resolvePunch(attacker, target, this.diceRoller);
+        result = this.physicalResolver.resolvePunch(attacker, target, this.diceRoller, options);
         break;
       case 'kick':
-        result = this.physicalResolver.resolveKick(attacker, target, this.diceRoller);
+        result = this.physicalResolver.resolveKick(attacker, target, this.diceRoller, options);
         break;
       case 'charge':
-        result = this.physicalResolver.resolveCharge(attacker, target, action.distanceCharged || 1, this.diceRoller);
+        result = this.physicalResolver.resolveCharge(attacker, target, action.distanceCharged || 1, this.diceRoller, options);
         break;
       case 'dfa':
-        result = this.physicalResolver.resolveDFA(attacker, target, this.diceRoller);
+        result = this.physicalResolver.resolveDFA(attacker, target, this.diceRoller, options);
         break;
       case 'push':
-        result = this.physicalResolver.resolvePush(attacker, target, this.diceRoller);
+        result = this.physicalResolver.resolvePush(attacker, target, this.diceRoller, options);
+        break;
+      case 'physicalWeapon':
+        result = this.physicalResolver.resolvePhysicalWeapon(attacker, target, action.weaponId, this.diceRoller, options);
         break;
       default:
         return { success: false, error: `Unknown physical attack: ${action.attackType}` };
     }
+
+    if (!result.success) return result;
 
     this.stateManager.applyStateChange(() => {
       if (result.hit && result.hitLocations) {
@@ -306,11 +326,63 @@ export class GameEngine {
           attacker.prone = true;
         }
       }
+
+      // Physical attacks have consequences beyond damage (p54).
+      result.psrRolls = this._resolvePhysicalConsequences(result, attacker, target);
     });
 
     this.eventBus.emit('physicalAttackResolved', { attackerId: attacker.id, targetId: target.id, result });
 
     return result;
+  }
+
+  /** Level difference between two units, target minus attacker (p140). */
+  _levelDifference(attacker, target, state) {
+    const hexes = state.map && state.map.hexes;
+    const a = hexes ? hexes.get(attacker.position.hexKey) : null;
+    const t = hexes ? hexes.get(target.position.hexKey) : null;
+    if (!a || !t) return 0;
+    return (t.level || 0) - (a.level || 0);
+  }
+
+  /**
+   * PSRs caused by a physical attack (p54): a kick forces the target to roll,
+   * a missed kick forces the attacker to roll, a charge forces both at +2, and
+   * a missed DFA drops the attacker automatically.
+   */
+  _resolvePhysicalConsequences(result, attacker, target) {
+    const rolls = [];
+
+    const attempt = (unit, modifier, label) => {
+      const psr = this.psrCalc.makePSR(unit, this.diceRoller, [{ trigger: label, baseModifier: modifier }]);
+      if (!psr.passed) unit.prone = true;
+      rolls.push({
+        unitId: unit.id,
+        label,
+        modifier,
+        roll: psr.roll,
+        targetNumber: psr.targetNumber,
+        passed: psr.passed,
+        fell: !psr.passed
+      });
+    };
+
+    if (result.type === 'kick') {
+      if (result.hit) attempt(target, 0, 'Kicked');
+      else attempt(attacker, 0, 'Missed kick');
+    } else if (result.type === 'charge' && result.hit) {
+      attempt(attacker, 2, 'Successful charge');
+      attempt(target, 2, 'Charged');
+    } else if (result.type === 'dfa') {
+      if (result.hit) {
+        attempt(attacker, 4, 'Successful DFA');
+      } else {
+        attacker.prone = true;
+        rolls.push({ unitId: attacker.id, label: 'DFA miss', automaticFall: true, fell: true });
+      }
+    }
+
+    return rolls;
   }
 
   _handleEndPhase(playerId) {

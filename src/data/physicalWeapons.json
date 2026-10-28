@@ -1,0 +1,13 @@
+{
+  "source": "BattleMech Manual p38, Physical Weapon Attacks Table",
+  "notes": "damagePerTons means 1 point of damage per X tons of the attacking Mech, with fractions rounded up; damageBonus is added after that. table is the default hit location table: punch, standard, or option (standard, but may use the punch table if declared before the attack for a +4 target number modifier).",
+  "weapons": [
+    { "id": "claws", "name": "Claws", "toHit": 1, "damagePerTons": 7, "damageBonus": 0, "table": "punch", "tsm": true },
+    { "id": "flail", "name": "Flail", "toHit": 0, "fixedDamage": 9, "table": "standard", "tsm": false },
+    { "id": "hatchet", "name": "Hatchet", "toHit": -1, "damagePerTons": 5, "damageBonus": 0, "table": "option", "tsm": true },
+    { "id": "lance", "name": "Lance", "toHit": 1, "damagePerTons": 5, "damageBonus": 0, "table": "standard", "tsm": true },
+    { "id": "mace", "name": "Mace", "toHit": 1, "damagePerTons": 4, "damageBonus": 0, "table": "option", "tsm": true },
+    { "id": "retractable_blade", "name": "Retractable Blade", "toHit": -2, "damagePerTons": 10, "damageBonus": 0, "table": "option", "tsm": true },
+    { "id": "sword", "name": "Sword", "toHit": -2, "damagePerTons": 10, "damageBonus": 1, "table": "option", "tsm": true }
+  ]
+}
