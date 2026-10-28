@@ -7,8 +7,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { BuildingRegistry, buildingDefaults, buildingTypeForTerrain } from '../../../src/rules/urban/Buildings.js';
+import { BuildingRegistry, buildingDefaults, buildingTypeForTerrain, entryPSRModifier, entryDamage, damageReduction, collapseDamage, buildingCombat } from '../../../src/rules/urban/Buildings.js';
 import { Hex } from '../../../src/models/Hex.js';
+import { hexLine } from '../../../src/hex/HexMath.js';
 import urbanMap from '../../../src/data/maps/urban.json' with { type: 'json' };
 
 const blockMap = () => ({
@@ -38,11 +39,11 @@ describe('building type mapping', () => {
     expect(buildingTypeForTerrain('clear')).toBeNull();
   });
 
-  it('knows the default CF and levels for each type', () => {
-    expect(buildingDefaults('light')).toEqual({ type: 'light', levels: 1, cf: 15 });
-    expect(buildingDefaults('medium')).toEqual({ type: 'medium', levels: 2, cf: 40 });
-    expect(buildingDefaults('heavy')).toEqual({ type: 'heavy', levels: 3, cf: 90 });
-    expect(buildingDefaults('hardened')).toEqual({ type: 'hardened', levels: 4, cf: 120 });
+  it('knows the default CF, levels and PSR modifier for each type', () => {
+    expect(buildingDefaults('light')).toMatchObject({ type: 'light', levels: 1, cf: 15, psrModifier: 0 });
+    expect(buildingDefaults('medium')).toMatchObject({ type: 'medium', levels: 2, cf: 40, psrModifier: 1 });
+    expect(buildingDefaults('heavy')).toMatchObject({ type: 'heavy', levels: 3, cf: 90, psrModifier: 2 });
+    expect(buildingDefaults('hardened')).toMatchObject({ type: 'hardened', levels: 4, cf: 120, psrModifier: 3 });
     expect(buildingDefaults('nonsense')).toBeNull();
   });
 });
@@ -139,6 +140,83 @@ describe('BuildingRegistry.validate', () => {
   it('flags a non-positive CF', () => {
     const map = { hexes: {}, buildings: [{ id: 'a', type: 'light', hexes: { '1,1': { cf: 0 } } }] };
     expect(BuildingRegistry.validate(map).join(' ')).toContain('CF must be positive');
+  });
+});
+
+describe('urban helpers (p67-73)', () => {
+  it('gives each building type its entering PSR modifier', () => {
+    expect(entryPSRModifier('light')).toBe(0);
+    expect(entryPSRModifier('medium')).toBe(1);
+    expect(entryPSRModifier('heavy')).toBe(2);
+    expect(entryPSRModifier('hardened')).toBe(3);
+    expect(entryPSRModifier('nonsense')).toBe(0);
+  });
+
+  it('damages a hex by tonnage / 10, rounded up', () => {
+    expect(entryDamage({ tonnage: 20 })).toBe(2);
+    expect(entryDamage({ tonnage: 70 })).toBe(7);
+    expect(entryDamage({ tonnage: 75 })).toBe(8);
+    expect(entryDamage({})).toBe(0);
+  });
+
+  it('absorbs CF / 10 of each hit, rounded up', () => {
+    expect(damageReduction({ building: { currentCF: 38 } })).toBe(4);
+    expect(damageReduction({ building: { currentCF: 40 } })).toBe(4);
+    expect(damageReduction({ building: { currentCF: 10 } })).toBe(1);
+    expect(damageReduction({ building: { currentCF: 0 } })).toBe(0);
+    expect(damageReduction({})).toBe(0);
+  });
+
+  it('scales collapse damage by the levels above the Mech', () => {
+    // p73 Archer example: CF 7, two levels above -> 0.7 x 3 = 2.1 -> 3
+    expect(collapseDamage(7, 2)).toBe(3);
+    expect(collapseDamage(37, 0)).toBe(4);
+    expect(collapseDamage(30, 0)).toBe(3);
+  });
+
+  it('caps the intervening-building modifier at +3', () => {
+    const line = hexLine('0,0', '6,0');
+    const between = line.slice(1, -1);
+
+    const hexes = new Map();
+    for (const key of line) {
+      hexes.set(key, new Hex(key, between.includes(key) ? { building: { levels: 2 } } : {}));
+    }
+    const state = { map: { hexes } };
+    const attacker = { position: { hexKey: '0,0' } };
+    const target = { position: { hexKey: '6,0' } };
+
+    const combat = buildingCombat(attacker, target, state);
+    expect(combat.intervening).toBe(between.length);
+    expect(combat.modifier).toBe(3); // capped at +3
+    expect(combat.losBlocked).toBe(true); // more than two intervene
+  });
+
+  it('does not block the line for a single intervening building hex', () => {
+    const line = hexLine('0,0', '2,0');
+    const between = line.slice(1, -1);
+    const hexes = new Map();
+    for (const key of line) {
+      hexes.set(key, new Hex(key, between.includes(key) ? { building: { levels: 1 } } : {}));
+    }
+
+    const combat = buildingCombat(
+      { position: { hexKey: '0,0' } },
+      { position: { hexKey: '2,0' } },
+      { map: { hexes } }
+    );
+
+    expect(combat.losBlocked).toBe(false);
+    expect(combat.modifier).toBe(between.length);
+  });
+
+  it('reports no modifier in the open', () => {
+    const state = {
+      map: { hexes: new Map([['0,0', new Hex('0,0')], ['2,0', new Hex('2,0')], ['1,0', new Hex('1,0')]]) }
+    };
+    const combat = buildingCombat({ position: { hexKey: '0,0' } }, { position: { hexKey: '2,0' } }, state);
+
+    expect(combat).toMatchObject({ targetInside: false, intervening: 0, modifier: 0, losBlocked: false });
   });
 });
 

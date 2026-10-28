@@ -189,15 +189,23 @@ nothing reads. So the first slice is a wiring job, exactly like the actuator dat
 per-hex `hex.building` objects (per-hex CF, shared building id) plus a registry, applies
 them at map load, and gives the renderer real building colours and a CF label. Terrain-only
 maps get synthetic one-hex buildings.
-5.2 **Entering buildings** — Level-0 entry costs 1 MP, a PSR (medium +1, heavy +2 as in the
-p72 example) and deals `ceil(tonnage/10)` to the hex; roof access uses level changes.
-5.3 **Collapse** — local collapse at CF 0 (hex becomes rubble, occupants fall); when more
-than half a building's hexes are destroyed the whole building collapses for
-`ceil(CF/10) x levels above`.
-5.4 **Combat within buildings** — +1 TN for a target inside, +1 per intervening building
-hex/level, damage reduced by `ceil(currentCF/10)` with the balance taken by the building,
-front table for shots through the wall and the punch table for damage inside.
-5.5 **Basements** — 2D6 on first Level-0 entry per hex, per scenario (p66).
+5.2 ✅ **Entering buildings** — a Level-0 entry rolls a PSR at the building's modifier
+(light 0, medium +1, heavy +2, hardened +3), the hex takes `ceil(tonnage/10)` whatever the
+roll, and a failed roll costs the 'Mech the same damage. Jumping onto a building does
+neither.
+5.3 ✅ **Collapse** — a hex at CF 0 becomes rubble and its occupants take
+`ceil((CF at phase start / 10) x (1 + levels above))`; losing more than half a building's
+hexes brings the rest down. Collapse from attack damage resolves at the end of the Weapon
+Attack Phase.
+5.4 ✅ **Combat within buildings** — +1 TN for a target inside a building, +1 per
+intervening building hex (capped at +3), line of sight blocked beyond two, and each hit
+reduced by `ceil(currentCF/10)` with the absorbed damage charged to the hex.
+5.5 **Basements** — 2D6 on first Level-0 entry per hex, per scenario (p66). Not started.
+
+**Known simplifications:** units have no elevation, so "inside at Level 0" is assumed and
+roof movement is deferred; collapse damage uses the standard front hit table rather than
+the Punch table (p73); the adjacent-attacker exception for missed shots is not implemented;
+building CF damage is applied immediately even though collapse waits for the phase end.
 
 **Size:** M–L. **Multiplayer:** building CF is public state, so it rides in the patch — but
 the damage-routing events must be JSON-safe (see R4).

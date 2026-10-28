@@ -12,6 +12,7 @@ import { PSRCalculator } from '../rules/movement/PSRCalculator.js';
 import { SkiddingRules } from '../rules/movement/SkiddingRules.js';
 import { LineOfSight } from '../rules/combat/LineOfSight.js';
 import { AttackResolver } from '../rules/combat/AttackResolver.js';
+import { entryPSRModifier, entryDamage, damageReduction, collapseDamage, buildingCombat, BuildingRegistry } from '../rules/urban/Buildings.js';
 import { canWeaponFireAt, getTargetArc, ARC } from '../rules/combat/ArcRules.js';
 import { hasActuatorSlot } from '../rules/combat/UnitDamage.js';
 import { DamageResolver } from '../rules/combat/DamageResolver.js';
@@ -146,6 +147,13 @@ export class GameEngine {
         default: unit._movementModifier = 0;
       }
 
+      // Urban movement (p67): entering a building hex at Level 0 costs a PSR
+      // and damages the hex whether the roll succeeds or not.
+      const destination = state.map.hexes.get(unit.position.hexKey);
+      if (destination && destination.building && movementType !== 'jump') {
+        this._enterBuilding(state, unit, destination);
+      }
+
       const psrTriggers = this.psrCalc.getPSRTriggers(unit, {
         enteredHeavyWoods: false,
         enteredRubble: false,
@@ -213,6 +221,13 @@ export class GameEngine {
       }
     }
 
+    // Combat within buildings (p72): more than two intervening building hexes
+    // or levels block the shot entirely.
+    const urban = buildingCombat(attacker, target, state);
+    if (urban.losBlocked) {
+      return { success: false, error: 'LOS blocked by intervening building hexes' };
+    }
+
     // Firing arcs (p24): reject an out-of-arc shot before any ammo or heat is
     // spent, so an illegal declaration costs nothing.
     if (action.weaponLocation) {
@@ -249,7 +264,8 @@ export class GameEngine {
         spotter: indirect ? indirect.spotter : null,
         spotterAttacked: Boolean(indirect && indirect.spotter.attackedThisPhase),
         aimedLocation: action.aimedLocation,
-        multipleTargetModifier
+        multipleTargetModifier,
+        buildingModifier: urban.modifier
       }
     );
 
@@ -273,12 +289,38 @@ export class GameEngine {
       }
 
       if (result.hit) {
+        const targetHex = state.map.hexes.get(target.position.hexKey);
+
         for (const hitLoc of result.hitLocations) {
           // A hit absorbed by partial cover does nothing to the Mech (p26).
           if (hitLoc.absorbedByCover) {
             hitLoc.damageResult = { absorbedByCover: true, coverHex: hitLoc.coverHex };
             continue;
           }
+
+          // Urban cover (p72): a building absorbs up to CF/10 of each hit and
+          // takes that damage itself; the remainder reaches the target.
+          if (targetHex && targetHex.building) {
+            const reduction = damageReduction(targetHex);
+            const absorbed = Math.min(hitLoc.damage, reduction);
+            if (absorbed > 0) {
+              hitLoc.damage -= absorbed;
+              hitLoc.buildingAbsorbed = absorbed;
+              if (targetHex._cfAtPhaseStart === undefined) {
+                targetHex._cfAtPhaseStart = targetHex.building.currentCF;
+              }
+              targetHex.building.currentCF = Math.max(0, targetHex.building.currentCF - absorbed);
+              if (!(state._buildingCollapseQueue instanceof Set)) {
+                state._buildingCollapseQueue = new Set();
+              }
+              state._buildingCollapseQueue.add(targetHex.hexKey);
+            }
+            if (hitLoc.damage <= 0) {
+              hitLoc.damageResult = { absorbedByBuilding: absorbed };
+              continue;
+            }
+          }
+
           const damageResult = this.damageResolver.applyDamage(
             target, hitLoc.location, hitLoc.damage, hitLoc.isRear, this.diceRoller
           );
@@ -467,8 +509,107 @@ export class GameEngine {
   }
 
   _handleEndPhase(playerId) {
+    // Building collapse from weapon damage resolves at the end of the Weapon
+    // Attack Phase (p73).
+    this._resolvePendingBuildingCollapses();
+
     const nextPhase = this.phaseManager.nextPhase();
+
+    // CF snapshots are per phase, so start the new one clean.
+    const state = this.stateManager.getState();
+    if (state.map && state.map.hexes) {
+      for (const [, hex] of state.map.hexes) {
+        delete hex._cfAtPhaseStart;
+      }
+    }
+
     return { success: true, nextPhase };
+  }
+
+  /**
+   * Collapse any building hexes that attacks reduced to zero during the phase.
+   */
+  _resolvePendingBuildingCollapses() {
+    const state = this.stateManager.getState();
+    const queue = state._buildingCollapseQueue;
+    if (!queue || queue.size === 0) return;
+
+    for (const hexKey of [...queue]) {
+      const hex = state.map.hexes.get(hexKey);
+      if (hex && hex.building && hex.building.currentCF <= 0) {
+        this._collapseBuildingHex(state, hex);
+      }
+    }
+    queue.clear();
+  }
+
+  /**
+   * Moving into a building hex at Level 0 (p67): a PSR modified by the building
+   * type, the hex takes tonnage/10 damage whatever the roll, and a failed roll
+   * costs the Mech the same damage.
+   */
+  _enterBuilding(state, unit, hex) {
+    const building = hex.building;
+    const damage = entryDamage(unit);
+
+    if (hex._cfAtPhaseStart === undefined) {
+      hex._cfAtPhaseStart = building.currentCF ?? building.cf;
+    }
+
+    const psr = this.psrCalc.makePSR(unit, this.diceRoller, [
+      { trigger: `Entering ${building.type} building`, baseModifier: entryPSRModifier(building.type) }
+    ]);
+
+    building.currentCF = Math.max(0, (building.currentCF ?? building.cf) - damage);
+
+    if (!psr.passed) {
+      // Damage from moving into the hex is applied before collapse damage (p73).
+      const roll = this.diceRoller.roll2d6();
+      const loc = this.attackResolver.determineHitLocation(roll, 'front');
+      this.damageResolver.applyDamage(unit, loc.location, damage, loc.isRear ?? false, this.diceRoller);
+    }
+
+    this.eventBus.emit('buildingEntered', {
+      unitId: unit.id, hexKey: hex.hexKey, damage, currentCF: building.currentCF
+    });
+
+    if (building.currentCF <= 0) {
+      this._collapseBuildingHex(state, hex);
+    }
+  }
+
+  /**
+   * Collapse a building hex (p73). Occupants take the collapse damage, the hex
+   * becomes rubble, and losing more than half of a multi-hex building brings
+   * the rest of it down.
+   */
+  _collapseBuildingHex(state, hex) {
+    const building = hex.building;
+    if (!building) return;
+
+    const cfAtPhaseStart = hex._cfAtPhaseStart ?? building.currentCF;
+    const levelsAbove = Math.max(0, building.levels - 1);
+
+    const occupants = Object.values(state.units).filter(u => u.position.hexKey === hex.hexKey);
+    for (const occupant of occupants) {
+      const damage = collapseDamage(cfAtPhaseStart, levelsAbove);
+      const roll = this.diceRoller.roll2d6();
+      const loc = this.attackResolver.determineHitLocation(roll, 'front');
+      this.damageResolver.applyDamage(occupant, loc.location, damage, loc.isRear ?? false, this.diceRoller);
+      this.eventBus.emit('buildingCollapsed', { hexKey: hex.hexKey, unitId: occupant.id, damage });
+    }
+
+    hex.terrainType = 'rubble';
+    hex.building = { ...building, currentCF: 0 };
+
+    if (BuildingRegistry.isMostlyDestroyed(building.id, state.map.hexes)) {
+      for (const [, other] of state.map.hexes) {
+        if (other.hexKey === hex.hexKey) continue;
+        if (other.building && other.building.id === building.id && other.building.currentCF > 0) {
+          this._collapseBuildingHex(state, other);
+        }
+      }
+    }
   }
 
   /**

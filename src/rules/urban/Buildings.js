@@ -8,7 +8,7 @@
  */
 
 import terrainData from '../../data/terrain.json' with { type: 'json' };
-import { hexNeighbors } from '../../hex/HexMath.js';
+import { hexNeighbors, hexLine } from '../../hex/HexMath.js';
 
 const TERRAIN_TO_TYPE = {
   light_building: 'light',
@@ -26,7 +26,68 @@ export function buildingTypeForTerrain(terrainType) {
 export function buildingDefaults(type) {
   const def = terrainData.buildings[type];
   if (!def) return null;
-  return { type, levels: def.levels, cf: def.cf };
+  return { type, levels: def.levels, cf: def.cf, psrModifier: def.psrModifier || 0 };
+}
+
+/** PSR modifier for entering a building at Level 0 (Building Modifiers Table, p67). */
+export function entryPSRModifier(type) {
+  const def = terrainData.buildings[type];
+  return def ? (def.psrModifier || 0) : 0;
+}
+
+/** Damage a Mech does to a building hex by walking into it: tonnage / 10 (p72). */
+export function entryDamage(unit) {
+  return Math.ceil((unit.tonnage || 0) / 10);
+}
+
+/** Damage a building hex absorbs from each hit on a Mech inside it (p72). */
+export function damageReduction(hex) {
+  const building = hex && hex.building;
+  if (!building) return 0;
+  const cf = building.currentCF ?? building.cf;
+  return Math.ceil(cf / 10);
+}
+
+/**
+ * Damage from a collapsing hex (p73): the hex's CF at the start of the phase
+ * divided by 10, plus that base for every building level above the Mech,
+ * rounded up.
+ */
+export function collapseDamage(cfAtPhaseStart, levelsAbove) {
+  const base = (cfAtPhaseStart || 0) / 10;
+  return Math.ceil(base * (1 + Math.max(0, levelsAbove)));
+}
+
+/**
+ * Combat within a building (p72).
+ *
+ * A target inside a building costs +1, and each intervening building hex or
+ * level costs another +1 (capped at +3 by the attack modifiers table). More
+ * than two intervening building hexes/levels blocks line of sight entirely.
+ */
+export function buildingCombat(attacker, target, state) {
+  const hexes = (state && state.map && state.map.hexes) || new Map();
+  const attackerHex = hexes.get(attacker.position.hexKey);
+  const targetHex = hexes.get(target.position.hexKey);
+
+  const targetInside = Boolean(targetHex && targetHex.building);
+
+  let intervening = 0;
+  if (attackerHex && targetHex && attacker.position.hexKey !== target.position.hexKey) {
+    const line = hexLine(attacker.position.hexKey, target.position.hexKey);
+    for (const key of line.slice(1, -1)) {
+      const hex = hexes.get(key);
+      if (hex && hex.building) intervening++;
+    }
+  }
+
+  const modifier = (targetInside ? 1 : 0) + Math.min(intervening, 3);
+  return {
+    targetInside,
+    intervening,
+    modifier,
+    losBlocked: intervening > 2
+  };
 }
 
 export class BuildingRegistry {

@@ -1,30 +1,138 @@
 {
   "terrain": {
-    "clear": { "name": "Clear", "mpCost": 1, "color": "#90EE90", "blocksLOS": false, "height": 0 },
-    "light_woods": { "name": "Light Woods", "mpCost": 2, "color": "#228B22", "blocksLOS": false, "height": 2, "woodsDensity": 1 },
-    "heavy_woods": { "name": "Heavy Woods", "mpCost": 3, "color": "#006400", "blocksLOS": false, "height": 2, "woodsDensity": 2 },
-    "water_depth1": { "name": "Water (Depth 1)", "mpCost": 2, "color": "#4169E1", "blocksLOS": false, "height": 0, "waterDepth": 1 },
-    "water_depth2": { "name": "Water (Depth 2)", "mpCost": 3, "color": "#0000CD", "blocksLOS": false, "height": 0, "waterDepth": 2 },
-    "rough": { "name": "Rough", "mpCost": 2, "color": "#8B7355", "blocksLOS": false, "height": 0 },
-    "rubble": { "name": "Rubble", "mpCost": 2, "color": "#808080", "blocksLOS": false, "height": 1 },
-    "swamp": { "name": "Swamp", "mpCost": 3, "color": "#556B2F", "blocksLOS": false, "height": 0 },
-    "pavement": { "name": "Pavement/Road", "mpCost": 1, "color": "#D2B48C", "blocksLOS": false, "height": 0, "road": true },
-    "bridge": { "name": "Bridge", "mpCost": 1, "color": "#A0522D", "blocksLOS": false, "height": 1 }
+    "clear": {
+      "name": "Clear",
+      "mpCost": 1,
+      "color": "#90EE90",
+      "blocksLOS": false,
+      "height": 0
+    },
+    "light_woods": {
+      "name": "Light Woods",
+      "mpCost": 2,
+      "color": "#228B22",
+      "blocksLOS": false,
+      "height": 2,
+      "woodsDensity": 1
+    },
+    "heavy_woods": {
+      "name": "Heavy Woods",
+      "mpCost": 3,
+      "color": "#006400",
+      "blocksLOS": false,
+      "height": 2,
+      "woodsDensity": 2
+    },
+    "water_depth1": {
+      "name": "Water (Depth 1)",
+      "mpCost": 2,
+      "color": "#4169E1",
+      "blocksLOS": false,
+      "height": 0,
+      "waterDepth": 1
+    },
+    "water_depth2": {
+      "name": "Water (Depth 2)",
+      "mpCost": 3,
+      "color": "#0000CD",
+      "blocksLOS": false,
+      "height": 0,
+      "waterDepth": 2
+    },
+    "rough": {
+      "name": "Rough",
+      "mpCost": 2,
+      "color": "#8B7355",
+      "blocksLOS": false,
+      "height": 0
+    },
+    "rubble": {
+      "name": "Rubble",
+      "mpCost": 2,
+      "color": "#808080",
+      "blocksLOS": false,
+      "height": 1
+    },
+    "swamp": {
+      "name": "Swamp",
+      "mpCost": 3,
+      "color": "#556B2F",
+      "blocksLOS": false,
+      "height": 0
+    },
+    "pavement": {
+      "name": "Pavement/Road",
+      "mpCost": 1,
+      "color": "#D2B48C",
+      "blocksLOS": false,
+      "height": 0,
+      "road": true
+    },
+    "bridge": {
+      "name": "Bridge",
+      "mpCost": 1,
+      "color": "#A0522D",
+      "blocksLOS": false,
+      "height": 1
+    }
   },
   "modifiers": {
-    "ice": { "name": "Ice", "mpCostMultiplier": 1.5, "psrModifier": 4 },
-    "mud": { "name": "Mud", "mpCostMultiplier": 2, "psrModifier": 1 },
-    "deep_snow": { "name": "Deep Snow", "mpCostMultiplier": 2, "psrModifier": 1 },
-    "narrow_low_rubble": { "name": "Narrow/Low Rubble", "mpCost": 1, "psrModifier": 0 }
+    "ice": {
+      "name": "Ice",
+      "mpCostMultiplier": 1.5,
+      "psrModifier": 4
+    },
+    "mud": {
+      "name": "Mud",
+      "mpCostMultiplier": 2,
+      "psrModifier": 1
+    },
+    "deep_snow": {
+      "name": "Deep Snow",
+      "mpCostMultiplier": 2,
+      "psrModifier": 1
+    },
+    "narrow_low_rubble": {
+      "name": "Narrow/Low Rubble",
+      "mpCost": 1,
+      "psrModifier": 0
+    }
   },
   "elevation": {
-    "levelChangeUp": { "mpCost": 1, "perLevel": true },
-    "levelChangeDown": { "mpCost": 0, "perLevel": true, "psrTrigger": 3 }
+    "levelChangeUp": {
+      "mpCost": 1,
+      "perLevel": true
+    },
+    "levelChangeDown": {
+      "mpCost": 0,
+      "perLevel": true,
+      "psrTrigger": 3
+    }
   },
   "buildings": {
-    "light": { "name": "Light Building", "cf": 15, "levels": 1 },
-    "medium": { "name": "Medium Building", "cf": 40, "levels": 2 },
-    "heavy": { "name": "Heavy Building", "cf": 90, "levels": 3 },
-    "hardened": { "name": "Hardened Building", "cf": 120, "levels": 4 }
+    "light": {
+      "name": "Light Building",
+      "cf": 15,
+      "levels": 1,
+      "psrModifier": 0
+    },
+    "medium": {
+      "name": "Medium Building",
+      "cf": 40,
+      "levels": 2,
+      "psrModifier": 1
+    },
+    "heavy": {
+      "name": "Heavy Building",
+      "cf": 90,
+      "levels": 3,
+      "psrModifier": 2
+    },
+    "hardened": {
+      "name": "Hardened Building",
+      "cf": 120,
+      "levels": 4,
+      "psrModifier": 3
+    }
   }
 }

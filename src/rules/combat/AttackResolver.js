@@ -122,6 +122,13 @@ export class AttackResolver {
       mods.push(`Secondary target: +${options.multipleTargetModifier}`);
     }
 
+    // Urban combat (p72): +1 for a target inside a building, plus +1 for each
+    // intervening building hex/level (the caller caps that part at +3).
+    if (options.buildingModifier) {
+      tn += options.buildingModifier;
+      mods.push(`Combat within buildings: +${options.buildingModifier}`);
+    }
+
     // O - Attacker heat
     const heatMod = this.getHeatModifier(attacker.heat);
     tn += heatMod;
