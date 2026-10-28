@@ -181,20 +181,83 @@ charged or launched a DFA that turn (needs declaration tracking).
 
 ## Phase 5 — Urban combat (p66–74)
 
-Building type/CF/levels, damage to buildings, movement PSRs and MP costs, basements,
-collapse, combat within buildings. `Hex.building` already carries `type/levels/cf`.
+`terrain.json` already defines the four building types (CF 15/40/90/120, levels 1–4) and
+`urban.json` already places three 2x2 building blocks — but as bare *terrain types* that
+nothing reads. So the first slice is a wiring job, exactly like the actuator data.
 
-**Size:** L. Only worth it once the open-field game is correct.
+5.1 ✅ **Building model** — `src/rules/urban/Buildings.js` resolves a map's buildings into
+per-hex `hex.building` objects (per-hex CF, shared building id) plus a registry, applies
+them at map load, and gives the renderer real building colours and a CF label. Terrain-only
+maps get synthetic one-hex buildings.
+5.2 **Entering buildings** — Level-0 entry costs 1 MP, a PSR (medium +1, heavy +2 as in the
+p72 example) and deals `ceil(tonnage/10)` to the hex; roof access uses level changes.
+5.3 **Collapse** — local collapse at CF 0 (hex becomes rubble, occupants fall); when more
+than half a building's hexes are destroyed the whole building collapses for
+`ceil(CF/10) x levels above`.
+5.4 **Combat within buildings** — +1 TN for a target inside, +1 per intervening building
+hex/level, damage reduced by `ceil(currentCF/10)` with the balance taken by the building,
+front table for shots through the wall and the punch table for damage inside.
+5.5 **Basements** — 2D6 on first Level-0 entry per hex, per scenario (p66).
+
+**Size:** M–L. **Multiplayer:** building CF is public state, so it rides in the patch — but
+the damage-routing events must be JSON-safe (see R4).
+
+---
+
+## Phase 5.5 — Multiplayer readiness (retrofit, before 6.4 and 7.4)
+
+The rules are player-agnostic and the engine is already DOM-free, so phases 1–4 do not need
+revisiting. The plumbing does, while the codebase is still small:
+
+- **R1 Visibility seam** — a `canSee(viewerId, targetId)` predicate plus
+  `projectStateForPlayer(state, viewerId)`; LOS, attacks, spotting, the renderer and the UI
+  all read through it. Hidden units (6.4) and multiplayer (7.4) both depend on it. *M*
+- **R2 Determinism** — inject an id factory (Unit ids and the game id use `Date.now()`), make
+  the initiative tie-break use the seeded dice (`InitiativeManager` uses `Math.random`), and
+  make map generation deterministic. *S*
+- **R3 Serialization** — `toJSON`/`fromJSON` for `GameState`/`Unit`/`Hex`, and `deepClone`
+  must handle `Set` (`firedThisTurn` is a Set and currently clones to a plain object). *M*
+- **R4 JSON-safe events** — `physicalAttackResolved` carries `weaponDef`/`weaponInstance`
+  class instances. *S*
+- **R5 Command boundary** — confirm no UI path mutates game state; the client may only send
+  actions. *S*
 
 ---
 
 ## Phase 6 — Optional layers (p61–64, p75–95)
 
-Weather and planetary conditions, fire/smoke, hidden 'Mechs (stubs exist in
-`GameState.hiddenUnits`), minefields and battlefield support, design quirks (a clean
-data-driven win — the tables are already in the KB).
+6.1 **Terrain modifiers** — `terrain.json.modifiers` already carries MP multipliers and PSR
+values for ice (4), mud (1) and deep snow (1); wire them into movement and PSR. *S*
+6.2 **Weather and planetary conditions** (p62–63) — `state.weather` exists but nothing reads
+it; fog/rain/snow/dusk/night, wind against missile and ballistic fire, heat from temperature.
+6.3 **Fire and smoke** (p63–64) — ignition from flamers and area-effect damage, spread
+downwind, 1D6 damage for standing in fire, smoke blocking LOS. The state and decay already
+exist; nothing ever ignites one.
+6.4 **Hidden units** (p82) — build on R1: per-player projection, detection by proximity and
+probes, point-blank shots on reveal, hidden spotters.
+6.5 **Minefields and battlefield support** (p75–79) — `state.minefields` and
+`state.battlefieldSupport` exist unused; mine triggers, artillery and air strikes.
+6.6 **Design quirks** (p82–95) — data-driven quirk table with per-Mech data; the refits are
+the natural place to start.
 
-**Size:** S–M each, independent, best done after the core is trustworthy.
+**Size:** S–M each, independent, gated on 5.5 for the visibility-dependent ones.
+
+---
+
+## Phase 7 — From simulator to game (proposed)
+
+7.1 **Save/load and replay** — needs R3; dice are already seeded by `gameId + turn` and
+`GameEngine.actionLog` records every action, so a replay is nearly free. `main.js` has a
+literal `// TODO: Implement load game`.
+7.2 **Scenarios** — mission JSON with deployment zones, objectives, victory conditions and
+turn limits; the force builder already collects players and maps.
+7.3 **AI opponent** — heuristic bot over the deterministic engine: enumerate legal moves,
+score by resulting TN and cover, choose fire and physical targets.
+7.4 **Multiplayer** — authoritative Node server with a WebSocket room per game, `seq`-stamped
+actions, per-player projections via R1, reconnect from snapshots, phase clocks. Solo play
+keeps working by running the same engine in a Web Worker.
+7.5 **Quality** — CI running tests plus the coverage floor, ESLint/Prettier, `checkJs`,
+dirty-rect rendering, mobile layout.
 
 ---
 

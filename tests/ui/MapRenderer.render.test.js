@@ -75,10 +75,29 @@ describe('MapRenderer rendering', () => {
     expect(ctx.texts()).toContain('3');
   });
 
-  it('draws buildings with their level label', () => {
-    const ctx = draw(stateWith({ '0,0': { terrainType: 'clear', building: { type: 'medium', levels: 2, cf: 40 } } }));
+  it('draws buildings with their level and remaining CF', () => {
+    const ctx = draw(stateWith({ '0,0': { terrainType: 'clear', building: { type: 'medium', levels: 2, cf: 40, currentCF: 38 } } }));
     expect(ctx.methods()).toContain('strokeRect');
-    expect(ctx.texts()).toContain('L2');
+    expect(ctx.texts()).toContain('L2·38');
+  });
+
+  it('draws a wrecked building as rubble', () => {
+    const ctx = draw(stateWith({ '0,0': { terrainType: 'clear', building: { type: 'medium', levels: 2, cf: 40, currentCF: 0 } } }));
+    expect(ctx.texts()).toContain('RUBBLE');
+  });
+
+  it('uses a distinct terrain colour for building hexes', () => {
+    const ctx = draw(stateWith({
+      '0,0': { terrainType: 'light_building' },
+      '1,0': { terrainType: 'medium_building' },
+      '2,0': { terrainType: 'heavy_building' }
+    }));
+
+    // Buildings must not fall back to the clear green.
+    expect(ctx.styles()).not.toContain('fillStyle=#90EE90');
+    expect(ctx.styles()).toContain('fillStyle=#C9B79C');
+    expect(ctx.styles()).toContain('fillStyle=#A89B8C');
+    expect(ctx.styles()).toContain('fillStyle=#8A8078');
   });
 
   it('draws the hex grid only when enabled', () => {

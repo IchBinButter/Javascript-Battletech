@@ -1025,5 +1025,39 @@
       "terrain": "pavement",
       "level": 0
     }
-  }
+  },
+  "buildings": [
+    {
+      "id": "light-block",
+      "type": "light",
+      "hexes": {
+        "2,2": {},
+        "3,2": {},
+        "2,3": {},
+        "3,3": {}
+      }
+    },
+    {
+      "id": "medium-block",
+      "type": "medium",
+      "hexes": {
+        "6,2": {},
+        "7,2": {},
+        "6,3": {},
+        "7,3": {}
+      }
+    },
+    {
+      "id": "heavy-block",
+      "type": "heavy",
+      "hexes": {
+        "10,2": {},
+        "11,2": {},
+        "10,3": {
+          "cf": 70
+        },
+        "11,3": {}
+      }
+    }
+  ]
 }

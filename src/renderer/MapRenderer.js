@@ -16,7 +16,11 @@ const TERRAIN_COLORS = {
   rubble: '#808080',
   swamp: '#556B2F',
   pavement: '#D2B48C',
-  bridge: '#A0522D'
+  bridge: '#A0522D',
+  light_building: '#C9B79C',
+  medium_building: '#A89B8C',
+  heavy_building: '#8A8078',
+  hardened_building: '#6F6A66'
 };
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444'];
@@ -292,11 +296,18 @@ export class MapRenderer {
 
   _drawBuilding(ctx, cx, cy, hex) {
     const s = this.hexSize * 0.35;
-    ctx.fillStyle = '#666666';
+    const building = hex.building;
+    const cf = building.currentCF ?? building.cf;
+    const destroyed = typeof cf === 'number' && cf <= 0;
+
+    ctx.fillStyle = destroyed ? '#6B6B6B' : '#8C8C8C';
     ctx.fillRect(cx - s, cy - s, s * 2, s * 2);
-    ctx.strokeStyle = '#444444';
+    ctx.strokeStyle = destroyed ? '#3F3F3F' : '#444444';
+    ctx.lineWidth = 2;
     ctx.strokeRect(cx - s, cy - s, s * 2, s * 2);
-    drawHexText(ctx, cx, cy, `L${hex.building.levels}`, '#ffffff', 8);
+
+    // Level and remaining CF, so a damaged structure is visible on the map.
+    drawHexText(ctx, cx, cy, destroyed ? 'RUBBLE' : `L${building.levels}·${cf}`, '#ffffff', 8);
   }
 
   _isVisible(x, y) {

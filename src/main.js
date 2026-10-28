@@ -88,10 +88,14 @@ async function startGame(forceBuilder) {
       try {
         const mapDef = entry.file ? await loadJSON(`src/data/maps/${entry.file}`) : entry;
         const { Hex } = await import('./models/Hex.js');
+        const { BuildingRegistry } = await import('./rules/urban/Buildings.js');
         hexGrid = new HexGrid(mapDef.width, mapDef.height);
         for (const [key, data] of Object.entries(mapDef.hexes || {})) {
           hexGrid.setHex(key, new Hex(key, { terrainType: data.terrain, level: data.level || 0 }));
         }
+        // Buildings become per-hex objects so LOS, rendering and the urban
+        // rules all read the same CF/level data (p66).
+        BuildingRegistry.fromMap(mapDef).applyToHexes(hexGrid.hexes);
       } catch (error) {
         console.error(`Could not load map "${selectedMapId}":`, error);
         hexGrid = undefined;
