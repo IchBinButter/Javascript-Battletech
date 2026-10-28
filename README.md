@@ -58,7 +58,15 @@ npm test
 
 # Run tests in watch mode
 npm run test:watch
+
+# Run with coverage (fails if coverage drops below the floor)
+npm run test:coverage
 ```
+
+Coverage is measured with the V8 provider over `src/**` (data JSON excluded). The
+thresholds in `vitest.config.js` are a regression floor, not a target: they sit a few
+points below the measured values so a drop fails the run while ordinary refactoring does
+not. A HTML report is written to `coverage/`.
 
 ## Architecture
 

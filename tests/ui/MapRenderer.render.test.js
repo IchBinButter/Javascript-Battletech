@@ -145,6 +145,24 @@ describe('MapRenderer rendering', () => {
     expect(ctx.styles()).toContain('strokeStyle=#ff0000');
   });
 
+  it('draws the LOS preview in green when the line is clear', () => {
+    renderer.losPreview = {
+      fromKey: '0,0',
+      toKey: '2,0',
+      losResult: { blocked: false, interveningHexes: ['1,0'] }
+    };
+    const ctx = draw(stateWith({ '0,0': {}, '1,0': {}, '2,0': {} }));
+
+    expect(ctx.styles()).toContain('strokeStyle=#00ff00');
+  });
+
+  it('falls back to a default alpha when a preview move has no remaining MP', () => {
+    renderer.validMoves = new Map([['1,1', { cost: 1, path: ['2,2', '1,1'] }]]);
+    const ctx = draw(stateWith({ '2,2': {}, '1,1': {} }));
+
+    expect(ctx.styles().some(s => s.includes('rgba(59, 130, 246'))).toBe(true);
+  });
+
   it('draws fire and smoke overlays', () => {
     const state = stateWith({ '1,1': {} });
     state.fireHexes = ['1,1'];

@@ -121,4 +121,31 @@ describe('main.js boot', () => {
     expect(buttons.length).toBeGreaterThan(0);
     expect(buttons.map(b => b.textContent.toLowerCase()).join(' ')).toContain('initiative');
   });
+
+  it('selects a unit when its hex is clicked, and clears on Escape', async () => {
+    const { hexToPixel } = await import('../../src/hex/HexMath.js');
+    const canvas = document.getElementById('map-canvas');
+    const pos = hexToPixel('6,3', 30);
+
+    canvas.dispatchEvent(new MouseEvent('click', {
+      clientX: pos.x,
+      clientY: pos.y,
+      bubbles: true
+    }));
+
+    expect(document.getElementById('unit-details').textContent).toContain('Atlas');
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(document.getElementById('unit-details').textContent).toContain('Select a unit');
+  });
+
+  it('re-renders the map on keyboard input', async () => {
+    const before = canvasStub.ctx.calls.length;
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'g' }));
+    await new Promise(resolve => requestAnimationFrame(() => resolve()));
+
+    // The grid toggle schedules a fresh frame, which clears and redraws.
+    expect(canvasStub.ctx.calls.length).toBeGreaterThan(before);
+  });
 });

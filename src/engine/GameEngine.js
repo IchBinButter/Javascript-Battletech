@@ -10,7 +10,6 @@ import { InitiativeManager } from './InitiativeManager.js';
 import { MovementCalculator } from '../rules/movement/MovementCalculator.js';
 import { PSRCalculator } from '../rules/movement/PSRCalculator.js';
 import { SkiddingRules } from '../rules/movement/SkiddingRules.js';
-import { FacingRules } from '../rules/movement/FacingRules.js';
 import { LineOfSight } from '../rules/combat/LineOfSight.js';
 import { AttackResolver } from '../rules/combat/AttackResolver.js';
 import { canWeaponFireAt, getTargetArc, ARC } from '../rules/combat/ArcRules.js';
@@ -34,7 +33,6 @@ export class GameEngine {
     this.movementCalc = new MovementCalculator();
     this.psrCalc = new PSRCalculator();
     this.skiddingRules = new SkiddingRules();
-    this.facingRules = new FacingRules();
     this.los = new LineOfSight();
 
     // Attack and damage resolvers will be initialized after loading hit tables
