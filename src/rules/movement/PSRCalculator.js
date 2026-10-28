@@ -58,6 +58,19 @@ export class PSRCalculator {
         triggers.push({ trigger: 'Entered Water', baseModifier: waterMod });
       }
 
+      // p61: terrain modifications (ice +3, mud +1, deep snow +1, swamp +1).
+      if (movement.terrainPSR && movement.terrainPSR.reasons && movement.terrainPSR.reasons.length) {
+        triggers.push({
+          trigger: movement.terrainPSR.reasons.join(', '),
+          baseModifier: movement.terrainPSR.modifier
+        });
+      }
+
+      // p62: heavy rain +1, torrential downpour +2 to every PSR.
+      if (movement.weatherPSR) {
+        triggers.push({ trigger: 'Weather Conditions', baseModifier: movement.weatherPSR });
+      }
+
       if (movement.standingUp) {
         triggers.push({ trigger: 'Standing Up', baseModifier: 0 });
       }

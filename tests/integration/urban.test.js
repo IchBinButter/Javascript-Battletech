@@ -183,7 +183,7 @@ describe('basements (p66)', () => {
 
   it('drops a Mech heavier than the hex CF even with no basement roll', () => {
     // Atlas is 100 tons; a CF 40 hex cannot hold it. Basement roll 7 = none.
-    const atlas = place(createTestUnit('atlas-as7d', 0, 'atlas'), '4,5');
+    const atlas = place(createTestUnit('atlas-as7d', 0, 'atlas'), '4,5', 2); // facing the building hex
     const engine = urbanEngine({
       units: { atlas },
       buildings: { '5,5': mediumBuilding(40) },

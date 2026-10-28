@@ -8,6 +8,7 @@ import { LineOfSight } from './LineOfSight.js';
 import { canWeaponFireAt, isLegLocation } from './ArcRules.js';
 import { armWeaponModifier, hasSensorHit } from './UnitDamage.js';
 import { getHeatEffects } from '../heat/HeatScale.js';
+import { attackModifier } from '../weather/WeatherRules.js';
 
 export class AttackResolver {
   constructor(hitTables) {
@@ -133,6 +134,13 @@ export class AttackResolver {
     const heatMod = this.getHeatModifier(attacker.heat);
     tn += heatMod;
     if (heatMod > 0) mods.push(`Attacker heat: +${heatMod}`);
+
+    // O - Weather conditions (p138)
+    const weatherMod = attackModifier(gameState.weather, weaponDef.type, target);
+    if (weatherMod.modifier > 0) {
+      tn += weatherMod.modifier;
+      mods.push(`Weather: +${weatherMod.modifier}`);
+    }
 
     // O - Attacker damage (weapon damage to self)
     // (simplified: check if any location has taken >20 damage, +1 per location)

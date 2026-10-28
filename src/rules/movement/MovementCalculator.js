@@ -9,6 +9,7 @@ import { hexToPixel, hexDistance, directionBetween, getNeighborInDirection, hexK
 import { parseHexKey } from '../../utils/helpers.js';
 import equipmentData from '../../data/equipment.json' with { type: 'json' };
 import { getMaxMP as computeMaxMP } from './maxMP.js';
+import { movementModifier } from '../weather/WeatherRules.js';
 
 const MASC_DATA = equipmentData.equipment.find(e => e.id === 'masc') || { mpMultiplier: 2, failureRollTarget: 3 };
 
@@ -34,11 +35,18 @@ export class MovementCalculator {
    * @param {string} movementType - 'walk', 'run', 'jump'
    * @returns {number} MP cost
    */
-  calculateMPCost(fromHex, toHex, unit, movementType) {
+  calculateMPCost(fromHex, toHex, unit, movementType, weather = null) {
     // Jump jets ignore terrain
     if (movementType === 'jump') return 1;
 
     let cost = TERRAIN_MP_COSTS[toHex.terrainType] || 1;
+
+    // Building terrain cost (Movement Costs Table, p136): light +1, medium +2,
+    // heavy +3, hardened +4 on top of the cost to enter any hex.
+    if (toHex.building) {
+      const buildingCosts = { light: 1, medium: 2, heavy: 3, hardened: 4 };
+      cost += buildingCosts[toHex.building.type] || 0;
+    }
 
     const levelDiff = toHex.level - fromHex.level;
     if (levelDiff >= 3) {
@@ -54,6 +62,11 @@ export class MovementCalculator {
     }
     if (toHex.modifiers.mud || toHex.modifiers.deepSnow) {
       cost += 1;
+    }
+
+    // Weather: fog and darkness add MP per hex.
+    if (weather) {
+      cost += movementModifier(weather);
     }
 
     // Road bonus: pavement overrides terrain cost (flat 1)
@@ -137,7 +150,7 @@ export class MovementCalculator {
 
         if (neighborHex.occupiedBy && neighborKey !== startKey) continue;
 
-        const terrainCost = this.calculateMPCost(currentHex, neighborHex, unit, movementType);
+        const terrainCost = this.calculateMPCost(currentHex, neighborHex, unit, movementType, gameState.weather);
         if (terrainCost === Infinity) continue;
 
         const moveDir = directionBetween(currentKey, neighborKey);
@@ -211,7 +224,7 @@ export class MovementCalculator {
         continue;
       }
 
-      const terrainCost = this.calculateMPCost(fromHex, toHex, unit, movementType);
+      const terrainCost = this.calculateMPCost(fromHex, toHex, unit, movementType, gameState.weather);
       const moveDir = directionBetween(fromKey, toKey);
 
       const facingCost = this.calculateFacingChangeFromDirection(currentFacing, moveDir);

@@ -80,7 +80,7 @@
     "ice": {
       "name": "Ice",
       "mpCostMultiplier": 1.5,
-      "psrModifier": 4
+      "psrModifier": 3
     },
     "mud": {
       "name": "Mud",

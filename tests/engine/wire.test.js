@@ -140,9 +140,9 @@ describe('event payload contract', () => {
       type: 'move', unitId: 'atlas', path: ['5,5', '5,6'], movementType: 'walk'
     });
     expect(moveResult).toMatchObject({ success: true });
-    // Entering at ground level costs one MP - building levels are for LOS and
-    // roof movement, not a climb through the front door.
-    expect(moveResult.remainingMP).toBe(2);
+    // A medium building adds +2 to the one point for entering a hex (p136),
+    // so the Atlas spends all three of its MP.
+    expect(moveResult.remainingMP).toBe(0);
 
     const names = events.map(e => e.name);
     expect(names).toContain('buildingEntered');

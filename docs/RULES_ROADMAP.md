@@ -241,13 +241,28 @@ revisiting. The plumbing does, while the codebase is still small:
 
 ## Phase 6 — Optional layers (p61–64, p75–95)
 
-6.1 **Terrain modifiers** — `terrain.json.modifiers` already carries MP multipliers and PSR
-values for ice (4), mud (1) and deep snow (1); wire them into movement and PSR. *S*
-6.2 **Weather and planetary conditions** (p62–63) — `state.weather` exists but nothing reads
-it; fog/rain/snow/dusk/night, wind against missile and ballistic fire, heat from temperature.
-6.3 **Fire and smoke** (p63–64) — ignition from flamers and area-effect damage, spread
-downwind, 1D6 damage for standing in fire, smoke blocking LOS. The state and decay already
-exist; nothing ever ignites one.
+6.1 ✅ **Terrain modifiers** — ice (+1 MP, PSR +3 — the data had +4, corrected against the
+Movement Costs Table), mud and deep snow (+1 MP, PSR +1) and swamp (PSR +1) now produce PSR
+triggers from the destination hex. The same pass fixed building MP costs: the table charges
+light +1, medium +2, heavy +3, hardened +4 on top of the one point to enter a hex, which
+replaces the earlier assumption that a ground-level entry cost one MP. *S*
+6.2 ✅ **Weather and planetary conditions** (p62–63) — `src/rules/weather/WeatherRules.js`
+covers fog (heavy fog +1 to P and DE), dusk (+1), full and moonless night (+2/+3, reduced by
+target heat), rain and snow, and wind against missiles and ballistics. It also drives MP per
+hex (fog, darkness), rain PSRs (+1/+2) and the extreme-temperature heat per turn (+1 per 10C
+above 50, -1 below -30). *M*
+6.3 ✅ **Fire and smoke** (p63–64) — the Fire Table (plasma/inferno automatic, flamer 4+,
+energy 7+, missile/ballistic 9+, with environment and temperature modifiers), ignition rolled
+at the end of the phase from hexes hit during it, spread downwind on a 12 (two hexes in a
+gale), smoke in the two hexes downwind, 2 CF per End Phase for a burning building, and 1D6
+damage in the Heat Phase to units standing in fire. *M*
+
+**Known gaps in Phase 6 so far:** illumination (searchlights) is not modelled, so night
+modifiers always apply; the moonless-night physical attack bonus is implemented as a helper
+but not wired into the physical resolver; extinguish-on-40-AE-damage is not wired because no
+AE weapon exists in the data; smoke does not yet block line of sight. The exact "Effects of
+Fire" procedure is not in the KB chunk set, so the 1D6-per-unit heat-phase damage is the
+simplified reading flagged here rather than a verified page citation.
 6.4 **Hidden units** (p82) — build on R1: per-player projection, detection by proximity and
 probes, point-blank shots on reveal, hidden spotters.
 6.5 **Minefields and battlefield support** (p75–79) — `state.minefields` and

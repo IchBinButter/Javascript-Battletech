@@ -7,6 +7,7 @@
 import { getHeatEffects, describeHeatEffects } from './HeatScale.js';
 import { hasLifeSupportHit } from '../combat/UnitDamage.js';
 import weaponsData from '../../data/weapons.json' with { type: 'json' };
+import { heatPerTurn } from '../weather/WeatherRules.js';
 
 const WEAPON_DAMAGE = {};
 for (const weapon of weaponsData.weapons) {
@@ -190,6 +191,12 @@ export class HeatManager {
     const results = [];
 
     for (const unit of Object.values(gameState.units)) {
+      // p62: extreme temperatures add or remove heat every turn.
+      const ambientHeat = heatPerTurn(gameState.weather);
+      if (ambientHeat !== 0) {
+        unit.heat = Math.max(0, unit.heat + ambientHeat);
+      }
+
       const dissipation = this.applyHeatDissipation(unit, gameState);
       const heatEffects = this.applyHeatEffects(unit);
 

@@ -241,6 +241,10 @@ export class PhaseManager {
 
     // Auto-resolve heat for all units
     if (this.engine && this.engine.heatManager) {
+      // Fire damage lands before heat dissipation (p63).
+      if (typeof this.engine.resolveFireDamage === 'function') {
+        this.engine.resolveFireDamage();
+      }
       const heatResults = this.engine.heatManager.resolveHeatPhase(state, this.engine.diceRoller);
       this.engine.eventBus.emit('heatResolved', heatResults);
     }
@@ -261,6 +265,12 @@ export class PhaseManager {
   _enterEndPhase() {
     const state = this.engine.stateManager.getState();
     state.phase = 'end';
+
+    // A hex that started on fire fills the hexes downwind with smoke, fires
+    // spread, and burning buildings lose CF (p64).
+    if (typeof this.engine.resolveEndPhaseFire === 'function') {
+      this.engine.resolveEndPhaseFire();
+    }
 
     // Consciousness checks
     for (const unit of Object.values(state.units)) {

@@ -16,6 +16,12 @@ import { canSee } from './visibility.js';
 import { toTransferable } from '../utils/helpers.js';
 import { entryPSRModifier, entryDamage, damageReduction, collapseDamage, buildingCombat, BuildingRegistry } from '../rules/urban/Buildings.js';
 import { rollBasement, basementFallDamage, basementCollapseDamage } from '../rules/urban/Basements.js';
+import { terrainPSRModifier } from '../rules/movement/TerrainRules.js';
+import { psrModifier } from '../rules/weather/WeatherRules.js';
+import {
+  canBurn, attemptIgnition, spreadsOnRoll, spreadDistance, downwindHexes,
+  BUILDING_FIRE_CF_LOSS, fireDamageRoll
+} from '../rules/terrain/FireRules.js';
 import { canWeaponFireAt, getTargetArc, ARC } from '../rules/combat/ArcRules.js';
 import { hasActuatorSlot } from '../rules/combat/UnitDamage.js';
 import { DamageResolver } from '../rules/combat/DamageResolver.js';
@@ -169,7 +175,9 @@ export class GameEngine {
         largeLevelDrop: false,
         isSkidding: false,
         rapidTurnWhileRunning: false,
-        type: movementType
+        type: movementType,
+        terrainPSR: destination ? terrainPSRModifier(destination) : { modifier: 0, reasons: [] },
+        weatherPSR: psrModifier(state.weather)
       }, state);
 
       if (psrTriggers.length > 0) {
@@ -303,6 +311,9 @@ export class GameEngine {
       }
 
       if (result.hit) {
+        // Fire is rolled for at the end of the phase, once per hit (p63).
+        this._recordFireCandidate(state, target.position.hexKey, weaponDef);
+
         const targetHex = state.map.hexes.get(target.position.hexKey);
 
         for (const hitLoc of result.hitLocations) {
@@ -526,6 +537,103 @@ export class GameEngine {
     }
 
     return rolls;
+  }
+
+  /**
+   * Remember a hex that was hit this phase; the ignition roll happens at the
+   * end of the phase so firing stays deterministic (p63).
+   */
+  _recordFireCandidate(state, hexKey, weaponDef) {
+    if (!state._fireCandidates) state._fireCandidates = [];
+    state._fireCandidates.push({
+      hexKey,
+      weaponId: weaponDef.id,
+      weaponType: weaponDef.type
+    });
+  }
+
+  /**
+   * End Phase fire resolution (p63-64): ignition rolls, spread downwind,
+   * smoke, and damage to burning building hexes.
+   */
+  resolveEndPhaseFire() {
+    const state = this.stateManager.getState();
+    const weather = state.weather || {};
+    const temperature = Number.isFinite(weather.temperature) ? weather.temperature : 20;
+    const windDirection = Number.isFinite(weather.windDirection) ? weather.windDirection : 0;
+
+    const fireSet = new Set(state.fireHexes || []);
+    const addFire = (hexKey) => {
+      if (fireSet.has(hexKey)) return false;
+      const hex = state.map.hexes.get(hexKey);
+      if (!hex || !canBurn(hex)) return false;
+
+      fireSet.add(hexKey);
+      this.eventBus.emit('fireStarted', { hexKey });
+
+      // p64: a burning hex fills the first two hexes downwind with smoke.
+      for (const smokeKey of downwindHexes(hexKey, windDirection, 2)) {
+        if (smokeKey === hexKey) continue;
+        if (!state.smokeHexes[smokeKey]) {
+          state.smokeHexes[smokeKey] = { level: 'light', turnsRemaining: 6 };
+        }
+      }
+      return true;
+    };
+
+    // 1. Ignition rolls for every hex hit this phase.
+    for (const candidate of state._fireCandidates || []) {
+      const hex = state.map.hexes.get(candidate.hexKey);
+      const result = attemptIgnition(
+        { id: candidate.weaponId, type: candidate.weaponType },
+        hex, this.diceRoller.roll2d6(), temperature
+      );
+      if (result.ignited) addFire(candidate.hexKey);
+    }
+    state._fireCandidates = [];
+
+    // 2. Spread downwind on a 12.
+    for (const hexKey of [...fireSet]) {
+      if (!spreadsOnRoll(this.diceRoller.roll2d6())) continue;
+      for (const target of downwindHexes(hexKey, windDirection, spreadDistance(weather.wind))) {
+        addFire(target);
+      }
+    }
+
+    // 3. Buildings on fire lose 2 CF every End Phase.
+    for (const hexKey of fireSet) {
+      const hex = state.map.hexes.get(hexKey);
+      if (hex && hex.building) {
+        hex.building.currentCF = Math.max(0, hex.building.currentCF - BUILDING_FIRE_CF_LOSS);
+      }
+    }
+
+    state.fireHexes = [...fireSet];
+    return state.fireHexes;
+  }
+
+  /**
+   * Heat Phase fire damage: one roll per unit standing in a fire hex.
+   */
+  resolveFireDamage() {
+    const state = this.stateManager.getState();
+    if (!Array.isArray(state.fireHexes) || state.fireHexes.length === 0) return [];
+
+    const results = [];
+    for (const hexKey of state.fireHexes) {
+      for (const unit of Object.values(state.units)) {
+        if (unit.position.hexKey !== hexKey) continue;
+
+        const damage = fireDamageRoll(this.diceRoller);
+        const locRoll = this.diceRoller.roll2d6();
+        const loc = this.attackResolver.determineHitLocation(locRoll, 'front');
+        this.damageResolver.applyDamage(unit, loc.location, damage, loc.isRear ?? false, this.diceRoller);
+
+        results.push({ hexKey, unitId: unit.id, damage });
+        this.eventBus.emit('fireDamage', { hexKey, unitId: unit.id, damage });
+      }
+    }
+    return results;
   }
 
   _handleEndPhase(playerId) {
