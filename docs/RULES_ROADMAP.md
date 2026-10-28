@@ -236,6 +236,15 @@ revisiting. The plumbing does, while the codebase is still small:
   so the payload survives a WebSocket/postMessage hop.
 - ✅ **R5 Command boundary** — a test scans `src/ui` for direct unit/state writes and the UI
   keeps its own selection state; every command goes through `engine.processAction`.
+- ✅ **M2 Replay equivalence** — two engines built with the same game id and fed the same
+  action list end in identical state, and different game ids produce different dice streams.
+- ✅ **M3 Diff sync** — `getStateDiff`/`applyStateDiff` now also carry `initiativeWinner`,
+  fire hexes, smoke and per-hex changes (building CF, rubble, basements); a snapshot plus its
+  patch rebuilds the live state through `GameState.fromJSON`.
+- ✅ **M4 Projection-safe patches** — a patch computed from two projected views never
+  mentions a hidden unit, while the raw diff does (a control test proves the projection is
+  doing real work). Note that projections are shallow: a server must serialize a view before
+  caching it as the last-sent snapshot, or the hidden state will mutate it.
 
 ---
 

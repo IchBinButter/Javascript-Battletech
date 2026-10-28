@@ -21,6 +21,11 @@ export function canSee(viewerId, targetId, state) {
 /**
  * A view of the state with everything this player must not know removed.
  * Keeps the GameState prototype so the UI can still call its helpers.
+ *
+ * The view is shallow: its units are the live Unit instances. That is fine for
+ * rendering, but a server must serialize the view before keeping it as the
+ * "last sent" snapshot - otherwise the hidden state mutates the snapshot too
+ * and every later diff looks empty.
  */
 export function projectStateForPlayer(state, viewerId) {
   if (!state) return state;
