@@ -13,7 +13,8 @@ import { SkiddingRules } from '../rules/movement/SkiddingRules.js';
 import { FacingRules } from '../rules/movement/FacingRules.js';
 import { LineOfSight } from '../rules/combat/LineOfSight.js';
 import { AttackResolver } from '../rules/combat/AttackResolver.js';
-import { canWeaponFireAt } from '../rules/combat/ArcRules.js';
+import { canWeaponFireAt, getTargetArc, ARC } from '../rules/combat/ArcRules.js';
+import { hasActuatorSlot } from '../rules/combat/UnitDamage.js';
 import { DamageResolver } from '../rules/combat/DamageResolver.js';
 import { PhysicalAttackResolver } from '../rules/combat/PhysicalAttackResolver.js';
 import { HeatManager } from '../rules/heat/HeatManager.js';
@@ -95,6 +96,12 @@ export class GameEngine {
         break;
       case 'confirmFacing':
         result = this._handleConfirmFacing(playerId, action);
+        break;
+      case 'twistTorso':
+        result = this._handleTwistTorso(playerId, action);
+        break;
+      case 'flipArms':
+        result = this._handleFlipArms(playerId, action);
         break;
       case 'selectUnit':
         result = this._handleSelectUnit(playerId, action);
@@ -226,13 +233,25 @@ export class GameEngine {
       }
     }
 
+    // Secondary target modifier (p27): the first target of the phase is free,
+    // every other target costs +1 forward or +2 in the side/rear arcs.
+    const attacked = attacker.targetsAttackedThisPhase instanceof Set
+      ? attacker.targetsAttackedThisPhase
+      : new Set();
+    let multipleTargetModifier = 0;
+    if (attacked.size > 0 && !attacked.has(target.id)) {
+      const arc = getTargetArc(attacker, target.position.hexKey);
+      multipleTargetModifier = arc === ARC.FORWARD ? 1 : 2;
+    }
+
     const result = this.attackResolver.resolveWeaponAttack(
       attacker, weaponDef, { location: action.weaponLocation }, target, state, this.diceRoller,
       {
         indirect: Boolean(action.indirect),
         spotter: indirect ? indirect.spotter : null,
         spotterAttacked: Boolean(indirect && indirect.spotter.attackedThisPhase),
-        aimedLocation: action.aimedLocation
+        aimedLocation: action.aimedLocation,
+        multipleTargetModifier
       }
     );
 
@@ -241,6 +260,10 @@ export class GameEngine {
 
       // Attack and spotting records for the rest of this phase (p30).
       attacker.attackedThisPhase = true;
+      if (!(attacker.targetsAttackedThisPhase instanceof Set)) {
+        attacker.targetsAttackedThisPhase = new Set();
+      }
+      attacker.targetsAttackedThisPhase.add(target.id);
       if (indirect && indirect.spotter) {
         indirect.spotter.spottedThisPhase = target.id;
       }
@@ -262,6 +285,12 @@ export class GameEngine {
             target, hitLoc.location, hitLoc.damage, hitLoc.isRear, this.diceRoller
           );
           hitLoc.damageResult = damageResult;
+
+          // p58: a head hit injures the MechWarrior, armour or no armour.
+          if (hitLoc.location === 'head' && typeof target.applyPilotDamage === 'function') {
+            target.applyPilotDamage(1);
+            hitLoc.pilotDamage = 1;
+          }
         }
       }
     });
@@ -442,6 +471,56 @@ export class GameEngine {
   _handleEndPhase(playerId) {
     const nextPhase = this.phaseManager.nextPhase();
     return { success: true, nextPhase };
+  }
+
+  /**
+   * Torso twist (p25): declared in the weapon attack phase. It shifts the arm
+   * and torso firing arcs one hexside and never changes the Mech's facing.
+   */
+  _handleTwistTorso(playerId, action) {
+    const state = this.stateManager.getState();
+    const unit = state.getUnit(action.unitId);
+    if (!unit) return { success: false, error: 'Unit not found' };
+    if (unit.player !== playerId) return { success: false, error: 'Not your unit' };
+    if (this.phaseManager.currentPhase !== 'weapon_attack') {
+      return { success: false, error: 'Torso twists are declared in the weapon attack phase' };
+    }
+    if (unit.prone) return { success: false, error: 'A prone Mech cannot twist' };
+    if (unit.armsReversed) {
+      return { success: false, error: 'Cannot twist and reverse arms in the same turn' };
+    }
+
+    const direction = action.direction === -1 ? -1 : action.direction === 1 ? 1 : 0;
+    this.stateManager.applyStateChange(() => { unit.torsoTwist = direction; });
+    return { success: true, unitId: unit.id, torsoTwist: direction };
+  }
+
+  /**
+   * Reversing (flipping) arms (p24): both arms must lack hand and lower-arm
+   * actuators, the Mech cannot twist in the same turn, and arm weapons then
+   * fire into the rear arc.
+   */
+  _handleFlipArms(playerId, action) {
+    const state = this.stateManager.getState();
+    const unit = state.getUnit(action.unitId);
+    if (!unit) return { success: false, error: 'Unit not found' };
+    if (unit.player !== playerId) return { success: false, error: 'Not your unit' };
+    if (this.phaseManager.currentPhase !== 'weapon_attack') {
+      return { success: false, error: 'Arms are reversed in the weapon attack phase' };
+    }
+    if (unit.prone) return { success: false, error: 'A prone Mech cannot reverse its arms' };
+    if (unit.torsoTwist) {
+      return { success: false, error: 'Cannot twist and reverse arms in the same turn' };
+    }
+
+    const blockers = /hand_actuator|lower_arm_actuator/;
+    if (hasActuatorSlot(unit, 'leftArm', blockers) || hasActuatorSlot(unit, 'rightArm', blockers)) {
+      return { success: false, error: 'This Mech cannot reverse its arms' };
+    }
+
+    const reversed = typeof action.reversed === 'boolean' ? action.reversed : true;
+    this.stateManager.applyStateChange(() => { unit.armsReversed = reversed; });
+    return { success: true, unitId: unit.id, armsReversed: reversed };
   }
 
   _handleConfirmFacing(playerId, action) {

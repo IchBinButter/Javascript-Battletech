@@ -181,10 +181,11 @@ export class PhaseManager {
     const state = this.engine.stateManager.getState();
     state.phase = 'weapon_attack';
 
-    // Spotting and attacking are per-phase (p30).
+    // Spotting, attacking and secondary targets are per-phase (p27, p30).
     for (const unit of Object.values(state.units)) {
       unit.spottedThisPhase = null;
       unit.attackedThisPhase = false;
+      unit.targetsAttackedThisPhase = new Set();
     }
 
     const winner = state.initiativeWinner;
@@ -231,10 +232,27 @@ export class PhaseManager {
     const state = this.engine.stateManager.getState();
     state.phase = 'heat';
 
+    // Remember who was running before the heat phase, to catch involuntary
+    // shutdowns (p52: they force a PSR at +3).
+    const wasShutdown = new Map();
+    for (const unit of Object.values(state.units)) {
+      wasShutdown.set(unit.id, Boolean(unit.shutdown));
+    }
+
     // Auto-resolve heat for all units
     if (this.engine && this.engine.heatManager) {
       const heatResults = this.engine.heatManager.resolveHeatPhase(state, this.engine.diceRoller);
       this.engine.eventBus.emit('heatResolved', heatResults);
+    }
+
+    for (const unit of Object.values(state.units)) {
+      if (unit.shutdown && !wasShutdown.get(unit.id)) {
+        const psr = this.engine.psrCalc.makePSR(unit, this.engine.diceRoller, [
+          { trigger: 'Involuntary shutdown', baseModifier: 3 }
+        ]);
+        if (!psr.passed) unit.prone = true;
+        this.engine.eventBus.emit('involuntaryShutdown', { unitId: unit.id, psr });
+      }
     }
 
     this.engine.eventBus.emit('heatPhase', {});
@@ -247,7 +265,8 @@ export class PhaseManager {
     // Consciousness checks
     for (const unit of Object.values(state.units)) {
       if (unit.pilot.hits > 0 && unit.pilot.conscious) {
-        const consciousnessTargets = [0, 3, 5, 7, 10, null, null];
+        // p58: 3+, 5+, 7+, 10+, 11+, then dead on the sixth point.
+        const consciousnessTargets = [0, 3, 5, 7, 10, 11, null];
         const hits = Math.min(unit.pilot.hits, 6);
         const target = consciousnessTargets[hits];
 
@@ -346,6 +365,9 @@ export class PhaseManager {
         return { valid: state.phase === 'physical_attack', reason: 'Only in physical attack phase' };
       case 'confirmFacing':
         return { valid: state.phase === 'movement', reason: 'Only in movement phase' };
+      case 'twistTorso':
+      case 'flipArms':
+        return { valid: state.phase === 'weapon_attack', reason: 'Only in weapon attack phase' };
       default:
         return { valid: false, reason: `Unknown action: ${actionType}` };
     }

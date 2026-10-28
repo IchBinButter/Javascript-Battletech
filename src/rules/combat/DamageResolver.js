@@ -185,6 +185,11 @@ export class DamageResolver {
     const explosionDamage = ammo.shots * wpnDamage;
     ammo.shots = 0; // All ammo destroyed
 
+    // p52: an ammunition explosion injures the MechWarrior for 2 points.
+    if (typeof unit.applyPilotDamage === 'function') {
+      unit.applyPilotDamage(2);
+    }
+
     if (location) {
       // Check for CASE in this location only (must be equipped in same location as ammo)
       const hasCase = unit.criticalSlots[location].some(s => s.item === 'case' && s.status === 'ok');

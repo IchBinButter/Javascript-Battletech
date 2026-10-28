@@ -15,9 +15,9 @@ audit of the current engine. Page references are BMM pages.
 | **Firing arcs** | ✅ 1.1 done | `src/rules/combat/ArcRules.js`, enforced in `AttackResolver` and `GameEngine` |
 | **LOS height / partial cover** | ✅ 1.2/1.3 done | `Unit.getLOSLevel`, `LineOfSight` rewritten against p22/p26 |
 | **Partial cover hit rule** | ✅ 1.3 done | leg hits strike the cover and do no damage (p26/p32) |
-| **Prone target modifier** | ❌ wrong | flat −4; rule is −2 adjacent / +1 otherwise (p28) |
-| **Pilot damage** | ❌ dead code | `pilot.hits` is read in `PhaseManager` but never incremented |
-| **Actuator / hip / shoulder crits** | ❌ no effect | `DamageResolver` has engine, gyro, sensors, life support, sinks only |
+| **Prone target modifier** | ✅ p28 | −2 adjacent / +1 otherwise |
+| **Pilot damage** | ✅ p58 | head hits, falls, ammo explosions, life support heat; 3/5/7/10/11/dead |
+| **Actuator / hip / shoulder crits** | ✅ p47-49 | weapon and physical modifiers, hip MP, sensors +2, engine heat |
 | **Physical attack TN table** | ✅ p137 | punch 0, kick −2, push −1, charge/DFA comparative, actuator damage p29 |
 | **PSR modifiers** | ✅ mostly p54 | 20+ damage +1, water −1/0/+1, woods +1/+2, charged/DFA +2; terrain and skid tables pending |
 | Indirect fire / spotting / TAG | ❌ absent | p30–31 |
@@ -76,53 +76,59 @@ With partial cover, a leg hit strikes the cover instead: absorbed, no damage, no
 and the cover hex is recorded for building damage later. **Not** the punch table — that
 is the pre-2006 rule.
 
-### 1.5 Target state modifiers (p28)
+### 1.5 Target state modifiers (p28)  ✅ done
 
-Replace the flat prone −4 with −2 adjacent / +1 otherwise; add attacker-prone +2 to fire;
+Prone target −2 from an adjacent hex and +1 from anywhere else; attacker prone +2;
 skidding +2 as a target and +1 to fire.
 
-### 1.6 Attacker damage modifiers (p28) — currently "omitted for simplicity"
+### 1.6 Attacker damage modifiers (p28)  ✅ done
 
-Sensor hit +2. Shoulder hit: no arm weapons, +4 for arm weapons regardless of other
-actuators. Upper/lower arm actuator +1 each for weapons in that arm.
+Sensor hit +2. Shoulder hit +4 for weapons in that arm, ignoring the other actuators;
+upper/lower arm actuator +1 each. Lives in `src/rules/combat/UnitDamage.js`, shared with
+the physical attack rules.
 
-### 1.7 Multiple targets (p27)
+### 1.7 Multiple targets (p27)  ✅ done
 
 First target free; each secondary target +1 if in forward arc, +2 if side/rear.
 
-### 1.8 Twist and flip as declared actions (p24–25)
+### 1.8 Twist and flip as declared actions (p24–25)  ✅ done
 
-`PhaseManager` already resets both each turn; wire them up:
 - Torso twist ±1 hexside during the weapon attack phase (shifts arcs, not facing).
-- Arm flip only if no hand/lower-arm actuators in either arm and no split locations;
-  cannot twist and flip in the same turn; returns to front in the End Phase.
+- Arm flip only if no hand/lower-arm actuators in either arm; cannot twist and flip in
+  the same turn; both return to front in the End Phase.
+- **Data gap:** `mechs.json` does not list actuators or split locations, so in practice
+  every Mech passes the flip eligibility test. Adding actuator slots to the data would
+  gate it properly.
 
-### 1.9 Rear-mounted weapons
+### 1.9 Rear-mounted weapons  ✅ done (in 1.1)
 
-`med_laser_rear` exists in `weapons.json` with no `mount` field. Add `mount: "rear"` and
-enforce via 1.1.
+`Weapon.mount` defaults from `special.rear`, and `ArcRules` restricts rear mounts to the
+rear arc.
 
 **Size:** L (roughly 3 PRs). **Tests:** new `tests/rules/combat/ArcRules.test.js`, plus
 LOS, partial cover and modifier cases in the existing suites.
 
 ---
 
-## Phase 2 — Pilot and damage continuity (p41–49, p52, p58)
+## Phase 2 — Pilot and damage continuity (p41–49, p52, p58)  ✅ done
 
-2.1 **Pilot damage sources** — head hit, fall, ammo explosion, life-support heat, hull
-breach, ejection. `pilot.hits` must actually move.
-2.2 **Consciousness ladder** — 3+/5+/7+/10+/11+/dead per hit; current array
-`[0,3,5,7,10,null,null]` treats the 5th hit as automatic unconsciousness.
-2.3 **Critical hit effects** — hip (½ MP, no kick, +2 PSR), upper/lower leg actuator,
-foot actuator, shoulder, upper/lower arm actuator, hand actuator, sensors (+2 TN),
-life support (heat damage), engine heat (+5 then +10/turn).
-2.4 **PSR modifiers from crits** — gyro +3 (code currently adds 1 per hit), +2 per hip,
-leg actuators, foot.
+2.1 ✅ **Pilot damage sources** — head hits, falls, ammunition explosions and life-support
+heat all call `Unit.applyPilotDamage`. Hull breach and ejection are still absent (both need
+environmental rules).
+2.2 ✅ **Consciousness ladder** — 3+/5+/7+/10+/11+, and the sixth point is death; the old
+array treated the fifth hit as automatic unconsciousness.
+2.3 ✅ **Critical hit effects** — hip (half MP, no kick), upper/lower leg actuator, foot
+actuator, shoulder, upper/lower arm actuator, hand actuator, sensors (+2 TN), life support
+(pilot heat damage), engine heat (+5 then +10 per turn).
+2.4 ✅ **PSR modifiers from crits** — gyro +3, +2 per hip, leg actuators +1 each, no
+double-counting a hip as an actuator.
+2.5 ✅ **Heat consequences** — one ammunition bin explodes (most damage per turn, then most
+shots), 2 points of MechWarrior damage, a spotter-check PSR at +3 on involuntary shutdown,
+and shutdown Mechs automatically fail PSRs.
 
-2.5 **Heat consequences** — an ammo explosion destroys *one* critical slot (the most
-destructive ammo per shot, then most shots remaining), not every bin; it inflicts 2 points
-of MechWarrior damage; an involuntary shutdown forces a PSR at +3; a shutdown 'Mech is
-immobile and auto-fails PSRs.
+**Known gap:** `mechs.json` has no actuator or sensor entries in its critical slots, so the
+arm/leg actuator modifiers only fire on injected data (tests do this). Filling in the slot
+data would make the physical and weapon modifiers bite in normal play.
 
 **Size:** M–L. **Why second:** it makes every existing damage result visible, and Phase 1
 item 1.6 needs the actuator state anyway.

@@ -225,10 +225,10 @@ describe('Integration: Full Turn Simulation', () => {
     expect(unconsciousEvents[0].auto).toBe(false);
   });
 
-  it('handles consciousness pass and 5+ hits auto-fail', () => {
+  it('a pilot with six hits is out of the fight', () => {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
     atlas.position = { hexKey: '5,7', facing: 0 };
-    atlas.pilot.hits = 5; // auto unconscious
+    atlas.pilot.hits = 6; // p58: the sixth point of damage kills
 
     const engine = createTestEngine({
       units: { 'atlas-0': atlas }

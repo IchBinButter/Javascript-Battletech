@@ -96,6 +96,20 @@ export class Unit {
     return hexLevel + this.getHeightLevels();
   }
 
+  /**
+   * Damage the MechWarrior (p58). A warrior takes up to 5 points and dies on
+   * the sixth; each point forces a consciousness roll in the End Phase.
+   * @returns {number} total hits taken
+   */
+  applyPilotDamage(points = 1) {
+    this.pilot.hits = Math.min(6, (this.pilot.hits || 0) + points);
+    if (this.pilot.hits >= 6) {
+      this.pilot.conscious = false;
+      this.pilot.dead = true;
+    }
+    return this.pilot.hits;
+  }
+
   /** Get current armor for a location (front or rear) */
   getArmor(location, isRear = false) {
     const loc = this.armor[location];

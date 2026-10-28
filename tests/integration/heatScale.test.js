@@ -64,7 +64,7 @@ describe('Heat thresholds 14-24+ (integration)', () => {
     expect(mech.equipment.ammo.ac5.shots).toBe(0); // roll 7 vs avoid 8+ explodes
   });
 
-  it('heat 30: auto shutdown + auto ammo, all bins drained', () => {
+  it('heat 30: auto shutdown and the most destructive ammo bin explodes', () => {
     const { engine, mech } = setupHeatTest(30, 'atlas-as7d', '7,7', 0);
     mech.equipment.ammo = { lrm15: { shots: 10 }, sr6: { shots: 5 } };
 
@@ -72,8 +72,9 @@ describe('Heat thresholds 14-24+ (integration)', () => {
 
     expect(mech.shutdown).toBe(true);
     expect(mech.currentMP).toBe(0);
+    // p52: one bin explodes - LRM-15 (15 damage per turn) beats SRM-6 (12).
     expect(mech.equipment.ammo.lrm15.shots).toBe(0);
-    expect(mech.equipment.ammo.sr6.shots).toBe(0);
+    expect(mech.equipment.ammo.sr6.shots).toBe(5);
   });
 
   it('heat 0-13: no shutdown, no ammo check, only MP penalties', () => {
@@ -174,7 +175,7 @@ describe('Ammo explosion checks (record sheet thresholds)', () => {
     expect(mech.equipment.ammo.lrm15.shots).toBe(0);
   });
 
-  it('ammo explosion drains all ammo types', () => {
+  it('ammo explosion destroys only the most destructive bin', () => {
     const { engine, mech } = setupAmmoMech(19);
     mech.equipment.ammo = {
       ac5: { shots: 10 },
@@ -184,9 +185,10 @@ describe('Ammo explosion checks (record sheet thresholds)', () => {
 
     enterHeatPhaseAndResolve(engine, makeDiceRoller(2));
 
-    expect(mech.equipment.ammo.ac5.shots).toBe(0);
+    // p52: LRM-15 does 15 damage per turn, ahead of SRM-4 (8) and AC/5 (5).
     expect(mech.equipment.ammo.lrm15.shots).toBe(0);
-    expect(mech.equipment.ammo.sr4.shots).toBe(0);
+    expect(mech.equipment.ammo.ac5.shots).toBe(10);
+    expect(mech.equipment.ammo.sr4.shots).toBe(25);
   });
 });
 

@@ -14,6 +14,7 @@
 
 import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { getTargetArc, ARC } from './ArcRules.js';
+import { getActuatorDamage as readActuatorDamage } from './UnitDamage.js';
 import hitTables from '../../data/hitTables.json' with { type: 'json' };
 import physicalWeapons from '../../data/physicalWeapons.json' with { type: 'json' };
 
@@ -52,22 +53,10 @@ export class PhysicalAttackResolver {
 
   /**
    * Destroyed actuators in a location, by kind (p29, p47-49).
+   * Shared with the weapon-attack modifiers and movement rules.
    */
   getActuatorDamage(unit, location) {
-    const slots = (unit.criticalSlots && unit.criticalSlots[location]) || [];
-    const destroyed = (pattern) =>
-      slots.some(s => s.status === 'destroyed' && pattern.test(s.item || ''));
-
-    return {
-      shoulder: destroyed(/shoulder/),
-      upperArm: destroyed(/upper_arm_actuator/),
-      lowerArm: destroyed(/lower_arm_actuator/),
-      hand: destroyed(/hand_actuator/),
-      hip: destroyed(/hip/),
-      upperLeg: destroyed(/upper_leg_actuator/),
-      lowerLeg: destroyed(/lower_leg_actuator/),
-      foot: destroyed(/foot_actuator/)
-    };
+    return readActuatorDamage(unit, location);
   }
 
   _destroyed(unit, location) {

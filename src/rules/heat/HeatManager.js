@@ -5,6 +5,17 @@
  */
 
 import { getHeatEffects, describeHeatEffects } from './HeatScale.js';
+import { hasLifeSupportHit } from '../combat/UnitDamage.js';
+import weaponsData from '../../data/weapons.json' with { type: 'json' };
+
+const WEAPON_DAMAGE = {};
+for (const weapon of weaponsData.weapons) {
+  // p52 measures destructive power by the damage one turn's worth of shots
+  // does, so a cluster launcher counts damage x size (LRM-15 = 15).
+  WEAPON_DAMAGE[weapon.id] = weapon.cluster
+    ? weapon.damage * (weapon.clusterSize || 1)
+    : weapon.damage;
+}
 
 export class HeatManager {
   /**
@@ -46,7 +57,34 @@ export class HeatManager {
       heat += unit._externalHeat;
     }
 
+    // p50: a damaged engine runs hot. First hit +5 per turn, second +10 total.
+    const engineHits = (unit.engine && unit.engine.hits) || 0;
+    if (engineHits >= 2) heat += 10;
+    else if (engineHits === 1) heat += 5;
+
     return heat;
+  }
+
+  /**
+   * The ammunition bin a heat-induced explosion destroys (p52): the one whose
+   * ammo does the most damage per shot, then the one with the most shots.
+   */
+  mostDestructiveAmmoBin(unit) {
+    const ammo = (unit.equipment && unit.equipment.ammo) || {};
+    let best = null;
+    let bestScore = -1;
+
+    for (const [binName, bin] of Object.entries(ammo)) {
+      if (!bin || bin.shots <= 0) continue;
+      const perShot = WEAPON_DAMAGE[binName] || 1;
+      const score = perShot * 1000 + bin.shots;
+      if (score > bestScore) {
+        bestScore = score;
+        best = binName;
+      }
+    }
+
+    return best;
   }
 
   /**
@@ -166,12 +204,26 @@ export class HeatManager {
       if (heatEffects.ammoExplosionCheck) {
         const ammoResult = this.checkAmmoExplosion(unit, diceRoller, heatEffects.ammoTarget);
         if (ammoResult.exploded) {
-          for (const [binName, ammo] of Object.entries(unit.equipment.ammo)) {
-            if (ammo.shots > 0) {
-              heatEffects.effects.push(`AMMO EXPLOSION in ${binName}! (rolled ${ammoResult.roll}, needed ${ammoResult.target}+)`);
-              ammo.shots = 0;
-            }
+          // p52: only the most destructive bin explodes, not every bin.
+          const binName = this.mostDestructiveAmmoBin(unit);
+          if (binName) {
+            heatEffects.effects.push(
+              `AMMO EXPLOSION in ${binName}! (rolled ${ammoResult.roll}, needed ${ammoResult.target}+)`
+            );
+            unit.equipment.ammo[binName].shots = 0;
+            if (typeof unit.applyPilotDamage === 'function') unit.applyPilotDamage(2);
           }
+        }
+      }
+
+      // p52: with life support gone, heat injures the MechWarrior.
+      if (hasLifeSupportHit(unit)) {
+        if (unit.heat >= 26) {
+          if (typeof unit.applyPilotDamage === 'function') unit.applyPilotDamage(2);
+          heatEffects.effects.push('Life support failure: pilot takes 2 damage');
+        } else if (unit.heat >= 15) {
+          if (typeof unit.applyPilotDamage === 'function') unit.applyPilotDamage(1);
+          heatEffects.effects.push('Life support failure: pilot takes 1 damage');
         }
       }
 

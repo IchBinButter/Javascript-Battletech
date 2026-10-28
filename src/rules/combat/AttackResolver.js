@@ -6,6 +6,7 @@
 import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { LineOfSight } from './LineOfSight.js';
 import { canWeaponFireAt, isLegLocation } from './ArcRules.js';
+import { armWeaponModifier, hasSensorHit } from './UnitDamage.js';
 import { getHeatEffects } from '../heat/HeatScale.js';
 
 export class AttackResolver {
@@ -72,10 +73,11 @@ export class AttackResolver {
     // Compute distance early for prone and range modifiers
     const distance = hexDistance(attacker.position.hexKey, target.position.hexKey);
 
-    // T - Target prone (flat -4, prone = immobile)
+    // T - Target prone (p28): -2 from an adjacent hex, +1 from anywhere else.
     if (target.prone) {
-      tn -= 4;
-      mods.push(`Target prone: -4`);
+      const proneMod = distance === 1 ? -2 : 1;
+      tn += proneMod;
+      mods.push(`Target prone${distance === 1 ? ' (adjacent)' : ''}: ${proneMod > 0 ? '+' : ''}${proneMod}`);
     } else if (target.immobile) {
       tn -= 4;
       mods.push(`Target immobile: -4`);
@@ -85,6 +87,39 @@ export class AttackResolver {
     if (target.shutdown) {
       tn -= 4;
       mods.push(`Target shutdown: -4`);
+    }
+
+    // T - Target skidding (p28)
+    if (target.skidding || target._skidding) {
+      tn += 2;
+      mods.push(`Target skidding: +2`);
+    }
+
+    // A - Attacker skidding, and firing while prone (p28)
+    if (attacker.skidding || attacker._skidding) {
+      tn += 1;
+      mods.push(`Attacker skidding: +1`);
+    }
+    if (attacker.prone) {
+      tn += 2;
+      mods.push(`Attacker prone: +2`);
+    }
+
+    // A - Attacker damage: sensors (p28/p49) and the firing arm's actuators.
+    if (hasSensorHit(attacker)) {
+      tn += 2;
+      mods.push(`Sensors hit: +2`);
+    }
+    const armMod = armWeaponModifier(attacker, options.weaponLocation);
+    if (armMod > 0) {
+      tn += armMod;
+      mods.push(`Arm actuators damaged: +${armMod}`);
+    }
+
+    // O - Secondary target this phase (p27): +1 forward, +2 side or rear.
+    if (options.multipleTargetModifier) {
+      tn += options.multipleTargetModifier;
+      mods.push(`Secondary target: +${options.multipleTargetModifier}`);
     }
 
     // O - Attacker heat
@@ -233,7 +268,8 @@ export class AttackResolver {
       weaponLocation: weaponInstance ? weaponInstance.location : undefined,
       indirect: isIndirect,
       spotter: options.spotter,
-      spotterAttacked: options.spotterAttacked
+      spotterAttacked: options.spotterAttacked,
+      multipleTargetModifier: options.multipleTargetModifier
     });
 
     if (!calc.canFire) {

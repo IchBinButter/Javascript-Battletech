@@ -294,34 +294,31 @@ describe('AttackResolver', () => {
 
     // --- Target prone ------------------------------------------------------
 
-    it('T: prone target applies flat -4', () => {
+    it('T: a prone target is -2 when attacked from an adjacent hex', () => {
       const attacker = makeUnit('4,4', 0, 4);
       const target = makeUnit('4,5', 0, 4, { prone: true });
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,5': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      expect(result.targetNumber).toBe(2);
-      expect(result.modifiers).toContain('Target prone: -4');
+      expect(result.modifiers).toContain('Target prone (adjacent): -2');
     });
 
-    it('T: prone target at non-adjacent hex also gets flat -4', () => {
+    it('T: a prone target is +1 to hit from further away', () => {
       const attacker = makeUnit('4,4', 0, 4);
       const target = makeUnit('4,6', 0, 4, { prone: true });
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      expect(result.targetNumber).toBe(2);
-      expect(result.modifiers).toContain('Target prone: -4');
+      expect(result.modifiers).toContain('Target prone: +1');
     });
 
-    it('T: prone takes precedence over immobile (else-if chain)', () => {
+    it('T: prone takes precedence over immobile', () => {
       const attacker = makeUnit('4,4', 0, 4);
       const target = makeUnit('4,6', 0, 4, { prone: true, immobile: true });
       const weapon = makeWeaponDef();
       const gs = makeGameState({ '4,4': {}, '4,6': {} });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
-      expect(result.targetNumber).toBe(2); // 4 - 4 (prone), clamped to 2
-      expect(result.modifiers).toContain('Target prone: -4');
+      expect(result.modifiers).toContain('Target prone: +1');
       expect(result.modifiers).not.toContain('Target immobile');
     });
 

@@ -7,6 +7,7 @@
 
 import equipmentData from '../../data/equipment.json' with { type: 'json' };
 import { getHeatEffects } from '../heat/HeatScale.js';
+import { getHipHits } from '../combat/UnitDamage.js';
 
 const MASC = equipmentData.equipment.find(e => e.id === 'masc') || { mpMultiplier: 2 };
 const TSM = equipmentData.equipment.find(e => e.id === 'tsm') || { heatThreshold: 9, walkMPBonus: 2 };
@@ -36,6 +37,14 @@ export function getMaxMP(unit, movementType = 'walk') {
   // Heat only penalises ground movement.
   if (movementType !== 'jump') {
     mp -= getHeatEffects(unit.heat).movementPenalty;
+
+    // A destroyed hip halves walking MP, rounded up; two hips stop the Mech
+    // (p48). Running MP is recalculated from the halved walking MP.
+    if (movementType === 'walk') {
+      const hipHits = getHipHits(unit);
+      if (hipHits >= 2) mp = 0;
+      else if (hipHits === 1) mp = Math.ceil(mp / 2);
+    }
 
     // TSM adds walking MP once the unit is hot enough.
     const hasTSM = Boolean(unit.equipment && unit.equipment.other && unit.equipment.other.tsm);

@@ -106,6 +106,12 @@ export class PSRCalculator {
 
     modList.push(`Base Pilot: ${basePiloting}`);
 
+    // p52: a shutdown Mech automatically fails every PSR.
+    if (unit.shutdown) {
+      modList.push('Shutdown: automatic failure');
+      return { targetNumber: 999, modifiers: modList };
+    }
+
     for (const trigger of triggers) {
       modifier += trigger.baseModifier;
       if (trigger.baseModifier !== 0) {

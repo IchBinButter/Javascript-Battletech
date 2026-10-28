@@ -477,10 +477,25 @@ describe('Consciousness checks', () => {
     expect(atlas.pilot.conscious).toBe(false);
   });
 
-  it('5+ pilot hits are auto unconscious', () => {
+  it('a pilot with 5 hits needs 11+ to stay conscious', () => {
+    const { engine, atlas } = twoMechEngine([8, 5]);
+    engine.diceRoller = makeDiceRoller(10); // fails the 11+
+    atlas.pilot.hits = 5;
+    atlas.pilot.conscious = true;
+
+    const events = [];
+    engine.eventBus.on('pilotUnconscious', d => events.push(d));
+
+    engine.phaseManager.enterPhase('end');
+
+    expect(atlas.pilot.conscious).toBe(false);
+    expect(events[0].auto).toBe(false);
+  });
+
+  it('a pilot with 6 hits is dead and auto-unconscious', () => {
     const { engine, atlas } = twoMechEngine([8, 5]);
     engine.diceRoller = makeDiceRoller(12);
-    atlas.pilot.hits = 5;
+    atlas.pilot.hits = 6;
     atlas.pilot.conscious = true;
 
     const events = [];
