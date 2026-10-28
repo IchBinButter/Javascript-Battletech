@@ -4,6 +4,8 @@
  */
 
 import { deepClone, EventEmitter } from '../utils/helpers.js';
+import { Unit } from './Unit.js';
+import { Hex } from './Hex.js';
 
 export const PHASES = [
   'initiative',
@@ -106,5 +108,72 @@ export class GameState {
     if (this.hiddenUnits[unitId]) {
       this.hiddenUnits[unitId].hidden = false;
     }
+  }
+
+  /** Plain data for saving and for sending over the wire. */
+  toJSON() {
+    const units = {};
+    for (const [id, unit] of Object.entries(this.units)) {
+      units[id] = typeof unit.toJSON === 'function' ? unit.toJSON() : unit;
+    }
+
+    const hexes = [];
+    for (const [key, hex] of this.map.hexes) {
+      hexes.push([key, typeof hex.toJSON === 'function' ? hex.toJSON() : hex]);
+    }
+
+    return {
+      turn: this.turn,
+      phase: this.phase,
+      initiativeWinner: this.initiativeWinner,
+      currentPlayer: this.currentPlayer,
+      players: this.players,
+      units,
+      map: { width: this.map.width, height: this.map.height, hexes },
+      weather: this.weather,
+      battlefieldSupport: this.battlefieldSupport,
+      hiddenUnits: this.hiddenUnits,
+      minefields: this.minefields,
+      fireHexes: this.fireHexes,
+      smokeHexes: this.smokeHexes,
+      buildings: this.buildings,
+      history: this.history
+    };
+  }
+
+  /** Rebuild a GameState (with Unit and Hex instances) from toJSON output. */
+  static fromJSON(json) {
+    const state = new GameState({
+      turn: json.turn,
+      phase: json.phase,
+      initiativeWinner: json.initiativeWinner,
+      currentPlayer: json.currentPlayer,
+      players: json.players || [],
+      weather: json.weather,
+      battlefieldSupport: json.battlefieldSupport,
+      hiddenUnits: json.hiddenUnits || {},
+      minefields: json.minefields || {},
+      fireHexes: json.fireHexes || [],
+      smokeHexes: json.smokeHexes || {},
+      buildings: json.buildings || {},
+      history: json.history || []
+    });
+
+    state.units = {};
+    for (const [id, unitJson] of Object.entries(json.units || {})) {
+      state.units[id] = Unit.fromJSON(unitJson);
+    }
+
+    const hexes = new Map();
+    for (const [key, hexJson] of (json.map && json.map.hexes) || []) {
+      hexes.set(key, Hex.fromJSON(hexJson));
+    }
+    state.map = {
+      width: (json.map && json.map.width) || 17,
+      height: (json.map && json.map.height) || 15,
+      hexes
+    };
+
+    return state;
   }
 }

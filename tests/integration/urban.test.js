@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { createTestEngine, createTestUnit, createWeaponDef, makeDiceRoller } from '../helpers/testUtils.js';
+import { createTestEngine, createTestUnit, createWeaponDef, makeDiceRoller, makeSequencedDiceRoller } from '../helpers/testUtils.js';
 import { BuildingRegistry, buildingCombat } from '../../src/rules/urban/Buildings.js';
 
 const mediumBuilding = (cf = 40, levels = 2, id = 'b1') => ({ id, type: 'medium', levels, cf, currentCF: cf });
@@ -42,12 +42,12 @@ describe('moving into a building (p67)', () => {
   });
 
   it('costs the Mech tonnage / 10 damage when the PSR fails', () => {
-    // 2 fails the entering PSR against a medium building (5 piloting + 1).
+    // Rolls: PSR 2 (fails), hit location 7, basement 7 (none).
     const locust = place(createTestUnit('locust-lct1v', 0, 'locust'), '4,5');
     const engine = urbanEngine({
       units: { locust },
       buildings: { '5,5': mediumBuilding() },
-      diceRoller: makeDiceRoller(2)
+      diceRoller: makeSequencedDiceRoller([2, 7, 7])
     });
 
     const armourBefore = JSON.stringify(locust.armor);
@@ -135,6 +135,67 @@ describe('collapse (p73)', () => {
 
     expect(state.map.hexes.get('6,5').building.currentCF).toBe(40);
     expect(state.map.hexes.get('6,6').terrainType).not.toBe('rubble');
+  });
+});
+
+describe('basements (p66)', () => {
+  it('rolls once per hex and drops the Mech when a basement is rolled', () => {
+    // PSR 7 (passes), basement 2 (double basement), hit location 7.
+    const locust = place(createTestUnit('locust-lct1v', 0, 'locust'), '4,5');
+    const engine = urbanEngine({
+      units: { locust },
+      buildings: { '5,5': mediumBuilding(90) },
+      diceRoller: makeSequencedDiceRoller([7, 2, 7])
+    });
+
+    engine.processAction(0, {
+      type: 'move', unitId: 'locust', path: ['4,5', '5,5'], movementType: 'walk'
+    });
+
+    const hex = engine.stateManager.getState().map.hexes.get('5,5');
+    expect(hex.basement).toMatchObject({ kind: 'double', depth: 2 });
+    expect(locust.prone).toBe(true);
+    expect(locust.basementDepth).toBe(2);
+    // 90 - 2 (entry) - 4 (double basement floor, tonnage/10 x 2)
+    expect(hex.building.currentCF).toBe(84);
+  });
+
+  it('does not roll a basement twice for the same hex', () => {
+    const first = place(createTestUnit('locust-lct1v', 0, 'locust'), '4,5');
+    const second = place(createTestUnit('jenner-jr7d', 0, 'jenner'), '4,6');
+    const engine = urbanEngine({
+      units: { locust: first, jenner: second },
+      buildings: { '5,5': mediumBuilding(90) },
+      diceRoller: makeSequencedDiceRoller([7, 7, 7])
+    });
+
+    engine.processAction(0, {
+      type: 'move', unitId: 'locust', path: ['4,5', '5,5'], movementType: 'walk'
+    });
+    const rolled = engine.stateManager.getState().map.hexes.get('5,5').basement;
+
+    engine.processAction(0, {
+      type: 'move', unitId: 'jenner', path: ['4,6', '5,5'], movementType: 'walk'
+    });
+
+    expect(engine.stateManager.getState().map.hexes.get('5,5').basement).toBe(rolled);
+  });
+
+  it('drops a Mech heavier than the hex CF even with no basement roll', () => {
+    // Atlas is 100 tons; a CF 40 hex cannot hold it. Basement roll 7 = none.
+    const atlas = place(createTestUnit('atlas-as7d', 0, 'atlas'), '4,5');
+    const engine = urbanEngine({
+      units: { atlas },
+      buildings: { '5,5': mediumBuilding(40) },
+      diceRoller: makeSequencedDiceRoller([7, 7, 7])
+    });
+
+    engine.processAction(0, {
+      type: 'move', unitId: 'atlas', path: ['4,5', '5,5'], movementType: 'walk'
+    });
+
+    expect(atlas.prone).toBe(true);
+    expect(atlas.basementDepth).toBe(1);
   });
 });
 

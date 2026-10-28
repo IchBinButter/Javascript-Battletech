@@ -12,7 +12,10 @@ import { PSRCalculator } from '../rules/movement/PSRCalculator.js';
 import { SkiddingRules } from '../rules/movement/SkiddingRules.js';
 import { LineOfSight } from '../rules/combat/LineOfSight.js';
 import { AttackResolver } from '../rules/combat/AttackResolver.js';
+import { canSee } from './visibility.js';
+import { toTransferable } from '../utils/helpers.js';
 import { entryPSRModifier, entryDamage, damageReduction, collapseDamage, buildingCombat, BuildingRegistry } from '../rules/urban/Buildings.js';
+import { rollBasement, basementFallDamage, basementCollapseDamage } from '../rules/urban/Basements.js';
 import { canWeaponFireAt, getTargetArc, ARC } from '../rules/combat/ArcRules.js';
 import { hasActuatorSlot } from '../rules/combat/UnitDamage.js';
 import { DamageResolver } from '../rules/combat/DamageResolver.js';
@@ -23,7 +26,10 @@ import { hexDistance } from '../hex/HexMath.js';
 import { parseHexKey } from '../utils/helpers.js';
 
 export class GameEngine {
-  constructor(gameState) {
+  /** Sequential game ids, so nothing depends on the wall clock. */
+  static _gameSequence = 0;
+
+  constructor(gameState, config = {}) {
     this.eventBus = new EventBus();
     this.stateManager = new StateManager(gameState);
     this.phaseManager = new PhaseManager();
@@ -42,9 +48,10 @@ export class GameEngine {
     this.physicalResolver = new PhysicalAttackResolver();
     this.heatManager = new HeatManager();
 
-    // Dice roller
-    this.gameId = 'game-' + Date.now();
-    this.diceRoller = createSeededDice(this.gameId, gameState.turn);
+    // Dice roller. The game id seeds it, so a server assigns it up front and
+    // every replay of the same game uses the same dice stream.
+    this.gameId = config.gameId || `game-${++GameEngine._gameSequence}`;
+    this.diceRoller = config.diceRoller || createSeededDice(this.gameId, gameState.turn);
 
     // Weapon data lookup (populated after init from JSON)
     this._weaponsData = null;
@@ -203,6 +210,11 @@ export class GameEngine {
 
     if (!attacker) return { success: false, error: 'Attacker not found' };
     if (!target) return { success: false, error: 'Target not found' };
+
+    // Hidden units (p82) cannot be targeted until revealed.
+    if (!canSee(playerId, target.id, state)) {
+      return { success: false, error: 'Target is hidden' };
+    }
 
     const weaponDef = action.weapon;
 
@@ -454,7 +466,13 @@ export class GameEngine {
       result.psrRolls = this._resolvePhysicalConsequences(result, attacker, target);
     });
 
-    this.eventBus.emit('physicalAttackResolved', { attackerId: attacker.id, targetId: target.id, result });
+    // The payload must survive a postMessage/WebSocket hop, and the result
+    // carries Weapon instances (R4).
+    this.eventBus.emit('physicalAttackResolved', {
+      attackerId: attacker.id,
+      targetId: target.id,
+      result: toTransferable(result)
+    });
 
     return result;
   }
@@ -572,6 +590,33 @@ export class GameEngine {
     this.eventBus.emit('buildingEntered', {
       unitId: unit.id, hexKey: hex.hexKey, damage, currentCF: building.currentCF
     });
+
+    // Basements (p66): rolled once per hex per scenario, on the first Level-0
+    // entry. A Mech heavier than the hex's CF at the start of the phase falls
+    // through regardless of the roll.
+    if (hex.basement === undefined) {
+      hex.basement = rollBasement(this.diceRoller);
+    }
+
+    const cfAtPhaseStart = hex._cfAtPhaseStart ?? building.currentCF;
+    const overweight = (unit.tonnage || 0) > cfAtPhaseStart;
+
+    if (overweight || hex.basement.depth > 0) {
+      const depth = Math.max(1, hex.basement.depth);
+      const fallDamage = basementFallDamage(unit, depth);
+      const locRoll = this.diceRoller.roll2d6();
+      const loc = this.attackResolver.determineHitLocation(locRoll, 'front');
+      this.damageResolver.applyDamage(unit, loc.location, fallDamage, loc.isRear ?? false, this.diceRoller);
+      unit.prone = true;
+      unit.basementDepth = depth;
+
+      // The floor gives way and the building hex takes the damage.
+      building.currentCF = Math.max(0, building.currentCF - basementCollapseDamage(unit, depth));
+
+      this.eventBus.emit('unitFellIntoBasement', {
+        unitId: unit.id, hexKey: hex.hexKey, depth, damage: fallDamage, overweight
+      });
+    }
 
     if (building.currentCF <= 0) {
       this._collapseBuildingHex(state, hex);

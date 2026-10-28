@@ -200,12 +200,17 @@ Attack Phase.
 5.4 ✅ **Combat within buildings** — +1 TN for a target inside a building, +1 per
 intervening building hex (capped at +3), line of sight blocked beyond two, and each hit
 reduced by `ceil(currentCF/10)` with the absorbed damage charged to the hex.
-5.5 **Basements** — 2D6 on first Level-0 entry per hex, per scenario (p66). Not started.
+5.5 ✅ **Basements** — the 2D6 Basements Table is rolled once per hex per scenario on
+first Level-0 entry; a basement drops the 'Mech 1–2 levels for `tonnage/10 x (levels + 1)`
+falling damage, prones it, and the building hex takes `tonnage/10` (double for a two-level
+basement). A 'Mech heavier than the hex's CF at the start of the phase falls through even
+when the roll says no basement.
 
 **Known simplifications:** units have no elevation, so "inside at Level 0" is assumed and
 roof movement is deferred; collapse damage uses the standard front hit table rather than
 the Punch table (p73); the adjacent-attacker exception for missed shots is not implemented;
-building CF damage is applied immediately even though collapse waits for the phase end.
+building CF damage is applied immediately even though collapse waits for the phase end;
+the Facing After Fall Table is not rolled for a basement fall.
 
 **Size:** M–L. **Multiplayer:** building CF is public state, so it rides in the patch — but
 the damage-routing events must be JSON-safe (see R4).
@@ -217,18 +222,20 @@ the damage-routing events must be JSON-safe (see R4).
 The rules are player-agnostic and the engine is already DOM-free, so phases 1–4 do not need
 revisiting. The plumbing does, while the codebase is still small:
 
-- **R1 Visibility seam** — a `canSee(viewerId, targetId)` predicate plus
-  `projectStateForPlayer(state, viewerId)`; LOS, attacks, spotting, the renderer and the UI
-  all read through it. Hidden units (6.4) and multiplayer (7.4) both depend on it. *M*
-- **R2 Determinism** — inject an id factory (Unit ids and the game id use `Date.now()`), make
-  the initiative tie-break use the seeded dice (`InitiativeManager` uses `Math.random`), and
-  make map generation deterministic. *S*
-- **R3 Serialization** — `toJSON`/`fromJSON` for `GameState`/`Unit`/`Hex`, and `deepClone`
-  must handle `Set` (`firedThisTurn` is a Set and currently clones to a plain object). *M*
-- **R4 JSON-safe events** — `physicalAttackResolved` carries `weaponDef`/`weaponInstance`
-  class instances. *S*
-- **R5 Command boundary** — confirm no UI path mutates game state; the client may only send
-  actions. *S*
+- ✅ **R1 Visibility seam** — `src/engine/visibility.js` provides `canSee` and
+  `projectStateForPlayer`; the engine refuses to fire at a hidden unit, and the projection
+  keeps the GameState prototype so the UI can keep calling its helpers. Still to do: route
+  the renderer and UI through the projection once hidden units ship (6.4).
+- ✅ **R2 Determinism** — unit ids come from a sequence instead of `Date.now()`, the game id
+  is seqential or injected and seeds the dice, the initiative tie fallback is the lowest
+  player id instead of `Math.random`, and `HexGrid` generation takes an injectable RNG.
+- ✅ **R3 Serialization** — `toJSON`/`fromJSON` on Hex, Unit and GameState (Units and Hexes
+  rebuilt as instances, Sets restored), and `deepClone` now handles `Set` (previously
+  `firedThisTurn` cloned to a plain object).
+- ✅ **R4 JSON-safe events** — `physicalAttackResolved` is passed through `toTransferable`,
+  so the payload survives a WebSocket/postMessage hop.
+- ✅ **R5 Command boundary** — a test scans `src/ui` for direct unit/state writes and the UI
+  keeps its own selection state; every command goes through `engine.processAction`.
 
 ---
 

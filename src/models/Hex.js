@@ -71,4 +71,35 @@ export class Hex {
       notes: this.notes
     }));
   }
+
+  /** Plain data for saving and for sending over the wire. */
+  toJSON() {
+    return {
+      hexKey: this.hexKey,
+      terrainType: this.terrainType,
+      level: this.level,
+      sublevel: this.sublevel,
+      building: this.building,
+      modifiers: { ...this.modifiers },
+      occupiedBy: this.occupiedBy,
+      label: this.label,
+      notes: this.notes,
+      basement: this.basement || null
+    };
+  }
+
+  static fromJSON(json) {
+    const hex = new Hex(json.hexKey, {
+      terrainType: json.terrainType,
+      level: json.level,
+      sublevel: json.sublevel,
+      building: json.building,
+      ...(json.modifiers || {}),
+      occupiedBy: json.occupiedBy,
+      label: json.label,
+      notes: json.notes
+    });
+    if (json.basement) hex.basement = json.basement;
+    return hex;
+  }
 }

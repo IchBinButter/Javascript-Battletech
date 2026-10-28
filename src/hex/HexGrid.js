@@ -14,13 +14,17 @@ export class HexGrid {
     this.hexes = new Map();
   }
 
-  /** Generate a grid with default clear terrain and random elevation */
-  generate(terrainTypes = ['clear', 'light_woods', 'heavy_woods', 'rough', 'water_depth1']) {
+  /**
+   * Generate a grid with default clear terrain and random elevation.
+   * @param {string[]} terrainTypes
+   * @param {Function} random - injectable RNG so generation is reproducible
+   */
+  generate(terrainTypes = ['clear', 'light_woods', 'heavy_woods', 'rough', 'water_depth1'], random = Math.random) {
     this.hexes.clear();
     for (let col = 0; col < this.width; col++) {
       for (let row = 0; row < this.height; row++) {
         const key = hexKey(col, row);
-        const terrainType = terrainTypes[Math.floor(Math.random() * terrainTypes.length)];
+        const terrainType = terrainTypes[Math.floor(random() * terrainTypes.length)];
 
         // Simple elevation hills
         const centerX = this.width / 2;
@@ -28,7 +32,7 @@ export class HexGrid {
         const distFromCenter = Math.sqrt(
           (col - centerX) ** 2 + (row - centerY) ** 2
         );
-        const level = distFromCenter < 2 ? 1 : (distFromCenter < 4 && Math.random() > 0.6 ? 1 : 0);
+        const level = distFromCenter < 2 ? 1 : (distFromCenter < 4 && random() > 0.6 ? 1 : 0);
 
         this.hexes.set(key, new Hex(key, { terrainType, level }));
       }
@@ -77,7 +81,7 @@ export class HexGrid {
   }
 
   /** Create a simple default map with mixed terrain */
-  static createDefaultMap() {
+  static createDefaultMap(random = Math.random) {
     const grid = new HexGrid(17, 15);
 
     for (let col = 0; col < grid.width; col++) {
@@ -96,17 +100,17 @@ export class HexGrid {
           terrainType = 'clear';
         } else if (dist < 3) {
           level = 1;
-          terrainType = Math.random() > 0.5 ? 'clear' : 'light_woods';
+          terrainType = random() > 0.5 ? 'clear' : 'light_woods';
         }
 
         // Scattered woods
-        if (Math.random() > 0.85 && dist >= 3) {
-          terrainType = Math.random() > 0.5 ? 'light_woods' : 'heavy_woods';
+        if (random() > 0.85 && dist >= 3) {
+          terrainType = random() > 0.5 ? 'light_woods' : 'heavy_woods';
         }
 
         // Water on edges
         if (col <= 1 || col >= grid.width - 2 || row <= 1 || row >= grid.height - 2) {
-          if (Math.random() > 0.8 && dist >= 4) {
+          if (random() > 0.8 && dist >= 4) {
             terrainType = 'water_depth1';
           }
         }

@@ -27,9 +27,12 @@ export class InitiativeManager {
     }
 
     if (rolls.length > 1 && rolls[0].roll === rolls[1].roll) {
-      const randomIdx = Math.floor(Math.random() * rolls.length);
+      // Deterministic fallback after 100 re-rolls: lowest player id wins, so a
+      // replay or a server never disagrees with a client about the winner.
+      const tied = rolls.filter(r => r.roll === rolls[0].roll);
+      const winner = tied.reduce((best, r) => (r.playerId < best.playerId ? r : best), tied[0]);
       return {
-        winner: rolls[randomIdx].playerId,
+        winner: winner.playerId,
         rolls
       };
     }

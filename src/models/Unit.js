@@ -11,9 +11,16 @@ const LOCATIONS = [
   'leftArm', 'rightArm', 'leftLeg', 'rightLeg'
 ];
 
+/**
+ * Deterministic id source. A wall clock here would make replays, saved games
+ * and server replication disagree about unit identity.
+ */
+let _unitIdSequence = 0;
+
 export class Unit {
   constructor(mechDef, playerId, unitId = null) {
-    this.id = unitId || `${mechDef.id}-${playerId}-${Date.now()}`;
+    this.id = unitId || `${mechDef.id}-${playerId}-${++_unitIdSequence}`;
+    this.mechId = mechDef.id;
     this.player = playerId;
     this.name = mechDef.name;
     this.tonnage = mechDef.tonnage;
@@ -232,5 +239,24 @@ export class Unit {
       throw new Error(`Mech not found: ${mechId}`);
     }
     return new Unit(mechDef, playerId);
+  }
+
+  /** Plain data for saving and for sending over the wire. */
+  toJSON() {
+    const json = {};
+    for (const key of Object.keys(this)) {
+      const value = this[key];
+      json[key] = value instanceof Set ? [...value] : value;
+    }
+    return JSON.parse(JSON.stringify(json));
+  }
+
+  /** Rebuild a Unit from toJSON output. */
+  static fromJSON(json) {
+    const unit = Object.create(Unit.prototype);
+    Object.assign(unit, JSON.parse(JSON.stringify(json)));
+    unit.firedThisTurn = new Set(json.firedThisTurn || []);
+    unit.targetsAttackedThisPhase = new Set(json.targetsAttackedThisPhase || []);
+    return unit;
   }
 }

@@ -31,6 +31,12 @@ export function deepClone(obj) {
     return new Date(obj.getTime());
   }
 
+  if (obj instanceof Set) {
+    const clonedSet = new Set();
+    for (const value of obj) clonedSet.add(deepClone(value));
+    return clonedSet;
+  }
+
   if (Array.isArray(obj)) {
     return obj.map(item => deepClone(item));
   }
@@ -47,6 +53,18 @@ export function deepClone(obj) {
   }
 
   return clone;
+}
+
+/**
+ * Make a value safe to send over a WebSocket or postMessage: class instances
+ * become plain data, Maps become entry arrays and Sets become arrays.
+ */
+export function toTransferable(value) {
+  return JSON.parse(JSON.stringify(value, (_key, val) => {
+    if (val instanceof Map) return [...val.entries()];
+    if (val instanceof Set) return [...val];
+    return val;
+  }));
 }
 
 /**
