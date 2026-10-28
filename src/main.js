@@ -82,12 +82,19 @@ async function startGame(forceBuilder) {
   // Create hex grid from selected map or default
   let hexGrid;
   if (selectedMapId && mapsData) {
-    const mapDef = mapsData.maps.find(m => m.id === selectedMapId);
-    if (mapDef) {
-      const { Hex } = await import('./models/Hex.js');
-      hexGrid = new HexGrid(mapDef.width, mapDef.height);
-      for (const [key, data] of Object.entries(mapDef.hexes)) {
-        hexGrid.setHex(key, new Hex(key, { terrainType: data.terrain, level: data.level || 0 }));
+    // maps/index.json only lists the maps; the hexes live in the map file.
+    const entry = mapsData.maps.find(m => m.id === selectedMapId);
+    if (entry) {
+      try {
+        const mapDef = entry.file ? await loadJSON(`src/data/maps/${entry.file}`) : entry;
+        const { Hex } = await import('./models/Hex.js');
+        hexGrid = new HexGrid(mapDef.width, mapDef.height);
+        for (const [key, data] of Object.entries(mapDef.hexes || {})) {
+          hexGrid.setHex(key, new Hex(key, { terrainType: data.terrain, level: data.level || 0 }));
+        }
+      } catch (error) {
+        console.error(`Could not load map "${selectedMapId}":`, error);
+        hexGrid = undefined;
       }
     }
   }
