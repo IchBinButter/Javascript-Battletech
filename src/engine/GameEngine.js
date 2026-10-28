@@ -118,7 +118,9 @@ export class GameEngine {
 
     this.actionLog.push({ playerId, action, result, phase: this.phaseManager.currentPhase });
 
-    this.eventBus.emit('actionProcessed', { playerId, action, result });
+    // The payload is broadcast to clients, so it must not carry class
+    // instances (a Weapon arrives without its methods).
+    this.eventBus.emit('actionProcessed', toTransferable({ playerId, action, result }));
 
     // Advance the unit queue after actions that consume a unit's turn
     if (result.success && ['move', 'fire', 'physicalAttack'].includes(action.type)) {
@@ -364,7 +366,7 @@ export class GameEngine {
       }
     }
 
-    this.eventBus.emit('unitAttacked', { attackerId: attacker.id, targetId: target.id, result });
+    this.eventBus.emit('unitAttacked', toTransferable({ attackerId: attacker.id, targetId: target.id, result }));
 
     result.success = true;
     return result;
