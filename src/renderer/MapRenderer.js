@@ -114,16 +114,30 @@ export class MapRenderer {
     }
 
     // 5. Draw units
-    if (gameState.units) {
-      for (const [id, unit] of Object.entries(gameState.units)) {
-        if (!unit.position.hexKey) continue;
-        const { x, y } = hexToPixel(unit.position.hexKey, this.hexSize);
-        this.drawUnit(unit, x + this.offsetX, y + this.offsetY, id);
-      }
-    }
+    this._drawUnitTokens(gameState);
 
     // 6. Draw fire/smoke overlays
     this.drawOverlays(gameState);
+  }
+
+  /**
+   * Draw a token for every unit in the view the renderer was handed.
+   *
+   * The state passed to the renderer is already projected for the viewing
+   * player (see projectStateForPlayer), so this must never reach back into the
+   * engine's raw state: a unit that is absent from `gameState.units` is a unit
+   * this player cannot see, and drawing it would leak a hidden unit's position.
+   * Reading `hiddenUnits` here instead would be wrong in the other direction -
+   * it would also hide the viewer's own hidden units.
+   */
+  _drawUnitTokens(gameState) {
+    if (!gameState.units) return;
+
+    for (const [id, unit] of Object.entries(gameState.units)) {
+      if (!unit || !unit.position || !unit.position.hexKey) continue;
+      const { x, y } = hexToPixel(unit.position.hexKey, this.hexSize);
+      this.drawUnit(unit, x + this.offsetX, y + this.offsetY, id);
+    }
   }
 
   /**

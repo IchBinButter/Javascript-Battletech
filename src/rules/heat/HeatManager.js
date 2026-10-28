@@ -30,7 +30,9 @@ export class HeatManager {
   calculateHeatGeneration(unit, weaponsFired, movementType, jumpHexes = 0) {
     let heat = 0;
 
-    // Weapon heat
+    // Weapon heat. Firing-time effects (design quirks such as Poor Cooling
+    // Jacket, p88) belong to the live fire path, which applies them when the
+    // shot is declared (GameEngine._handleFire); this stays a plain heat total.
     for (const weapon of weaponsFired) {
       heat += weapon.heat;
     }

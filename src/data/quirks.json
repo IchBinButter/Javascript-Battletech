@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "source": {
+    "book": "BattleMech Manual (7th printing)",
+    "pages": "Design Quirks p82-95; Negative Quirk Table p145"
+  },
+  "format": "A Mech lists quirk ids in its `quirks` array (see mechs.json). Weapon-scoped quirks are objects naming their weapon: { \"id\": \"poor_cooling_jacket\", \"weapon\": \"ac20\" }. A weapon-scoped quirk applies only when the entry names a weapon and the firing weapon matches it; an entry without a `weapon` is inert.",
+  "rules": {
+    "target": "Adds to ranged weapon attack Target Numbers.",
+    "psr": "Adds to Piloting Skill Roll Target Numbers.",
+    "heat": "Adds heat when a weapon is fired."
+  },
+  "quirks": [
+    {
+      "id": "poor_targeting_short",
+      "name": "Poor Targeting (Short)",
+      "type": "negative",
+      "cost": 2,
+      "rule": "target",
+      "scope": "rangeBracket",
+      "rangeBracket": "short",
+      "modifier": 1,
+      "page": 88,
+      "description": "All ranged attacks at Short range receive a +1 Target Number modifier."
+    },
+    {
+      "id": "poor_targeting_medium",
+      "name": "Poor Targeting (Medium)",
+      "type": "negative",
+      "cost": 2,
+      "rule": "target",
+      "scope": "rangeBracket",
+      "rangeBracket": "medium",
+      "modifier": 1,
+      "page": 88,
+      "description": "All ranged attacks at Medium range receive a +1 Target Number modifier."
+    },
+    {
+      "id": "poor_targeting_long",
+      "name": "Poor Targeting (Long)",
+      "type": "negative",
+      "cost": 2,
+      "rule": "target",
+      "scope": "rangeBracket",
+      "rangeBracket": "long",
+      "modifier": 1,
+      "page": 88,
+      "description": "All ranged attacks at Long range receive a +1 Target Number modifier."
+    },
+    {
+      "id": "sensor_ghosts",
+      "name": "Sensor Ghosts",
+      "type": "negative",
+      "cost": 3,
+      "rule": "target",
+      "scope": "all",
+      "modifier": 1,
+      "page": 88,
+      "description": "The sensor suite projects ghost images: all ranged attacks receive a +1 Target Number modifier."
+    },
+    {
+      "id": "inaccurate_weapon",
+      "name": "Inaccurate Weapon",
+      "type": "negative",
+      "cost": "variable",
+      "rule": "target",
+      "scope": "weapon",
+      "requiresWeapon": true,
+      "modifier": 1,
+      "page": 87,
+      "description": "The named weapon receives a +1 Target Number modifier. Cost varies with the weapon."
+    },
+    {
+      "id": "cramped_cockpit",
+      "name": "Cramped Cockpit",
+      "type": "negative",
+      "cost": 2,
+      "rule": "psr",
+      "scope": "all",
+      "modifier": 1,
+      "page": 86,
+      "description": "The Mech receives a +1 Piloting Skill Roll modifier."
+    },
+    {
+      "id": "hard_to_pilot",
+      "name": "Hard to Pilot",
+      "type": "negative",
+      "cost": 2,
+      "rule": "psr",
+      "scope": "all",
+      "modifier": 1,
+      "page": 87,
+      "description": "The Mech receives a +1 Target Number modifier to all Piloting Skill Rolls."
+    },
+    {
+      "id": "unbalanced",
+      "name": "Unbalanced",
+      "type": "negative",
+      "cost": 1,
+      "rule": "psr",
+      "scope": "hexEntry",
+      "modifier": 1,
+      "page": 89,
+      "description": "The Mech receives a +1 Target Number modifier to PSRs when entering a hex that requires PSRs."
+    },
+    {
+      "id": "poor_cooling_jacket",
+      "name": "Poor Cooling Jacket",
+      "type": "negative",
+      "cost": 1,
+      "rule": "heat",
+      "scope": "weapon",
+      "requiresWeapon": true,
+      "modifier": 1,
+      "page": 88,
+      "description": "The named weapon generates 1 more point of heat than normal when fired."
+    }
+  ]
+}

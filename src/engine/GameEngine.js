@@ -12,7 +12,15 @@ import { PSRCalculator } from '../rules/movement/PSRCalculator.js';
 import { SkiddingRules } from '../rules/movement/SkiddingRules.js';
 import { LineOfSight } from '../rules/combat/LineOfSight.js';
 import { AttackResolver } from '../rules/combat/AttackResolver.js';
-import { canSee } from './visibility.js';
+import {
+  canSee,
+  hiddenEnemyAt,
+  revealInBuildings,
+  revealOnFire,
+  revealOnAdjacentMove,
+  revealOnMove,
+  revealUnit
+} from './visibility.js';
 import { toTransferable } from '../utils/helpers.js';
 import { entryPSRModifier, entryDamage, damageReduction, collapseDamage, buildingCombat, BuildingRegistry } from '../rules/urban/Buildings.js';
 import { rollBasement, basementFallDamage, basementCollapseDamage } from '../rules/urban/Basements.js';
@@ -22,8 +30,16 @@ import {
   canBurn, attemptIgnition, spreadsOnRoll, spreadDistance, downwindHexes,
   BUILDING_FIRE_CF_LOSS, fireDamageRoll
 } from '../rules/terrain/FireRules.js';
+import {
+  minefieldAt, minefieldHexesEntered, resolveMinefieldTrigger
+} from '../rules/battlefield/Minefields.js';
+import {
+  dueSupportStrikes, expireSupportStrike, resolveSupportStrike,
+  scheduleSupportStrike as scheduleStrike
+} from '../rules/battlefield/BattlefieldSupport.js';
 import { canWeaponFireAt, getTargetArc, ARC } from '../rules/combat/ArcRules.js';
 import { hasActuatorSlot } from '../rules/combat/UnitDamage.js';
+import { quirkHeatModifier } from '../rules/quirks/Quirks.js';
 import { DamageResolver } from '../rules/combat/DamageResolver.js';
 import { PhysicalAttackResolver } from '../rules/combat/PhysicalAttackResolver.js';
 import { HeatManager } from '../rules/heat/HeatManager.js';
@@ -141,19 +157,93 @@ export class GameEngine {
     const unit = state.getUnit(action.unitId);
     if (!unit) return { success: false, error: 'Unit not found' };
 
+    // p82: "Hidden 'Mechs revealed in these ways cannot move that phase." The
+    // revealed unit forfeits its movement slot; advance the queue instead of
+    // leaving the phase stuck on a unit that may not act.
+    if (this._cannotMoveAfterReveal(unit.id)) {
+      this.phaseManager.advanceQueueOrNextPhase();
+      return { success: false, error: 'Revealed by enemy movement; it cannot move this phase' };
+    }
+
     const { path, movementType } = action;
+    // p82 Minefields: only a hidden 'Mech that walks or runs out of a mined hex
+    // is attacked by that hex's field; capture the hidden flag before the move
+    // reveals it.
+    const wasHidden = Boolean(
+      state.hiddenUnits && state.hiddenUnits[unit.id] && state.hiddenUnits[unit.id].hidden
+    );
+
     const validation = this.movementCalc.validateMovement(unit, path, movementType, state);
 
     if (!validation.valid) {
       return { success: false, error: `Invalid movement: ${validation.errors.join(', ')}` };
     }
 
+    // Hidden units (p82): a 'Mech ordered into a hex containing a hidden enemy
+    // 'Mech stops in the previous hex instead, and the hidden 'Mech is
+    // revealed. Any later hex is the same rule - a unit cannot run through a
+    // hidden 'Mech either. The move is re-validated against the shortened path
+    // so MP and facing reflect where it actually stopped.
+    //
+    // Jumping is the exception (p82 Jumping): a jump ignores hidden 'Mechs in
+    // hexes it passes over, and a jump into a hidden 'Mech's hex still lands
+    // there (the stop-short rule is ground movement only).
+    const isJump = movementType === 'jump';
+    const blocker = this._hiddenUnitBlockingMove(state, unit, path, movementType);
+    const effectivePath = blocker ? path.slice(0, blocker.index) : path;
+    const landingHiddenId = isJump
+      ? hiddenEnemyAt(state, path[path.length - 1], unit)
+      : null;
+    // "Jumping over hexes does not reveal 'Mechs hidden in them."
+    const overflownHexes = isJump ? new Set(path.slice(1, -1)) : null;
+
+    let effectiveValidation = validation;
+    if (blocker) {
+      effectiveValidation = effectivePath.length > 1
+        ? this.movementCalc.validateMovement(unit, effectivePath, movementType, state)
+        // Stopped in the hex it started in: no MP was spent and it did not turn.
+        : { valid: true, totalCost: 0, errors: [], finalFacing: unit.position.facing };
+    }
+
     this.stateManager.applyStateChange(() => {
-      unit.position.hexKey = path[path.length - 1];
-      if (validation.finalFacing !== undefined) {
-        unit.position.facing = validation.finalFacing;
+      // p82: a hidden 'Mech is revealed at the start of its own move.
+      revealOnMove(state, unit.id);
+
+      // Hidden 'Mechs this move gives away; p82 says they cannot move this
+      // phase. The mover itself is not recorded - it is moving right now.
+      const revealedByThisMove = [];
+
+      // Running into a hidden 'Mech reveals it as well, and a jump into its
+      // hex lands and reveals it (p82 Jumping).
+      if (blocker && revealUnit(state, blocker.unitId)) {
+        revealedByThisMove.push(blocker.unitId);
       }
-      unit.hexesMoved = path.length - 1;
+      if (landingHiddenId && revealUnit(state, landingHiddenId)) {
+        revealedByThisMove.push(landingHiddenId);
+      }
+
+      unit.position.hexKey = effectivePath[effectivePath.length - 1];
+      // A unit stopped in its starting hex never entered the blocked hex and
+      // does not turn; a real move keeps the validated final facing.
+      if (effectivePath.length > 1 && effectiveValidation.finalFacing !== undefined) {
+        unit.position.facing = effectiveValidation.finalFacing;
+      }
+      unit.hexesMoved = effectivePath.length - 1;
+
+      // p82: a 'Mech that ends its move next to a hidden enemy reveals THAT
+      // ENEMY - the mover is not given away by adjacency. A hidden mover was
+      // already revealed above, at the start of its move.
+      revealedByThisMove.push(
+        ...revealOnAdjacentMove(state, unit.id, { excludeHexes: overflownHexes })
+      );
+
+      // p82 Buildings: moving into or ending next to a building hex reveals
+      // every hidden enemy 'Mech in that building.
+      revealedByThisMove.push(
+        ...revealInBuildings(state, unit.id, { excludeHexes: overflownHexes })
+      );
+
+      this._noteRevealedMovement(state, revealedByThisMove);
 
       switch (movementType) {
         case 'walk': unit._movementModifier = 1; break;
@@ -184,9 +274,9 @@ export class GameEngine {
         const psrResult = this.psrCalc.makePSR(unit, this.diceRoller, psrTriggers);
         if (!psrResult.passed) {
           let levelsFallen = 1;
-          if (path.length > 1) {
-            const startHex = state.map.hexes.get(path[0]);
-            const endHex = state.map.hexes.get(path[path.length - 1]);
+          if (effectivePath.length > 1) {
+            const startHex = state.map.hexes.get(effectivePath[0]);
+            const endHex = state.map.hexes.get(effectivePath[effectivePath.length - 1]);
             if (startHex && endHex) {
               const totalDrop = startHex.level - endHex.level;
               if (totalDrop > 0) levelsFallen = totalDrop;
@@ -200,13 +290,123 @@ export class GameEngine {
 
     this.eventBus.emit('unitMoved', { unitId: unit.id, hexKey: unit.position.hexKey, facing: unit.position.facing });
 
+    // Minefields (p.75-79) attack as soon as a 'Mech enters the mined hex.
+    // Only the hexes actually entered count; the blocked hex was never entered.
+    // p82 gives a hidden 'Mech's own starting hex a trigger as well if it walks
+    // or runs out of it.
+    const minefieldExitHex = wasHidden &&
+      (movementType === 'walk' || movementType === 'run') &&
+      effectivePath.length > 1 &&
+      minefieldAt(state, path[0])
+      ? path[0]
+      : null;
+    const minefields = this._resolveMinefields(unit, effectivePath, movementType,
+      minefieldExitHex ? { extraHexes: [minefieldExitHex] } : undefined);
+
     return {
       success: true,
       unitId: unit.id,
       finalHex: unit.position.hexKey,
-      remainingMP: Math.max(0, this.movementCalc.getMaxMP(unit, movementType) - validation.totalCost),
-      facing: unit.position.facing
+      remainingMP: Math.max(0, this.movementCalc.getMaxMP(unit, movementType) - effectiveValidation.totalCost),
+      facing: unit.position.facing,
+      minefields,
+      ...(blocker ? { stoppedShortOf: blocker.unitId } : {})
     };
+  }
+
+  /**
+   * The first hex on `path` where a hidden enemy of `unit` waits (p82).
+   * Returns `{ index, unitId, hexKey }` for the blocked hex, or null.
+   *
+   * The stop-short rule is ground movement only (p82 Jumping): a jump lands in
+   * the hex it was ordered into, so a jump never has a blocker.
+   */
+  _hiddenUnitBlockingMove(state, unit, path, movementType = 'walk') {
+    if (movementType === 'jump') return null;
+
+    for (let i = 1; i < path.length; i++) {
+      const hiddenUnitId = hiddenEnemyAt(state, path[i], unit);
+      if (hiddenUnitId) return { index: i, unitId: hiddenUnitId, hexKey: path[i] };
+    }
+    return null;
+  }
+
+  /**
+   * p82: "Hidden 'Mechs revealed in these ways cannot move that phase."
+   *
+   * The marker lives on the unit's `hiddenUnits` entry (`cannotMoveTurn`) so it
+   * round-trips through save/load and replay; projections drop `hiddenUnits`
+   * wholesale, so it never reaches a client. The engine has no general
+   * per-unit/Movement-Phase state, and a turn has exactly one Movement Phase,
+   * so a turn number is enough to expire it.
+   */
+  _noteRevealedMovement(state, unitIds) {
+    if (!Array.isArray(unitIds) || unitIds.length === 0) return;
+
+    for (const unitId of unitIds) {
+      const entry = state.hiddenUnits && state.hiddenUnits[unitId];
+      if (entry) entry.cannotMoveTurn = state.turn;
+    }
+  }
+
+  /** Has `unitId` been revealed by enemy movement this turn? (p82) */
+  _cannotMoveAfterReveal(unitId) {
+    const state = this.stateManager.getState();
+    const entry = state.hiddenUnits && state.hiddenUnits[unitId];
+    return Boolean(entry && entry.cannotMoveTurn === state.turn);
+  }
+
+  /**
+   * Resolve minefields triggered by a move (p.79, p82).
+   *
+   * Walking or running through a mined hex triggers the field; a jumping
+   * 'Mech only triggers the field in its landing hex.  A field that is
+   * triggered and inflicts damage loses one Damage Value grouping, and one at
+   * zero has no further effect.
+   *
+   * `extraHexes` carries the starting hex of a hidden 'Mech that walked or ran
+   * out of a mined hex: p82 gives that hex's minefield a trigger too.
+   */
+  _resolveMinefields(unit, path, movementType, { extraHexes = [] } = {}) {
+    const state = this.stateManager.getState();
+    const entered = [...extraHexes, ...minefieldHexesEntered(path, movementType)]
+      .filter((hexKey, index, all) => all.indexOf(hexKey) === index);
+    const results = [];
+
+    for (const hexKey of entered) {
+      const field = minefieldAt(state, hexKey);
+      if (!field) continue;
+
+      const resolution = resolveMinefieldTrigger(field, this.diceRoller);
+      if (resolution.strengthBefore <= 0) continue;
+
+      if (resolution.triggered && resolution.hits.length > 0) {
+        this.stateManager.applyStateChange(() => {
+          for (const hit of resolution.hits) {
+            hit.damageResult = this.damageResolver.applyDamage(
+              unit, hit.location, hit.damage, hit.isRear, this.diceRoller
+            );
+          }
+          field.strength = resolution.strengthAfter;
+
+          // A minefield attack gives a hidden 'Mech away (p82).
+          revealUnit(state, unit.id);
+        });
+      }
+
+      // The controlling player announces the field and its roll (p.79), so a
+      // miss is reported too; the field simply stays active.
+      const payload = { ...resolution, unitId: unit.id, hexKey };
+      results.push(payload);
+      this.eventBus.emit('minefieldTriggered', payload);
+
+      if (typeof unit.isDestroyed === 'function' && unit.isDestroyed()) {
+        this.eventBus.emit('unitDestroyed', { unitId: unit.id });
+        break;
+      }
+    }
+
+    return results;
   }
 
   _handleFire(playerId, action) {
@@ -292,7 +492,8 @@ export class GameEngine {
     );
 
     this.stateManager.applyStateChange(() => {
-      attacker.heat += weaponDef.heat;
+      // Weapon heat, plus design quirks such as Poor Cooling Jacket (p88).
+      attacker.heat += weaponDef.heat + quirkHeatModifier(attacker, weaponDef);
 
       // Attack and spotting records for the rest of this phase (p30).
       attacker.attackedThisPhase = true;
@@ -309,6 +510,10 @@ export class GameEngine {
         if (!(attacker.firedThisTurn instanceof Set)) attacker.firedThisTurn = new Set();
         attacker.firedThisTurn.add(action.weaponLocation);
       }
+
+      // Hidden units (p82): firing reveals the attacker, hit or miss.  Run
+      // before the damage/attack emits so projections already see the reveal.
+      revealOnFire(state, attacker.id);
 
       if (result.hit) {
         // Fire is rolled for at the end of the phase, once per hit (p63).
@@ -634,6 +839,101 @@ export class GameEngine {
       }
     }
     return results;
+  }
+
+  /**
+   * Book a Battlefield Support strike (p.75-79).  The acting player is the
+   * owner by default and the type's BSP cost is spent from
+   * `state.battlefieldSupport.points`; an insufficient pool or invalid
+   * schedule is refused without touching the queue or the point pool.
+   *
+   * @param {object} schedule - { hexKey, turn?, type, owner? }
+   * @param {number|string|null} [playerId] - acting player (defaults to state.currentPlayer)
+   * @returns {{success: true, strike: object}|{success: false, error: string}}
+   */
+  scheduleSupportStrike(schedule = {}, playerId = null) {
+    const state = this.stateManager.getState();
+
+    try {
+      let record = null;
+      this.stateManager.applyStateChange(() => {
+        record = scheduleStrike(state, {
+          ...schedule,
+          owner: schedule.owner === undefined || schedule.owner === null
+            ? (playerId === null || playerId === undefined ? state.currentPlayer : playerId)
+            : schedule.owner
+        });
+      });
+
+      this.eventBus.emit('supportStrikeScheduled', { ...record });
+      return { success: true, strike: record };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * End Phase battlefield support (p.75-79): resolve every strike scheduled
+   * for this turn with the Battlefield Support table's Target Number and
+   * Damage Value groupings, then expire it.
+   */
+  resolveScheduledSupport() {
+    const state = this.stateManager.getState();
+    const due = dueSupportStrikes(state);
+    if (due.length === 0) return [];
+
+    const units = Object.values(state.units)
+      .map(unit => ({
+        id: unit.id,
+        hexKey: unit.position && unit.position.hexKey
+      }))
+      .filter(unit => typeof unit.hexKey === 'string');
+
+    const resolutions = [];
+    const destroyed = new Set();
+
+    this.stateManager.applyStateChange(() => {
+      for (const strike of due) {
+        const resolution = resolveSupportStrike(strike, {
+          diceRoller: this.diceRoller,
+          units
+        });
+        const areaEffect = resolution.weaponType === 'AE';
+
+        for (const hit of resolution.hits) {
+          const unit = state.getUnit(hit.unitId);
+          if (!unit) continue;
+          if (typeof unit.isDestroyed === 'function' && unit.isDestroyed()) continue;
+
+          hit.damageResult = this.damageResolver.applyDamage(
+            unit, hit.location, hit.damage, Boolean(hit.isRear), this.diceRoller
+          );
+
+          // Area-effect attacks reveal hidden 'Mechs in the blast (p82).
+          if (areaEffect) revealUnit(state, unit.id);
+
+          if (typeof unit.isDestroyed === 'function' && unit.isDestroyed()) {
+            destroyed.add(unit.id);
+          }
+        }
+
+        resolutions.push(resolution);
+      }
+
+      // One-use only: the strike expires whether it hit or missed (p.75).
+      for (const strike of due) {
+        expireSupportStrike(state, strike);
+      }
+    });
+
+    for (const resolution of resolutions) {
+      this.eventBus.emit('supportStrikeResolved', resolution);
+    }
+    for (const unitId of destroyed) {
+      this.eventBus.emit('unitDestroyed', { unitId });
+    }
+
+    return resolutions;
   }
 
   _handleEndPhase(playerId) {

@@ -22,7 +22,7 @@ audit of the current engine. Page references are BMM pages.
 | **PSR modifiers** | ✅ mostly p54 | 20+ damage +1, water −1/0/+1, woods +1/+2, charged/DFA +2; terrain and skid tables pending |
 | Indirect fire / spotting / TAG | ❌ absent | p30–31 |
 | Buildings / urban | ❌ stub | `Hex.building` exists, nothing damages it |
-| Weather, fire, hidden, mines, quirks | ❌ absent | p61–89 |
+| Weather, fire, hidden, mines, quirks | ✅ Phase 6 shipped (6.4 open items listed) | `src/rules/weather/`, `terrain/FireRules.js`, `battlefield/`, `quirks/` |
 
 The pattern: **tables and dice are faithful; geometry and consequences are not.**
 Any weapon can shoot in any direction, a 'Mech's arm can be shot off with no effect on
@@ -224,8 +224,8 @@ revisiting. The plumbing does, while the codebase is still small:
 
 - ✅ **R1 Visibility seam** — `src/engine/visibility.js` provides `canSee` and
   `projectStateForPlayer`; the engine refuses to fire at a hidden unit, and the projection
-  keeps the GameState prototype so the UI can keep calling its helpers. Still to do: route
-  the renderer and UI through the projection once hidden units ship (6.4).
+  keeps the GameState prototype so the UI can keep calling its helpers. The renderer and UI
+  now read through the projection (6.4).
 - ✅ **R2 Determinism** — unit ids come from a sequence instead of `Date.now()`, the game id
   is seqential or injected and seeds the dice, the initiative tie fallback is the lowest
   player id instead of `Math.random`, and `HexGrid` generation takes an injectable RNG.
@@ -272,12 +272,35 @@ but not wired into the physical resolver; extinguish-on-40-AE-damage is not wire
 AE weapon exists in the data; smoke does not yet block line of sight. The exact "Effects of
 Fire" procedure is not in the KB chunk set, so the 1D6-per-unit heat-phase damage is the
 simplified reading flagged here rather than a verified page citation.
-6.4 **Hidden units** (p82) — build on R1: per-player projection, detection by proximity and
-probes, point-blank shots on reveal, hidden spotters.
-6.5 **Minefields and battlefield support** (p75–79) — `state.minefields` and
-`state.battlefieldSupport` exist unused; mine triggers, artillery and air strikes.
-6.6 **Design quirks** (p82–95) — data-driven quirk table with per-Mech data; the refits are
-the natural place to start.
+6.4 ⚠️ **Hidden units** (p82) — per-player projection on the read path plus the p82 trigger
+list: *fires* (hit or miss), *starts its own move*, an enemy *ends its move next to it* (this
+reveals the hidden 'Mech, not the mover), an enemy *is ordered into its hex* (ground movement
+stops in the previous hex; a jumping 'Mech lands there and reveals it), a 'Mech *moves into or
+ends next to a building hex* (reveals every hidden 'Mech in that building, whatever level it
+hides on), a hidden 'Mech in a mined hex *walks or runs out* (the field attacks it), and
+minefield/area-effect damage. Jumping over a hidden 'Mech neither blocks nor reveals it, and
+hidden 'Mechs revealed by enemy movement cannot move that phase. **Open:** point-blank shots on
+reveal, active-probe detection at the end of the Movement Phase, hidden spotters, the
+end-of-phase adjacency case for an enemy that never declares a move, jump-into domino
+displacement (p55), and the skidding/dropping/displacement exceptions to the entry stop-short
+rule. The p82 "Hidden 'Mechs" section is in the project KB (chunk 42), so the rules implemented
+here come from that text.
+6.5 ✅ **Minefields and battlefield support** (p75–79) — `src/rules/battlefield/Minefields.js`
+handles the Light/Medium/Heavy densities (2D6 vs Target Number, 5-point Damage Value groupings),
+the enter-a-mined-hex trigger (a jumping 'Mech only at its landing hex), depletion, and the
+hidden-'Mech walk/run exit attack from p82. `src/rules/battlefield/BattlefieldSupport.js` books
+Light/Heavy Strike, Light/Heavy Bombing (scatter on a miss), Strafing and Thumper/Sniper/Long
+Tom artillery (blast rings), spends Battlefield Support Points, and resolves each strike in the
+End Phase of its turn; scheduled strikes are filtered out of the opponent's projection.
+Known simplification: the p79 minefield hit location is assumed (the KB has no p79 minefield
+body), and defensive air cover, pre-plotted artillery hexes and strafing's five-hex line are
+out of scope.
+6.6 ✅ **Design quirks** (p82–95) — `src/data/quirks.json` carries nine quirks (Poor Targeting
+short/medium/long, Sensor Ghosts, Inaccurate Weapon, Cramped Cockpit, Hard to Pilot, Unbalanced,
+Poor Cooling Jacket) and `src/rules/quirks/Quirks.js` resolves them as pure accessors wired into
+target numbers (`AttackResolver`), piloting skill rolls (`PSRCalculator`) and heat
+(`GameEngine`); per-Mech quirks live on `unit.quirks`. The remaining positive/negative quirk
+tables are not transcribed yet.
 
 **Size:** S–M each, independent, gated on 5.5 for the visibility-dependent ones.
 

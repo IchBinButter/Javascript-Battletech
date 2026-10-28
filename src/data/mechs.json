@@ -1161,6 +1161,9 @@
     {
       "id": "wolverine-wvr6r",
       "name": "Wolverine WVR-6R",
+      "quirks": [
+        "cramped_cockpit"
+      ],
       "tonnage": 55,
       "movement": {
         "walk": 5,
@@ -6873,6 +6876,17 @@
     {
       "id": "atlas-as7d-refit",
       "name": "Atlas AS7-D (Refit)",
+      "quirks": [
+        "sensor_ghosts",
+        {
+          "id": "poor_cooling_jacket",
+          "weapon": "ac20"
+        },
+        {
+          "id": "inaccurate_weapon",
+          "weapon": "lrm20"
+        }
+      ],
       "tonnage": 100,
       "movement": {
         "walk": 3,
@@ -7462,11 +7476,16 @@
         "type": "standard",
         "hits": 0
       },
-      "notes": "Non-canon refit used to exercise CASE, ECM and the targeting computer"
+      "notes": "Non-canon refit used to exercise CASE, ECM, the targeting computer and negative design quirks (Sensor Ghosts, Poor Cooling Jacket on the AC/20, Inaccurate Weapon on the LRM-20)"
     },
     {
       "id": "banshee-bnc3e-refit",
       "name": "Banshee BNC-3E (Refit)",
+      "quirks": [
+        "hard_to_pilot",
+        "unbalanced",
+        "poor_targeting_long"
+      ],
       "tonnage": 95,
       "movement": {
         "walk": 3,
@@ -8026,7 +8045,7 @@
         "type": "standard",
         "hits": 0
       },
-      "notes": "Non-canon refit: triple-strength myomer and no hand actuators (arms can be reversed)"
+      "notes": "Non-canon refit: triple-strength myomer and no hand actuators (arms can be reversed); design quirks exercise Hard to Pilot, Unbalanced and Poor Targeting (Long)"
     }
   ]
 }

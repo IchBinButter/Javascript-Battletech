@@ -4,6 +4,7 @@
  */
 
 import { parseHexKey } from '../../utils/helpers.js';
+import { quirkPSRModifier } from '../quirks/Quirks.js';
 
 export class PSRCalculator {
   /**
@@ -133,6 +134,13 @@ export class PSRCalculator {
         modList.push(`${trigger.trigger}`);
       }
     }
+
+    // Negative design quirks (p86-89): Cramped Cockpit and Hard to Pilot raise
+    // every PSR; Unbalanced only the ones for entering a hex. Passing the
+    // triggers along lets the quirk code tell those apart.
+    const quirkMod = quirkPSRModifier(unit, { triggers });
+    modifier += quirkMod.modifier;
+    modList.push(...quirkMod.reasons);
 
     // Gyro hit already handled in triggers, but add standard gyro PSR if needed
     if (unit.gyro.hits === 1) {

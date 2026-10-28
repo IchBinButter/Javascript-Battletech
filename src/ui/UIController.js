@@ -4,12 +4,16 @@
  */
 
 import { describeHeatEffects } from '../rules/heat/HeatScale.js';
+import { projectStateForPlayer } from '../engine/visibility.js';
 
 export class UIController {
-  constructor() {
+  constructor({ viewerId = 0 } = {}) {
     this.gameEngine = null;
     this.mapRenderer = null;
     this.selectedUnitId = null;
+    // The player whose eyes the UI is looking through. Solo play watches the
+    // game as player 0, so hidden enemy units stay off every list.
+    this.viewerId = viewerId;
 
     // DOM elements
     this.phaseLabel = document.getElementById('phase-label');
@@ -50,6 +54,33 @@ export class UIController {
     this._setupActionButtons();
   }
 
+  /**
+   * The state this controller is allowed to show the local viewer (R1).
+   * Everything the UI lists, looks up or renders for a unit goes through this,
+   * so a hidden enemy can never appear in a unit or target list.
+   */
+  viewState() {
+    if (!this.gameEngine) return null;
+    return projectStateForPlayer(this.gameEngine.stateManager.getState(), this.viewerId);
+  }
+
+  /** Every unit the local viewer can see; optionally only one player's. */
+  getVisibleUnits(playerId = null) {
+    const state = this.viewState();
+    if (!state) return [];
+    const units = Object.values(state.units);
+    return playerId === null ? units : units.filter(unit => unit.player === playerId);
+  }
+
+  /** Enemy units of `unitId` that the local viewer can see, i.e. may target. */
+  getTargetableUnits(unitId) {
+    const state = this.viewState();
+    if (!state) return [];
+    const attacker = state.getUnit(unitId);
+    if (!attacker) return [];
+    return Object.values(state.units).filter(unit => unit.player !== attacker.player);
+  }
+
   _hideAllPanels() {
     this.movementPanel.style.display = 'none';
     this.weaponPanel.style.display = 'none';
@@ -68,7 +99,7 @@ export class UIController {
     this.turnLabel.textContent = `Turn: ${data.turn}`;
     this._pendingTarget = null;
 
-    const state = this.gameEngine.stateManager.getState();
+    const state = this.viewState();
     this._updateActivePlayer(state);
 
     this._hideAllPanels();
@@ -137,7 +168,7 @@ export class UIController {
   }
 
   _handleFireSelected() {
-    const state = this.gameEngine.stateManager.getState();
+    const state = this.viewState();
     const attacker = state.getUnit(this.selectedUnitId);
     if (!attacker) { this.log('Select a unit first', 'miss'); return; }
 
@@ -173,13 +204,15 @@ export class UIController {
 
     this._pendingTarget = null;
     if (this.mapRenderer) {
-      this.mapRenderer.render(state);
+      // Re-project: a shot can reveal a hidden target, and the reveal must be
+      // on screen immediately.
+      this.mapRenderer.render(this.viewState());
     }
     this.updateUnitPanel(attacker);
   }
 
   _handlePhysicalAttack() {
-    const state = this.gameEngine.stateManager.getState();
+    const state = this.viewState();
     const attacker = state.getUnit(this.selectedUnitId);
     if (!attacker) { this.log('Select a unit first', 'miss'); return; }
 
@@ -208,7 +241,7 @@ export class UIController {
 
     this._pendingTarget = null;
     if (this.mapRenderer) {
-      this.mapRenderer.render(state);
+      this.mapRenderer.render(this.viewState());
     }
     this.updateUnitPanel(attacker);
   }
@@ -219,7 +252,7 @@ export class UIController {
       return;
     }
 
-    const state = this.gameEngine.stateManager.getState();
+    const state = this.viewState();
     const unit = state.getUnit(this.selectedUnitId);
     if (!unit) return;
 
@@ -346,10 +379,13 @@ export class UIController {
   }
 
   _onUnitMoved(data) {
-    const state = this.gameEngine.stateManager.getState();
-    const unit = state.getUnit(data.unitId);
+    const state = this.viewState();
+    const unit = state && state.getUnit(data.unitId);
+    // A unit this viewer cannot see must not have its destination printed in
+    // the dice log - a hidden enemy moving would otherwise broadcast its hex.
+    if (!unit) return;
     this.log(`Unit ${data.unitId} moved to ${data.hexKey}, facing ${data.facing}`);
-    if (unit && unit.id === this.selectedUnitId) {
+    if (unit.id === this.selectedUnitId) {
       this.updateUnitPanel(unit);
     }
   }
@@ -380,7 +416,7 @@ export class UIController {
   }
 
   _handleConfirmMove() {
-    const state = this.gameEngine.stateManager.getState();
+    const state = this.viewState();
     const unit = state.getUnit(this.selectedUnitId);
     if (!unit) { this.log('No unit selected', 'miss'); return; }
 
@@ -397,17 +433,19 @@ export class UIController {
       }
 
       this._clearMovementPreview();
+      // Re-project: ending a move next to an enemy can reveal this unit.
+      const view = this.viewState();
       if (this.mapRenderer) {
-        this.mapRenderer.render(state);
+        this.mapRenderer.render(view);
       }
-      this.updateUnitPanel(state.getUnit(unit.id));
+      this.updateUnitPanel(view.getUnit(unit.id));
     }
   }
 
   _handleCancelMove() {
     this._clearMovementPreview();
     if (this.mapRenderer) {
-      this.mapRenderer.render(this.gameEngine.stateManager.getState());
+      this.mapRenderer.render(this.viewState());
     }
   }
 
@@ -420,6 +458,8 @@ export class UIController {
   }
 
   _refreshMovementPreview() {
+    // The movement calculator needs the full state (it validates against the
+    // engine's rules); only what is drawn is projected back down to the view.
     const state = this.gameEngine.stateManager.getState();
     if (state.phase !== 'movement') return;
     const unit = state.getUnit(this.selectedUnitId);
@@ -428,7 +468,7 @@ export class UIController {
     const validMoves = this.gameEngine.movementCalc.getValidMoves(unit, state, this.movementMode);
     if (this.mapRenderer) {
       this.mapRenderer.validMoves = validMoves;
-      this.mapRenderer.render(state);
+      this.mapRenderer.render(this.viewState());
     }
     this._pendingMove = null;
   }

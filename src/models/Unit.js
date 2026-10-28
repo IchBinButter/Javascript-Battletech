@@ -75,6 +75,10 @@ export class Unit {
     // Gyro
     this.gyro = { ...mechDef.gyro };
 
+    // Design quirks (p82-95). Entries are ids or objects carrying the weapon a
+    // weapon-scoped quirk applies to; Quirks.js resolves them against the table.
+    this.quirks = Array.isArray(mechDef.quirks) ? deepClone(mechDef.quirks) : [];
+
     // Status flags
     this.initiativeModifier = 0;
   }

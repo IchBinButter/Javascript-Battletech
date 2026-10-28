@@ -103,6 +103,29 @@ describe('M3 state sync', () => {
     expect(patch.hexUpdates['5,5'].terrainType).toBe('rubble');
   });
 
+  it('carries minefields and scheduled strikes through a patch and fromJSON', () => {
+    const { engine } = setup();
+    const state = engine.stateManager.getState();
+    const snapshot = json(state.toJSON());
+
+    state.minefields = { '5,6': { type: 'light', strength: 2 } };
+    state.battlefieldSupport = {
+      ...state.battlefieldSupport,
+      strikes: [{ hexKey: '5,6', turn: 2, type: 'light_strike', owner: 0 }]
+    };
+
+    const patch = makePatch(engine, snapshot);
+
+    expect(patch.minefields).toEqual({ '5,6': { type: 'light', strength: 2 } });
+    expect(patch.battlefieldSupport.strikes)
+      .toEqual([{ hexKey: '5,6', turn: 2, type: 'light_strike', owner: 0 }]);
+
+    const restored = GameState.fromJSON(applyPatch(snapshot, patch));
+    expect(restored.minefields).toEqual(state.minefields);
+    expect(restored.battlefieldSupport.strikes).toEqual(state.battlefieldSupport.strikes);
+    expect(restored.battlefieldSupport.points).toBe(state.battlefieldSupport.points);
+  });
+
   it('sends an empty patch when nothing changed', () => {
     const { engine } = setup();
     const snapshot = json(engine.stateManager.getState().toJSON());
@@ -114,6 +137,8 @@ describe('M3 state sync', () => {
     expect(patch.unitUpdates).toEqual({});
     expect(patch.hexUpdates).toBeUndefined();
     expect(patch.fireHexes).toBeUndefined();
+    expect(patch.minefields).toBeUndefined();
+    expect(patch.battlefieldSupport).toBeUndefined();
   });
 });
 
@@ -166,5 +191,76 @@ describe('M4 projection-safe patches', () => {
     expect(Object.keys(patch.unitUpdates)).toEqual(['atlas']);
     // The hidden unit was never in the client snapshot, so it cannot appear.
     expect(patched.units.jenner).toBeUndefined();
+  });
+
+  it('keeps the opponent\'s strikes and minefields out of the projection and its patch', () => {
+    const { engine } = setup();
+    const state = engine.stateManager.getState();
+
+    state.battlefieldSupport = {
+      points: 12,
+      selections: [],
+      strikes: [{ hexKey: '5,6', turn: 2, type: 'light_strike', owner: 0 }]
+    };
+    state.minefields = {};
+
+    // Player 0's client snapshot: only their own strike is visible.
+    const clientSnapshot = json(projectStateForPlayer(state, 0).toJSON());
+
+    // The opponent schedules a secret strike and places a hidden minefield;
+    // player 0 also updates their own strike and places their own field.
+    state.battlefieldSupport.strikes = [
+      { hexKey: '5,6', turn: 3, type: 'light_strike', owner: 0 },
+      { hexKey: '7,7', turn: 2, type: 'sniper', owner: 1 }
+    ];
+    state.minefields = {
+      '5,6': { type: 'light', strength: 2, owner: 0 },
+      '8,8': { type: 'medium', strength: 4, owner: 1 }
+    };
+
+    const view = projectStateForPlayer(state, 0);
+    expect(view.battlefieldSupport.strikes).toEqual([
+      { hexKey: '5,6', turn: 3, type: 'light_strike', owner: 0 }
+    ]);
+    expect(view.minefields).toEqual({ '5,6': { type: 'light', strength: 2, owner: 0 } });
+
+    // The raw state still holds every secret.
+    expect(state.battlefieldSupport.strikes).toHaveLength(2);
+    expect(state.minefields['8,8']).toBeDefined();
+
+    // A patch computed from the two projected views carries only the viewer's
+    // own hidden-information fields.
+    const patch = json(manager.getStateDiff(clientSnapshot, view));
+    expect(patch.battlefieldSupport.strikes).toEqual([
+      { hexKey: '5,6', turn: 3, type: 'light_strike', owner: 0 }
+    ]);
+    expect(patch.minefields).toEqual({ '5,6': { type: 'light', strength: 2, owner: 0 } });
+    expect(JSON.stringify(patch)).not.toContain('7,7');
+    expect(JSON.stringify(patch)).not.toContain('8,8');
+
+    // Projection cloned the filtered fields instead of handing out source data.
+    expect(view.battlefieldSupport).not.toBe(state.battlefieldSupport);
+    expect(view.minefields).not.toBe(state.minefields);
+  });
+
+  it('hides an ownerless strike and an ownerless minefield from every viewer', () => {
+    const { engine } = setup();
+    const state = engine.stateManager.getState();
+    // An ownerless strike is unowned: it must not leak into either view.
+    state.battlefieldSupport = {
+      ...state.battlefieldSupport,
+      strikes: [{ hexKey: '9,9', turn: 2, type: 'thumper', owner: null }]
+    };
+    // A minefield with no owner cannot be attributed to a player either.
+    state.minefields = { '9,9': { type: 'light', strength: 2 } };
+
+    for (const viewerId of [0, 1]) {
+      const view = projectStateForPlayer(state, viewerId);
+      expect(view.battlefieldSupport.strikes).toEqual([]);
+      expect(view.minefields).toEqual({});
+    }
+
+    // The raw state still holds the manually inserted ownerless records.
+    expect(state.battlefieldSupport.strikes).toHaveLength(1);
   });
 });

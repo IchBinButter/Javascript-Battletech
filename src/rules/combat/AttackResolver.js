@@ -7,6 +7,7 @@ import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { LineOfSight } from './LineOfSight.js';
 import { canWeaponFireAt, isLegLocation } from './ArcRules.js';
 import { armWeaponModifier, hasSensorHit } from './UnitDamage.js';
+import { quirkTargetModifier } from '../quirks/Quirks.js';
 import { getHeatEffects } from '../heat/HeatScale.js';
 import { attackModifier } from '../weather/WeatherRules.js';
 
@@ -227,6 +228,26 @@ export class AttackResolver {
     tn += rangeMod;
     if (rangeMod > 0) mods.push(`Range: +${rangeMod}`);
 
+    // O - Design quirks (p82-95): Poor Targeting raises the TN in one range
+    // bracket, Sensor Ghosts on every ranged attack, Inaccurate Weapon on the
+    // weapon it names. The bracket comes from the same distance as the range
+    // modifier above, so the two can never disagree. A shot inside a weapon's
+    // minimum range is still a Short range attack for quirks; the minimum
+    // range modifier is additional (p27).
+    const bracket = typeof weaponDef.getRangeBracket === 'function'
+      ? weaponDef.getRangeBracket(distance)
+      : undefined;
+    const quirkMod = quirkTargetModifier(attacker, {
+      weapon: weaponDef,
+      rangeBracket: bracket === 'min' ? 'short' : bracket,
+      distance,
+      target
+    });
+    if (quirkMod.modifier !== 0) {
+      tn += quirkMod.modifier;
+      mods.push(...quirkMod.reasons);
+    }
+
     return {
       canFire: true,
       arc: arcInfo ? arcInfo.arc : undefined,
@@ -235,6 +256,7 @@ export class AttackResolver {
       targetNumber: Math.max(2, tn),
       modifiers: mods,
       rangeMod,
+      quirkModifier: quirkMod.modifier,
       distance,
       losResult,
       minimumRangeMod: distance <= weaponDef.minRange ? weaponDef.minRange - distance + 1 : 0

@@ -6,5 +6,6 @@ coverage/
 .DS_Store
 Thumbs.db
 .hive/
+.agent-teams/
 *.pdf
 RULES_AUDIT_REFERENCE.md

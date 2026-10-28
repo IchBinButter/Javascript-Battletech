@@ -11,7 +11,7 @@ A web-based implementation of the Classic BattleTech tabletop wargame, faithfull
 - **Equipment System** - CASE, ECM, Targeting Computer, MASC, TSM wired into the rules
 - **Canvas Rendering** - 2D hex map with terrain visualization, unit tokens, and movement previews
 - **Phase System** - Initiative, Movement, Weapon Attack, Physical Attack, Heat, End phases
-- **1,677 Tests** - Comprehensive test suite covering all rules modules
+- **1,823 Tests** - Comprehensive test suite covering all rules modules
 
 ## Quick Start
 

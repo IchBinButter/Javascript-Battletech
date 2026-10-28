@@ -8,6 +8,7 @@ import { Unit } from './models/Unit.js';
 import { GameState } from './models/GameState.js';
 import { Weapon } from './models/Weapon.js';
 import { GameEngine } from './engine/GameEngine.js';
+import { projectStateForPlayer } from './engine/visibility.js';
 import { MapRenderer } from './renderer/MapRenderer.js';
 import { UIController } from './ui/UIController.js';
 import { StartMenu } from './ui/StartMenu.js';
@@ -15,6 +16,9 @@ import { ForceBuilder } from './ui/ForceBuilder.js';
 
 // ---- Globals ----
 const HEX_SIZE = 30;
+// Solo play looks at the game through player 0's eyes. The projection removes
+// hidden enemy units, so they never reach the renderer, the UI or a click test.
+const VIEWER_ID = 0;
 let gameEngine;
 let mapRenderer;
 let ui;
@@ -69,6 +73,16 @@ function showGame() {
 
 function hideGame() {
   app.style.display = 'none';
+}
+
+/**
+ * The state the local viewer is allowed to see (R1 projection, p82).
+ * Every render, hit test and keyboard selection reads this rather than
+ * gameEngine.stateManager.getState(), so a hidden unit cannot leak.
+ */
+function viewState() {
+  if (!gameEngine) return null;
+  return projectStateForPlayer(gameEngine.stateManager.getState(), VIEWER_ID);
 }
 
 // ---- Initialize Game with Selected Forces ----
@@ -161,7 +175,7 @@ async function startGame(forceBuilder) {
   mapRenderer = new MapRenderer(canvas, HEX_SIZE);
 
   // Initialize UI
-  ui = new UIController();
+  ui = new UIController({ viewerId: VIEWER_ID });
   ui.init(gameEngine, mapRenderer);
 
   // Trigger initial phase
@@ -169,17 +183,17 @@ async function startGame(forceBuilder) {
 
   // Hook up render updates
   gameEngine.eventBus.on('phaseChanged', () => {
-    mapRenderer.render(gameEngine.stateManager.getState());
+    mapRenderer.render(viewState());
     updateUI();
   });
   gameEngine.eventBus.on('unitMoved', () => {
-    mapRenderer.render(gameEngine.stateManager.getState());
+    mapRenderer.render(viewState());
   });
   gameEngine.eventBus.on('damageApplied', () => {
-    mapRenderer.render(gameEngine.stateManager.getState());
+    mapRenderer.render(viewState());
   });
   gameEngine.eventBus.on('unitDestroyed', () => {
-    mapRenderer.render(gameEngine.stateManager.getState());
+    mapRenderer.render(viewState());
   });
 
   // Show game UI
@@ -187,7 +201,7 @@ async function startGame(forceBuilder) {
 
   // Initial render
   updateUI();
-  mapRenderer.render(gameState);
+  mapRenderer.render(viewState());
 
   const unitCount = Object.keys(gameState.units).length;
   ui.log(`BattleTech Tabletop Simulator started!`);
@@ -249,7 +263,7 @@ async function init() {
   _resizeHandler = () => {
     resizeCanvas();
     if (gameEngine && mapRenderer) {
-      mapRenderer.render(gameEngine.stateManager.getState());
+      mapRenderer.render(viewState());
     }
   };
   window.addEventListener('resize', _resizeHandler);
@@ -278,7 +292,8 @@ async function init() {
 // ---- Game Interaction (only active when game is running) ----
 canvas.addEventListener('click', (event) => {
   if (!gameEngine) return;
-  const state = gameEngine.stateManager.getState();
+  const state = viewState();
+  if (!state) return;
   const rect = canvas.getBoundingClientRect();
   const px = event.clientX - rect.left - mapRenderer.offsetX;
   const py = event.clientY - rect.top - mapRenderer.offsetY;
@@ -291,11 +306,14 @@ canvas.addEventListener('click', (event) => {
   const unitOnHex = Object.values(state.units).find(u => u.position.hexKey === hexKey);
 
   if (unitOnHex) {
-    // If a friendly unit is selected and clicking an enemy, treat as target
+    // If a friendly unit is selected and clicking an enemy, treat as target.
+    // The target must be on the projected target list, so a hidden unit's hex
+    // behaves exactly like an empty hex.
     if (ui.selectedUnitId && ui.selectedUnitId !== unitOnHex.id) {
       const selectedUnit = state.getUnit(ui.selectedUnitId);
       const clickedUnit = unitOnHex;
-      if (selectedUnit && clickedUnit.player !== selectedUnit.player) {
+      const targetable = ui.getTargetableUnits(ui.selectedUnitId);
+      if (selectedUnit && targetable.some(unit => unit.id === clickedUnit.id)) {
         ui._pendingTarget = unitOnHex.id;
         ui.log(`Target selected: ${clickedUnit.name}`);
         mapRenderer.selectedUnit = ui.selectedUnitId;
@@ -321,7 +339,8 @@ canvas.addEventListener('click', (event) => {
               ui.log(`Fire error: ${result.error}`, 'miss');
             }
           }
-          mapRenderer.render(gameEngine.stateManager.getState());
+          // Re-project so a target revealed by this shot appears right away.
+          mapRenderer.render(viewState());
           ui.updateUnitPanel(selectedUnit);
         }
         return;
@@ -389,14 +408,15 @@ canvas.addEventListener('wheel', (event) => {
   mapRenderer.offsetX -= event.deltaX;
   mapRenderer.offsetY -= event.deltaY;
   if (gameEngine) {
-    mapRenderer.render(gameEngine.stateManager.getState());
+    mapRenderer.render(viewState());
   }
 });
 
 // Keyboard shortcuts - stored as a named handler for cleanup
 _keydownHandler = (event) => {
   if (!gameEngine) return;
-  const state = gameEngine.stateManager.getState();
+  const state = viewState();
+  if (!state) return;
 
   switch (event.key) {
     case 'ArrowUp': mapRenderer.offsetY += 20; break;
@@ -411,7 +431,7 @@ _keydownHandler = (event) => {
       break;
     case 'n':
       if (mapRenderer.selectedUnit) {
-        const units = state.getPlayerUnits(state.currentPlayer);
+        const units = ui.getVisibleUnits(state.currentPlayer);
         const idx = units.findIndex(u => u.id === mapRenderer.selectedUnit);
         if (idx >= 0 && idx < units.length - 1) {
           mapRenderer.selectedUnit = units[idx + 1].id;
@@ -430,7 +450,8 @@ document.addEventListener('keydown', _keydownHandler);
 
 function updateUI() {
   if (!gameEngine) return;
-  const state = gameEngine.stateManager.getState();
+  const state = viewState();
+  if (!state) return;
   document.getElementById('turn-label').textContent = `Turn: ${state.turn}`;
   document.getElementById('phase-label').textContent = `Phase: ${state.phase}`;
 }

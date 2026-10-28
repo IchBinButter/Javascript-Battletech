@@ -92,6 +92,15 @@ export class StateManager {
       diff.smokeHexes = newState.smokeHexes;
     }
 
+    // Mines and scheduled battlefield support (p75-79) also live outside the
+    // units, so they need the same treatment or a client loses the battlefield.
+    if (JSON.stringify(oldState.minefields) !== JSON.stringify(newState.minefields)) {
+      diff.minefields = newState.minefields;
+    }
+    if (JSON.stringify(oldState.battlefieldSupport) !== JSON.stringify(newState.battlefieldSupport)) {
+      diff.battlefieldSupport = newState.battlefieldSupport;
+    }
+
     // Map hexes that changed: building CF, rubble from collapse, basements,
     // terrain set alight.
     const hexUpdates = {};
@@ -124,6 +133,8 @@ export class StateManager {
 
     if (diff.fireHexes) state.fireHexes = diff.fireHexes;
     if (diff.smokeHexes) state.smokeHexes = diff.smokeHexes;
+    if (diff.minefields !== undefined) state.minefields = diff.minefields;
+    if (diff.battlefieldSupport !== undefined) state.battlefieldSupport = diff.battlefieldSupport;
 
     if (diff.hexUpdates) {
       const hexes = state.map.hexes;

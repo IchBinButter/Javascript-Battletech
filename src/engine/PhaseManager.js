@@ -272,6 +272,12 @@ export class PhaseManager {
       this.engine.resolveEndPhaseFire();
     }
 
+    // Scheduled battlefield support strikes resolve in the End Phase of the
+    // turn they were called for, then expire (p.75-79).
+    if (typeof this.engine.resolveScheduledSupport === 'function') {
+      this.engine.resolveScheduledSupport();
+    }
+
     // Consciousness checks
     for (const unit of Object.values(state.units)) {
       if (unit.pilot.hits > 0 && unit.pilot.conscious) {

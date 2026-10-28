@@ -41,7 +41,11 @@ const EXPECTED_FIXED_SLOTS = {
 };
 
 describe('Mech Roster Data', () => {
-  it('has 14 mechs in the roster (12 canon, 2 refits)', () => {
+  // Curated roster size, not a rules cap. The roster is 12 canon designs plus 2
+  // non-canon refits that exist so the optional equipment and design-quirk rules
+  // are reachable in play. Adding designs is a deliberate data change that must
+  // update this number; no game rule depends on it.
+  it('keeps the curated roster at 12 canon designs plus 2 refits', () => {
     expect(mechs).toHaveLength(14);
   });
 
