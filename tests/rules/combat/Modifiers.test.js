@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { AttackResolver } from '../../../src/rules/combat/AttackResolver.js';
+import { PhysicalAttackResolver } from '../../../src/rules/combat/PhysicalAttackResolver.js';
 import { getMaxMP } from '../../../src/rules/movement/maxMP.js';
 import { PSRCalculator } from '../../../src/rules/movement/PSRCalculator.js';
 import hitTables from '../../../src/data/hitTables.json' with { type: 'json' };
@@ -323,5 +324,67 @@ describe('damage consequences', () => {
     unit.applyPilotDamage(1);
     expect(unit.pilot.dead).toBe(true);
     expect(unit.pilot.conscious).toBe(false);
+  });
+});
+
+// =============================================================================
+// The roster data now carries the slots these rules read
+// =============================================================================
+
+describe('roster data drives the damage rules', () => {
+  const dice = makeDiceRoller(12);
+
+  it('a hip crit halves the Atlas walking MP', () => {
+    const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    const hip = atlas.criticalSlots.leftLeg.find(s => s.item === 'hip');
+    hip.status = 'destroyed';
+
+    expect(getMaxMP(atlas, 'walk')).toBe(2); // base 3, halved and rounded up
+  });
+
+  it('a shoulder crit stops that arm punching', () => {
+    const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    atlas.position = { hexKey: '5,7', facing: 0 };
+    const shoulder = atlas.criticalSlots.rightArm.find(s => s.item === 'shoulder');
+    shoulder.status = 'destroyed';
+
+    const target = createTestUnit('jenner-jr7d', 1, 'jenner-1');
+    target.position = { hexKey: '5,6', facing: 3 };
+
+    const result = new PhysicalAttackResolver().resolvePunch(atlas, target, dice, { arm: 'rightArm' });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('Shoulder');
+  });
+
+  it('an arm actuator now adds to the weapon attack roll', () => {
+    const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    atlas.position = { hexKey: '5,7', facing: 3 };
+    const actuator = atlas.criticalSlots.rightArm.find(s => s.item === 'upper_arm_actuator');
+    actuator.status = 'destroyed';
+
+    const target = createTestUnit('jenner-jr7d', 1, 'jenner-1');
+    target.position = { hexKey: '5,8', facing: 0 };
+
+    const calc = resolver.calculateTargetNumber(atlas, weapon, target, gs(), {
+      weaponLocation: 'rightArm'
+    });
+    expect(calc.modifiers).toContain('Arm actuators damaged: +1');
+  });
+
+  it('the Banshee refit may reverse its arms', () => {
+    const banshee = createTestUnit('banshee-bnc3e-refit', 0, 'banshee-0');
+    banshee.position = { hexKey: '5,7', facing: 0 };
+
+    const enemy = createTestUnit('jenner-jr7d', 1, 'jenner-1');
+    enemy.position = { hexKey: '5,6', facing: 3 };
+
+    const engine = createTestEngine({ units: { 'banshee-0': banshee, 'jenner-1': enemy } });
+    engine.phaseManager.enterPhase('weapon_attack');
+    engine.phaseManager.clearQueue();
+    engine.stateManager.getState().currentPlayer = 0;
+
+    const result = engine.processAction(0, { type: 'flipArms', unitId: 'banshee-0' });
+    expect(result.success).toBe(true);
+    expect(banshee.armsReversed).toBe(true);
   });
 });

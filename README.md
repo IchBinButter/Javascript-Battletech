@@ -6,12 +6,12 @@ A web-based implementation of the Classic BattleTech tabletop wargame, faithfull
 
 - **Complete Rules Engine** - Movement, combat (GATOR), heat management, physical attacks, damage resolution
 - **Hex Grid System** - Flat-top hex grid with proper coordinate math and line-of-sight calculations
-- **4 BattleMechs** - Atlas AS7-D, Jenner JR7-D, Wolverine WVR-6R, Thunderbolt TDR-5S
+- **14 BattleMechs** - 12 canon designs (Atlas AS7-D through Awesome AWS-8Q) plus two equipment refits
 - **17 Weapons** - Medium Laser, PPC, AC/2-20, SRM-2/4/6, LRM-5/10/15/20, and more
-- **Equipment System** - CASE, ECM, Targeting Computer, MASC, TSM with full rules integration
+- **Equipment System** - CASE, ECM, Targeting Computer, MASC, TSM wired into the rules
 - **Canvas Rendering** - 2D hex map with terrain visualization, unit tokens, and movement previews
 - **Phase System** - Initiative, Movement, Weapon Attack, Physical Attack, Heat, End phases
-- **201 Tests** - Comprehensive test suite covering all rules modules
+- **1,495 Tests** - Comprehensive test suite covering all rules modules
 
 ## Quick Start
 

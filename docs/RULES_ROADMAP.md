@@ -96,9 +96,9 @@ First target free; each secondary target +1 if in forward arc, +2 if side/rear.
 - Torso twist ±1 hexside during the weapon attack phase (shifts arcs, not facing).
 - Arm flip only if no hand/lower-arm actuators in either arm; cannot twist and flip in
   the same turn; both return to front in the End Phase.
-- **Data gap:** `mechs.json` does not list actuators or split locations, so in practice
-  every Mech passes the flip eligibility test. Adding actuator slots to the data would
-  gate it properly.
+- `mechs.json` now carries the actuators (shoulder/upper/lower arm, hip/upper/lower
+  leg/foot), so eligibility is real: the canon roster has hands and cannot flip, and the
+  Banshee refit (no hand or lower-arm actuators) can.
 
 ### 1.9 Rear-mounted weapons  ✅ done (in 1.1)
 
@@ -126,9 +126,11 @@ double-counting a hip as an actuator.
 shots), 2 points of MechWarrior damage, a spotter-check PSR at +3 on involuntary shutdown,
 and shutdown Mechs automatically fail PSRs.
 
-**Known gap:** `mechs.json` has no actuator or sensor entries in its critical slots, so the
-arm/leg actuator modifiers only fire on injected data (tests do this). Filling in the slot
-data would make the physical and weapon modifiers bite in normal play.
+**Data:** `mechs.json` now carries every structural slot the rules read — engine, gyro,
+cockpit, sensors, life support, and the arm/leg actuators — with all locations at their
+record-sheet size (12 slots, 6 in the head) and heat sink slots matching the sinks the
+engine does not house. Two non-canon refits (`atlas-as7d-refit`, `banshee-bnc3e-refit`)
+exist so the equipment rules are reachable in play.
 
 **Size:** M–L. **Why second:** it makes every existing damage result visible, and Phase 1
 item 1.6 needs the actuator state anyway.

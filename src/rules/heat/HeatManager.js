@@ -76,7 +76,9 @@ export class HeatManager {
 
     for (const [binName, bin] of Object.entries(ammo)) {
       if (!bin || bin.shots <= 0) continue;
-      const perShot = WEAPON_DAMAGE[binName] || 1;
+      // Real bins name their weapon in `type` (lrm20_ammo -> lrm20); synthetic
+      // ones are keyed by the weapon id.
+      const perShot = WEAPON_DAMAGE[bin.type] || WEAPON_DAMAGE[binName] || 1;
       const score = perShot * 1000 + bin.shots;
       if (score > bestScore) {
         bestScore = score;

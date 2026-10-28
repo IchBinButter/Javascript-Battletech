@@ -34,13 +34,15 @@ const EXPECTED_FIXED_SLOTS = {
   centerTorso: 12,
   leftTorso: 12,
   rightTorso: 12,
-  leftLeg: 6,
-  rightLeg: 6,
+  leftArm: 12,
+  rightArm: 12,
+  leftLeg: 12,
+  rightLeg: 12,
 };
 
 describe('Mech Roster Data', () => {
-  it('has 12 mechs in the roster', () => {
-    expect(mechs).toHaveLength(12);
+  it('has 14 mechs in the roster (12 canon, 2 refits)', () => {
+    expect(mechs).toHaveLength(14);
   });
 
   describe.each(EXPECTED_MECHS)('$id', (expected) => {
@@ -208,6 +210,75 @@ describe('Mech Roster Data', () => {
     for (const mech of mechs) {
       const expectedRun = Math.ceil(mech.movement.walk * 1.5);
       expect(mech.movement.run).toBe(expectedRun);
+    }
+  });
+});
+
+// =============================================================================
+// Critical slot completeness: the rules that read slots need them to exist
+// =============================================================================
+
+describe('critical slot completeness', () => {
+  const ARM_ACTUATORS = ['shoulder', 'upper_arm_actuator', 'lower_arm_actuator'];
+  const LEG_ACTUATORS = ['hip', 'upper_leg_actuator', 'lower_leg_actuator', 'foot_actuator'];
+
+  it('every arm carries shoulder, upper and lower arm actuators', () => {
+    for (const mech of mechs) {
+      // The Banshee refit deliberately lacks lower-arm actuators so it can
+      // reverse its arms (p24).
+      if (mech.id.endsWith('-refit')) continue;
+
+      for (const arm of ['leftArm', 'rightArm']) {
+        const items = mech.criticalSlots[arm].map(s => s.item);
+        for (const actuator of ARM_ACTUATORS) {
+          expect(items, `${mech.id} ${arm} ${actuator}`).toContain(actuator);
+        }
+      }
+    }
+  });
+
+  it('every leg carries hip, upper leg, lower leg and foot actuators', () => {
+    for (const mech of mechs) {
+      for (const leg of ['leftLeg', 'rightLeg']) {
+        const items = mech.criticalSlots[leg].map(s => s.item);
+        for (const actuator of LEG_ACTUATORS) {
+          expect(items, `${mech.id} ${leg} ${actuator}`).toContain(actuator);
+        }
+      }
+    }
+  });
+
+  it('heat sink slots match the sinks the engine does not house', () => {
+    for (const mech of mechs) {
+      // The refits trade sink crits for equipment, so only the canon roster is
+      // expected to carry the full complement.
+      if (mech.id.endsWith('-refit')) continue;
+
+      const expected = Math.max(0, mech.heatSinks.count - 10);
+      const actual = Object.values(mech.criticalSlots)
+        .flat()
+        .filter(s => (s.item || '').includes('heat_sink')).length;
+      expect(actual, `${mech.id} heat sink slots`).toBe(expected);
+    }
+  });
+
+  it('the refits carry their equipment', () => {
+    const atlasRefit = mechs.find(m => m.id === 'atlas-as7d-refit');
+    expect(atlasRefit.equipment.other.case).toBe(true);
+    expect(atlasRefit.equipment.other.ecm).toBe(true);
+    expect(atlasRefit.equipment.other.targeting_computer).toBe(true);
+    expect(atlasRefit.criticalSlots.leftTorso.map(s => s.item)).toContain('case');
+
+    const bansheeRefit = mechs.find(m => m.id === 'banshee-bnc3e-refit');
+    expect(bansheeRefit.equipment.other.tsm).toBe(true);
+  });
+
+  it('the Banshee refit has no hand actuators, so it may reverse its arms', () => {
+    const bansheeRefit = mechs.find(m => m.id === 'banshee-bnc3e-refit');
+    for (const arm of ['leftArm', 'rightArm']) {
+      const items = bansheeRefit.criticalSlots[arm].map(s => s.item);
+      expect(items).not.toContain('hand_actuator');
+      expect(items).not.toContain('lower_arm_actuator');
     }
   });
 });

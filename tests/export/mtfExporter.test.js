@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "vitest";
 import { mechDefToMTF } from "../../src/export/mtfExporter.js";
 import { parseMTF } from "../../src/import/mtfParser.js";
 import { convertToMechDef, parseAndConvert } from "../../src/import/unitConverter.js";
@@ -443,10 +443,12 @@ describe("mechDefToMTF", () => {
       expect(mechDefToMTF(d)).toContain("Left Arm Actuators:");
     });
 
-    it("omits actuator lines when no actuators present", () => {
+    it("exports actuator lines for a roster Mech", () => {
       const mtf = mechDefToMTF(getMechDef("atlas-as7d"));
-      expect(mtf).not.toContain("Left Arm Actuators:");
-      expect(mtf).not.toContain("Right Arm Actuators:");
+      expect(mtf).toContain("Left Arm Actuators:Shoulder,Upper Arm,Lower Arm,Hand");
+      expect(mtf).toContain("Right Arm Actuators:Shoulder,Upper Arm,Lower Arm,Hand");
+      expect(mtf).toContain("Left Leg Actuators:Hip,Upper Leg,Lower Leg,Foot");
+      expect(mtf).toContain("Right Leg Actuators:Hip,Upper Leg,Lower Leg,Foot");
     });
   });
 
