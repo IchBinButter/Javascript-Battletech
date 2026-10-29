@@ -30,57 +30,77 @@ describe('Equipment: CASE containment', () => {
     return atlas;
   }
 
-  it('CASE in same location contains ammo explosion, destroying the location but leaving armor on associated arm', () => {
+  // p118 CASE: the blast is contained to the internal structure of the
+  // location that holds the ammunition; the excess is ignored. p44: an
+  // ammunition explosion bypasses armour entirely, so the armour value does
+  // not change at all.
+  it('CASE in same location contains the blast in internal structure, leaving armour intact', () => {
     const engine = createTestEngine({
       units: { 'atlas-0': createAmmoTestUnit(true) }
     });
     const atlas = engine.stateManager.getState().getUnit('atlas-0');
     atlas.equipment.ammo.lrm20_ammo.shots = 12;
+    const initialLTArmor = atlas.getArmor('leftTorso');
+    const initialLAArmor = atlas.getArmor('leftArm');
     const initialCTarmor = atlas.getArmor('centerTorso');
     const initialCTis = atlas.getInternal('centerTorso');
 
     engine.damageResolver.resolveAmmoExplosion(atlas, 'lrm20_ammo', makeDiceRoller(7));
 
-    expect(atlas.ammoDestroyed !== undefined ? atlas.equipment.ammo.lrm20_ammo.shots : 0).toBe(0);
+    expect(atlas.equipment.ammo.lrm20_ammo.shots).toBe(0);
     expect(atlas.isLocationDestroyed('leftTorso')).toBe(true);
-    expect(atlas.getArmor('leftTorso')).toBe(0);
+    // p44: "explosions bypass armour" — the left torso armour is untouched.
+    expect(atlas.getArmor('leftTorso')).toBe(initialLTArmor);
     expect(atlas.getInternal('leftTorso')).toBe(0);
+    // p44: a destroyed side torso takes its arm with it.
     expect(atlas.isLocationDestroyed('leftArm')).toBe(true);
+    expect(atlas.getArmor('leftArm')).toBe(initialLAArmor); // the arm itself is undamaged
+    // p118: CASE ignores the excess, so nothing reaches the centre torso.
     expect(atlas.getArmor('centerTorso')).toBe(initialCTarmor);
     expect(atlas.getInternal('centerTorso')).toBe(initialCTis);
+    // p58: an ammunition explosion injures the MechWarrior for 2 points.
+    expect(atlas.pilot.hits).toBe(2);
   });
 
-  it('ammo explosion without CASE damages internal structure but preserves armor', () => {
+  // p102: a missile bin explodes for the launcher size in damage per shot, so
+  // two LRM-20 shots are 40 points, not 2 (p96/p118).
+  it('an LRM-20 bin explodes for 20 per shot, not 1 per shot (p102)', () => {
     const engine = createTestEngine({
       units: { 'atlas-0': createAmmoTestUnit(false) }
     });
     const atlas = engine.stateManager.getState().getUnit('atlas-0');
     atlas.equipment.ammo.lrm20_ammo.shots = 2;
     const initialArmor = atlas.getArmor('leftTorso');
-    const initialIS = atlas.getInternal('leftTorso');
 
     engine.damageResolver.resolveAmmoExplosion(atlas, 'lrm20_ammo', makeDiceRoller(7));
 
     expect(atlas.equipment.ammo.lrm20_ammo.shots).toBe(0);
+    // p44: the explosion bypasses the left torso's 32 armour and destroys its
+    // 21 internal structure; the remaining 19 points transfer inward.
     expect(atlas.getArmor('leftTorso')).toBe(initialArmor);
-    expect(atlas.getInternal('leftTorso')).toBe(initialIS - 2);
-    expect(atlas.isLocationDestroyed('leftTorso')).toBe(false);
+    expect(atlas.isLocationDestroyed('leftTorso')).toBe(true);
+    expect(atlas.getInternal('centerTorso')).toBe(31 - 19); // 12
   });
 
-  it('ammo explosion without CASE destroys location when damage exceeds IS', () => {
+  // p44: without CASE the excess keeps transferring inward, past armour.
+  it('ammo explosion without CASE transfers inward past armour (p44)', () => {
     const engine = createTestEngine({
       units: { 'atlas-0': createAmmoTestUnit(false) }
     });
     const atlas = engine.stateManager.getState().getUnit('atlas-0');
     atlas.equipment.ammo.lrm20_ammo.shots = 30;
-    const initialCTis = atlas.getInternal('centerTorso');
+    const initialCTarmor = atlas.getArmor('centerTorso');
 
     engine.damageResolver.resolveAmmoExplosion(atlas, 'lrm20_ammo', makeDiceRoller(7));
 
     expect(atlas.equipment.ammo.lrm20_ammo.shots).toBe(0);
     expect(atlas.isLocationDestroyed('leftTorso')).toBe(true);
     expect(atlas.isLocationDestroyed('leftArm')).toBe(true);
-    expect(atlas.getInternal('centerTorso')).toBe(initialCTis);
+    // 30 LRM-20 shots = 600 points: the left torso (21) and the centre torso
+    // (31) are both destroyed; the centre torso armour is never touched.
+    expect(atlas.getInternal('centerTorso')).toBe(0);
+    expect(atlas.getArmor('centerTorso')).toBe(initialCTarmor);
+    expect(atlas.isLocationDestroyed('centerTorso')).toBe(true);
   });
 
   it('CASE in wrong location does not protect ammo in a different location', () => {
@@ -287,15 +307,30 @@ describe('Equipment: MASC', () => {
     expect(unit.mascActive).toBeUndefined();
   });
 
-  it('doubles walk MP when MASC is active', () => {
+  // p116 MASC: "On a result of 3 or higher, the 'Mech can run that turn at a
+  // speed equal to double its current Walking MP." Walking MP itself is not
+  // increased, so the attack modifier stays "ran +2" (p28).
+  it('does NOT change walk MP when MASC is active', () => {
     const unit = createMASCUnit(true);
     movCalc.activateMASC(unit);
 
     const mp = movCalc.getMaxMP(unit, 'walk');
-    expect(mp).toBe(6); // Atlas walk 3 × 2 = 6
+    expect(mp).toBe(3); // Atlas walk 3
   });
 
-  it('does NOT double walk MP when MASC is not active', () => {
+  it('doubles run MP when MASC is active', () => {
+    const unit = createMASCUnit(true);
+    movCalc.activateMASC(unit);
+
+    expect(movCalc.getMaxMP(unit, 'run')).toBe(6); // 2 x walk 3
+  });
+
+  it('run MP without MASC is 1.5 x walk (Atlas: 5)', () => {
+    const unit = createMASCUnit(true);
+    expect(movCalc.getMaxMP(unit, 'run')).toBe(5); // ceil(3 x 1.5)
+  });
+
+  it('does NOT change walk MP when MASC is not active', () => {
     const unit = createMASCUnit(true);
     const mp = movCalc.getMaxMP(unit, 'walk');
     expect(mp).toBe(3); // Normal walk MP
@@ -380,11 +415,11 @@ describe('Equipment: MASC', () => {
     expect(mp).toBe(3);
   });
 
-  it('mascActive flag alone doubles MP even without equipment installed', () => {
+  it('mascActive flag alone doubles run MP even without equipment installed', () => {
     const unit = createMASCUnit(false);
     unit.mascActive = true;
-    const mp = movCalc.getMaxMP(unit, 'walk');
-    expect(mp).toBe(6);
+    expect(movCalc.getMaxMP(unit, 'walk')).toBe(3);
+    expect(movCalc.getMaxMP(unit, 'run')).toBe(6);
   });
 });
 

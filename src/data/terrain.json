@@ -102,11 +102,6 @@
     "levelChangeUp": {
       "mpCost": 1,
       "perLevel": true
-    },
-    "levelChangeDown": {
-      "mpCost": 0,
-      "perLevel": true,
-      "psrTrigger": 3
     }
   },
   "buildings": {
@@ -132,7 +127,7 @@
       "name": "Hardened Building",
       "cf": 120,
       "levels": 4,
-      "psrModifier": 3
+      "psrModifier": 5
     }
   }
 }

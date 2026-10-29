@@ -5,7 +5,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { createTestEngine, createTestUnit, createWeaponDef, makeDiceRoller, makeSequencedDiceRoller } from '../helpers/testUtils.js';
-import { BuildingRegistry, buildingCombat } from '../../src/rules/urban/Buildings.js';
+import { BuildingRegistry, buildingCombat, damageReduction } from '../../src/rules/urban/Buildings.js';
+import { Weapon } from '../../src/models/Weapon.js';
 
 const mediumBuilding = (cf = 40, levels = 2, id = 'b1') => ({ id, type: 'medium', levels, cf, currentCF: cf });
 
@@ -226,7 +227,7 @@ describe('combat within buildings (p72)', () => {
     expect(calc.modifiers).toContain('Combat within buildings: +1');
   });
 
-  it('absorbs CF / 10 of a hit and charges it to the hex', () => {
+  it('absorbs CF / 10 of a hit and charges it to the hex at the end of the phase', () => {
     const { engine } = combat({ '5,5': mediumBuilding(40) });
     const state = engine.stateManager.getState();
     const weapon = createWeaponDef('med_laser');
@@ -238,7 +239,71 @@ describe('combat within buildings (p72)', () => {
 
     expect(result.success).toBe(true);
     const hex = state.map.hexes.get('5,5');
+    // p72: "Resolve damage to the building's CF at the end of the Weapon
+    // Attack Phase." Until then the hex keeps its starting CF.
+    expect(hex.building.currentCF).toBe(40);
+    expect(hex._pendingCFDamage).toBe(4); // ceil(40 / 10)
+
+    engine.processAction(0, { type: 'endPhase' }); // weapon_attack -> physical_attack
+
     expect(hex.building.currentCF).toBe(36); // 40 - ceil(40/10), a 5-point laser
+    expect(hex._pendingCFDamage).toBeUndefined(); // the bank is cleared with the phase
+  });
+
+  it('uses the start-of-phase CF for every hit (p72 example: 38 becomes 19)', () => {
+    const attacker = place(createTestUnit('atlas-as7d', 0, 'atlas'), '5,8', 0);
+    const target = place(createTestUnit('atlas-as7d', 1, 'target'), '5,5', 3);
+    const engine = urbanEngine({
+      units: { atlas: attacker, target },
+      buildings: { '5,5': mediumBuilding(38) },
+      phase: 'weapon_attack',
+      diceRoller: makeDiceRoller(7)
+    });
+    const state = engine.stateManager.getState();
+    const hex = state.map.hexes.get('5,5');
+
+    // The manual's Hunchback example: an AC/10 hit, a small laser, a large
+    // laser and the 5- and 4-point groupings of an LRM-15. "Each attack's
+    // damage is thus reduced by 4 (38 / 10 = 3.8, rounded up to 4)", and the
+    // hex's CF is only cut "at the end of the Weapon Attack Phase".
+    const damageValues = [10, 3, 8, 5, 4];
+    const absorbed = [];
+
+    for (const damage of damageValues) {
+      engine.phaseManager.clearQueue();
+      state.currentPlayer = 0;
+      const shot = engine.processAction(0, {
+        type: 'fire',
+        attackerId: 'atlas',
+        targetId: 'target',
+        weapon: new Weapon({
+          id: `test_${damage}`, name: `Test ${damage}`, type: 'DE', heat: 0,
+          damage, shortRange: 3, mediumRange: 6, longRange: 9
+        })
+      });
+
+      expect(shot.success).toBe(true);
+      expect(shot.hit).toBe(true);
+      absorbed.push(shot.hitLocations[0].buildingAbsorbed);
+    }
+
+    // A 3-point hit is fully absorbed by the 4-point reduction, exactly as the
+    // manual's small laser does: 4 + 3 + 4 + 4 + 4 = 19.
+    expect(absorbed).toEqual([4, 3, 4, 4, 4]);
+    expect(hex.building.currentCF).toBe(38);
+
+    engine.processAction(0, { type: 'endPhase' }); // weapon_attack -> physical_attack
+
+    expect(hex.building.currentCF).toBe(19); // 38 - 19
+  });
+
+  it('damageReduction reads the start-of-phase CF snapshot', () => {
+    const hex = { hexKey: '5,5', building: mediumBuilding(40) };
+    expect(damageReduction(hex)).toBe(4);
+
+    hex._cfAtPhaseStart = 38;
+    hex.building.currentCF = 10;
+    expect(damageReduction(hex)).toBe(4); // ceil(38 / 10), not ceil(10 / 10)
   });
 
   it('rejects a shot through three intervening building hexes', () => {

@@ -190,7 +190,7 @@ per-hex `hex.building` objects (per-hex CF, shared building id) plus a registry,
 them at map load, and gives the renderer real building colours and a CF label. Terrain-only
 maps get synthetic one-hex buildings.
 5.2 ✅ **Entering buildings** — a Level-0 entry rolls a PSR at the building's modifier
-(light 0, medium +1, heavy +2, hardened +3), the hex takes `ceil(tonnage/10)` whatever the
+(light 0, medium +1, heavy +2, hardened +5; p54/p142), the hex takes `ceil(tonnage/10)` whatever the
 roll, and a failed roll costs the 'Mech the same damage. Jumping onto a building does
 neither.
 5.3 ✅ **Collapse** — a hex at CF 0 becomes rubble and its occupants take

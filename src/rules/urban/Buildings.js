@@ -40,11 +40,21 @@ export function entryDamage(unit) {
   return Math.ceil((unit.tonnage || 0) / 10);
 }
 
-/** Damage a building hex absorbs from each hit on a Mech inside it (p72). */
+/**
+ * Damage a building hex absorbs from each hit on a Mech inside it (p72).
+ *
+ * "A building reduces the damage of each hit on a 'Mech inside it by its
+ * current CF / 10 (round up; treat each Damage Value grouping as a separate
+ * hit)." The manual's worked example fixes the value for the whole phase (five
+ * attacks all use "38 ÷10 = 3.8, rounded up to 4" although the hex's CF is only
+ * cut to 19 at the end of the phase), so the phase-start CF snapshot wins when
+ * one is present. `GameEngine` takes that snapshot when the Weapon Attack Phase
+ * begins and charges the absorbed damage to the hex at the phase's end.
+ */
 export function damageReduction(hex) {
   const building = hex && hex.building;
   if (!building) return 0;
-  const cf = building.currentCF ?? building.cf;
+  const cf = hex._cfAtPhaseStart ?? building.currentCF ?? building.cf;
   return Math.ceil(cf / 10);
 }
 

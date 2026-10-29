@@ -101,7 +101,38 @@ export function downwindHexes(hexKey, windDirection, distance = 1) {
 /** A burning building hex loses 2 CF every End Phase (p64). */
 export const BUILDING_FIRE_CF_LOSS = 2;
 
-/** Fire damage to a unit standing in the hex, rolled in the Heat Phase. */
-export function fireDamageRoll(diceRoller) {
-  return diceRoller.roll1d6();
+/**
+ * Heat a 'Mech gains from fire in one turn (p50, "Fire"): "During the Heat
+ * Phase, a 'Mech in a burning hex absorbs an additional 5 Heat Points. A 'Mech
+ * also absorbs 2 Heat Points for each burning hex it moved through during the
+ * Movement Phase." Fire causes heat in BattleTech, not armour damage.
+ */
+export const FIRE_HEAT_STANDING = 5;
+export const FIRE_HEAT_MOVED_THROUGH = 2;
+
+/**
+ * p50, "Outside Heat Sources": fire, plasma and weather "are cumulative, to a
+ * maximum of 15 heat points in a single turn".
+ */
+export const OUTSIDE_HEAT_CAP = 15;
+
+/**
+ * Heat a 'Mech gains from fire this turn (p50).
+ * @param {{standingInFire?: boolean, burningHexesMovedThrough?: number}} [fire]
+ * @returns {number} heat points to add in the Heat Phase
+ */
+export function fireHeat({ standingInFire = false, burningHexesMovedThrough = 0 } = {}) {
+  const moved = Math.max(0, Math.floor(Number.isFinite(burningHexesMovedThrough)
+    ? burningHexesMovedThrough
+    : 0));
+  return (standingInFire ? FIRE_HEAT_STANDING : 0) + moved * FIRE_HEAT_MOVED_THROUGH;
+}
+
+/**
+ * Cap cumulative outside heat at the p50 maximum of 15 per turn. Negative
+ * values (cold weather cooling the 'Mech) pass through uncapped.
+ */
+export function capOutsideHeat(heat) {
+  if (!Number.isFinite(heat)) return 0;
+  return heat > OUTSIDE_HEAT_CAP ? OUTSIDE_HEAT_CAP : heat;
 }

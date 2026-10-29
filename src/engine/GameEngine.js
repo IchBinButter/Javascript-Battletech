@@ -28,7 +28,7 @@ import { terrainPSRModifier } from '../rules/movement/TerrainRules.js';
 import { psrModifier } from '../rules/weather/WeatherRules.js';
 import {
   canBurn, attemptIgnition, spreadsOnRoll, spreadDistance, downwindHexes,
-  BUILDING_FIRE_CF_LOSS, fireDamageRoll
+  BUILDING_FIRE_CF_LOSS
 } from '../rules/terrain/FireRules.js';
 import {
   minefieldAt, minefieldHexesEntered, resolveMinefieldTrigger
@@ -134,6 +134,9 @@ export class GameEngine {
       case 'selectUnit':
         result = this._handleSelectUnit(playerId, action);
         break;
+      case 'pass':
+        result = this._handlePass(playerId, action);
+        break;
       default:
         result = { success: false, error: `Unknown action: ${action.type}` };
     }
@@ -145,17 +148,190 @@ export class GameEngine {
     this.eventBus.emit('actionProcessed', toTransferable({ playerId, action, result }));
 
     // Advance the unit queue after actions that consume a unit's turn
-    if (result.success && ['move', 'fire', 'physicalAttack'].includes(action.type)) {
+    if (result.success && ['move', 'fire', 'physicalAttack', 'pass'].includes(action.type)) {
       this.phaseManager.advanceQueueOrNextPhase();
     }
 
     return result;
   }
 
+  /**
+   * Resolve a fall (p56/p58/p74).
+   *
+   * PSRCalculator's `resolveFall` picks the facing-after-fall hit-location
+   * column (p143), makes the MechWarrior's PSR with the triggers of the PSR
+   * that caused the fall (p58) and returns the 'Mech's falling damage in
+   * 5-point Damage Value groupings (p74). This method applies the warrior's
+   * Consciousness Roll and the damage to the 'Mech, which is what the manual's
+   * "the caller applies `damage`" split leaves to the engine.
+   *
+   * @param {object} unit
+   * @param {{levelsFallen?: number, causeTriggers?: Array, fallDirection?: number}} [options]
+   *   causeTriggers are the triggers of the PSR that caused the fall; their
+   *   modifiers carry over to the warrior's roll.
+   * @returns {object} the PSRCalculator fall result, with `damageResults`
+   */
+  applyFall(unit, { levelsFallen = 1, causeTriggers = [], fallDirection = null } = {}) {
+    const pilotHitsBefore = unit.pilot ? (unit.pilot.hits || 0) : 0;
+    const direction = Number.isFinite(fallDirection)
+      ? fallDirection
+      : (unit.position ? unit.position.facing : 0);
+
+    const fall = this.psrCalc.resolveFall(unit, direction, this.diceRoller, levelsFallen, {
+      causeTriggers
+    });
+    unit.prone = true;
+
+    // p58: the warrior's fall injury forces its Consciousness Roll immediately,
+    // and it is made before any falling damage reaches the 'Mech.
+    this.rollConsciousnessForNewPilotHits(unit, pilotHitsBefore);
+
+    // p56/p74: falling damage is applied in 5-point groupings, each on the
+    // facing-after-fall hit-location column.
+    fall.damageResults = [];
+    for (const grouping of fall.damageGroupings || []) {
+      if (grouping <= 0) continue;
+      let location = 'centerTorso';
+      let isRear = false;
+      if (this.attackResolver) {
+        const locRoll = this.diceRoller.roll2d6();
+        const rolled = this.attackResolver.determineHitLocation(
+          locRoll, fall.hitLocationColumn || 'front'
+        );
+        location = rolled.location;
+        // p56/p57: the Facing-After-Fall "Opposite Direction" (Rear) result
+        // sends torso damage to rear armour; arms, legs and the head have no
+        // rear facing, so the table only marks torso entries as rear.
+        isRear = Boolean(rolled.isRear);
+      }
+      fall.damageResults.push(this._applyDamageTo(unit, location, grouping, isRear));
+    }
+
+    this.eventBus.emit('unitFell', { unitId: unit.id, fall });
+
+    return fall;
+  }
+
+  /**
+   * Apply damage to a unit and make the Consciousness Rolls it forces (p58).
+   *
+   * "Every time a warrior takes a point of damage, its controller must
+   * immediately make a Consciousness Roll." The damage resolver funnels all
+   * MechWarrior damage through `applyPilotDamage`, so wrapping the call is
+   * enough to roll for head hits, ammunition explosions, falls, heat damage
+   * and everything else in one place.
+   *
+   * @returns {object} the DamageResolver result
+   */
+  _applyDamageTo(unit, location, damage, isRear = false) {
+    const hitsBefore = unit.pilot ? (unit.pilot.hits || 0) : 0;
+    const result = this.damageResolver.applyDamage(unit, location, damage, isRear, this.diceRoller);
+    this.rollConsciousnessForNewPilotHits(unit, hitsBefore);
+    return result;
+  }
+
+  /**
+   * Make one Consciousness Roll per point of MechWarrior damage added since
+   * `hitsBefore` (p58). Rolls stop as soon as the warrior is knocked out - "if
+   * a MechWarrior is knocked unconscious, no further Consciousness Rolls need
+   * be made that turn" - or dies on the sixth point.
+   *
+   * @param {object} unit
+   * @param {number} hitsBefore - damage total the caller has already accounted for
+   * @param {number|null} [hitsAfter] - cap the damage total to this many hits
+   *   (used by the Heat Phase, so a fall caused later in the same phase is not
+   *   counted twice)
+   */
+  rollConsciousnessForNewPilotHits(unit, hitsBefore, hitsAfter = null) {
+    const rolls = [];
+    if (!unit || !unit.pilot) return rolls;
+
+    const limit = Number.isFinite(hitsAfter) ? hitsAfter : (unit.pilot.hits || 0);
+    const first = Math.max(0, Number.isFinite(hitsBefore) ? hitsBefore : 0) + 1;
+
+    for (let hits = first; hits <= limit; hits++) {
+      const result = this.phaseManager.rollConsciousness(unit, { hits });
+      rolls.push(result);
+      if (result.dead) break;
+      if (result.rolled && result.passed === false) break;
+    }
+
+    return rolls;
+  }
+
+  /**
+   * Spend a unit's declaration slot without acting (p10/p52/p58).
+   *
+   * A shut-down 'Mech or one whose warrior is unconscious is immobile and may
+   * not move, fire or make physical attacks, but p10 still has its player
+   * assign it a movement selection and its slot in the alternating declaration
+   * order is consumed. This is that "no action" declaration.
+   */
+  _handlePass(playerId, action) {
+    const entry = this.phaseManager.getCurrentQueueEntry();
+    const unitId = action.unitId || (entry ? entry.unitId : null);
+    return { success: true, unitId, passed: true };
+  }
+
+  /**
+   * p72: a building hex absorbs min(hit damage, ceil(CF/10)) from every hit on
+   * a 'Mech inside it, measured against the CF the hex had at the start of the
+   * Weapon Attack Phase. The absorbed damage is banked on the hex during the
+   * phase and charged to its CF here, at the end of the Weapon Attack Phase -
+   * "Resolve damage to the building's CF at the end of the Weapon Attack
+   * Phase." A hex reduced to 0 collapses right after (p73).
+   *
+   * @returns {Array<{hexKey: string, damage: number, currentCF: number}>}
+   */
+  applyPendingBuildingDamage() {
+    const state = this.stateManager.getState();
+    const damaged = [];
+
+    const hasPending = [...state.map.hexes.values()].some(hex => (hex._pendingCFDamage || 0) > 0);
+    if (!hasPending) return damaged;
+
+    this.stateManager.applyStateChange(() => {
+      for (const [, hex] of state.map.hexes) {
+        const pending = hex._pendingCFDamage || 0;
+        if (pending <= 0) continue;
+        if (!hex.building) {
+          hex._pendingCFDamage = 0;
+          continue;
+        }
+
+        hex.building.currentCF = Math.max(0, (hex.building.currentCF ?? hex.building.cf) - pending);
+        hex._pendingCFDamage = 0;
+        damaged.push({ hexKey: hex.hexKey, damage: pending, currentCF: hex.building.currentCF });
+      }
+
+      this._resolvePendingBuildingCollapses();
+    });
+
+    for (const record of damaged) {
+      this.eventBus.emit('buildingDamaged', record);
+    }
+
+    return damaged;
+  }
+
   _handleMove(playerId, action) {
     const state = this.stateManager.getState();
     const unit = state.getUnit(action.unitId);
     if (!unit) return { success: false, error: 'Unit not found' };
+
+    // p52/p58: a shut-down 'Mech and one with an unconscious warrior are
+    // immobile and cannot move; p131: a destroyed 'Mech is out of the game.
+    if (this.phaseManager.isDestroyedUnit(unit)) {
+      return { success: false, error: 'Unit has been destroyed' };
+    }
+    if (this.phaseManager.isImmobile(unit)) {
+      return {
+        success: false,
+        error: unit.shutdown
+          ? 'A shut-down Mech cannot move'
+          : 'A MechWarrior who is unconscious cannot move'
+      };
+    }
 
     // p82: "Hidden 'Mechs revealed in these ways cannot move that phase." The
     // revealed unit forfeits its movement slot; advance the queue instead of
@@ -230,6 +406,19 @@ export class GameEngine {
       }
       unit.hexesMoved = effectivePath.length - 1;
 
+      // p50 "Fire": a 'Mech absorbs 2 Heat Points "for each burning hex it moved
+      // through during the Movement Phase". Record the burning hexes actually
+      // entered (a jump only enters its landing hex) with the turn, so the Heat
+      // Phase can charge them and a list from an earlier turn is ignored.
+      const enteredHexes = movementType === 'jump'
+        ? effectivePath.slice(-1)
+        : effectivePath.slice(1);
+      const burningHexes = Array.isArray(state.fireHexes) ? state.fireHexes : [];
+      unit._burningHexesMovedThrough = {
+        turn: state.turn,
+        hexes: enteredHexes.filter(hexKey => burningHexes.includes(hexKey))
+      };
+
       // p82: a 'Mech that ends its move next to a hidden enemy reveals THAT
       // ENEMY - the mover is not given away by adjacency. A hidden mover was
       // already revealed above, at the start of its move.
@@ -273,7 +462,10 @@ export class GameEngine {
       if (psrTriggers.length > 0) {
         const psrResult = this.psrCalc.makePSR(unit, this.diceRoller, psrTriggers);
         if (!psrResult.passed) {
-          let levelsFallen = 1;
+          // p57/p143: falling damage is ceil(tonnage / 10) x (levels fallen + 1).
+          // A fall on level ground therefore falls 0 levels (not 1); only a
+          // drop to a lower hex counts.
+          let levelsFallen = 0;
           if (effectivePath.length > 1) {
             const startHex = state.map.hexes.get(effectivePath[0]);
             const endHex = state.map.hexes.get(effectivePath[effectivePath.length - 1]);
@@ -282,8 +474,10 @@ export class GameEngine {
               if (totalDrop > 0) levelsFallen = totalDrop;
             }
           }
-          this.psrCalc.resolveFall(unit, unit.position.facing, this.diceRoller, levelsFallen);
-          unit.prone = true;
+          // p56/p58: a failed PSR makes the Mech fall - the fall damages the
+          // Mech (in 5-point groupings) and injures the warrior. The triggers
+          // that caused the fall carry over to the warrior's own PSR.
+          this.applyFall(unit, { levelsFallen, causeTriggers: psrTriggers });
         }
       }
     });
@@ -383,9 +577,7 @@ export class GameEngine {
       if (resolution.triggered && resolution.hits.length > 0) {
         this.stateManager.applyStateChange(() => {
           for (const hit of resolution.hits) {
-            hit.damageResult = this.damageResolver.applyDamage(
-              unit, hit.location, hit.damage, hit.isRear, this.diceRoller
-            );
+            hit.damageResult = this._applyDamageTo(unit, hit.location, hit.damage, hit.isRear);
           }
           field.strength = resolution.strengthAfter;
 
@@ -420,6 +612,21 @@ export class GameEngine {
 
     if (!attacker) return { success: false, error: 'Attacker not found' };
     if (!target) return { success: false, error: 'Target not found' };
+
+    // p52/p58: shut-down 'Mechs and 'Mechs with an unconscious warrior cannot
+    // attack or take any other action (the queue validation has the same guard;
+    // this catches direct callers too).
+    if (this.phaseManager.isDestroyedUnit(attacker)) {
+      return { success: false, error: 'Attacker has been destroyed' };
+    }
+    if (this.phaseManager.isImmobile(attacker)) {
+      return {
+        success: false,
+        error: attacker.shutdown
+          ? 'A shut-down Mech cannot fire'
+          : 'A MechWarrior who is unconscious cannot fire'
+      };
+    }
 
     // Hidden units (p82) cannot be targeted until revealed.
     if (!canSee(playerId, target.id, state)) {
@@ -479,19 +686,25 @@ export class GameEngine {
       multipleTargetModifier = arc === ARC.FORWARD ? 1 : 2;
     }
 
-    const result = this.attackResolver.resolveWeaponAttack(
-      attacker, weaponDef, { location: action.weaponLocation }, target, state, this.diceRoller,
-      {
-        indirect: Boolean(action.indirect),
-        spotter: indirect ? indirect.spotter : null,
-        spotterAttacked: Boolean(indirect && indirect.spotter.attackedThisPhase),
-        aimedLocation: action.aimedLocation,
-        multipleTargetModifier,
-        buildingModifier: urban.modifier
-      }
-    );
+    let result = null;
 
     this.stateManager.applyStateChange(() => {
+      // The resolver applies the through-armour critical (p32/p139) while it
+      // resolves the hit, so it runs inside the state change: the critical
+      // belongs to this action, not to the snapshot taken before it (history
+      // and the state diff must both see it).
+      result = this.attackResolver.resolveWeaponAttack(
+        attacker, weaponDef, { location: action.weaponLocation }, target, state, this.diceRoller,
+        {
+          indirect: Boolean(action.indirect),
+          spotter: indirect ? indirect.spotter : null,
+          spotterAttacked: Boolean(indirect && indirect.spotter.attackedThisPhase),
+          aimedLocation: action.aimedLocation,
+          multipleTargetModifier,
+          buildingModifier: urban.modifier
+        }
+      );
+
       // Weapon heat, plus design quirks such as Poor Cooling Jacket (p88).
       attacker.heat += weaponDef.heat + quirkHeatModifier(attacker, weaponDef);
 
@@ -529,17 +742,16 @@ export class GameEngine {
           }
 
           // Urban cover (p72): a building absorbs up to CF/10 of each hit and
-          // takes that damage itself; the remainder reaches the target.
+          // takes that damage itself; the remainder reaches the target. The
+          // protection uses the CF at the start of the phase, and the hex's CF
+          // is only charged once the phase ends (see applyPendingBuildingDamage).
           if (targetHex && targetHex.building) {
             const reduction = damageReduction(targetHex);
             const absorbed = Math.min(hitLoc.damage, reduction);
             if (absorbed > 0) {
               hitLoc.damage -= absorbed;
               hitLoc.buildingAbsorbed = absorbed;
-              if (targetHex._cfAtPhaseStart === undefined) {
-                targetHex._cfAtPhaseStart = targetHex.building.currentCF;
-              }
-              targetHex.building.currentCF = Math.max(0, targetHex.building.currentCF - absorbed);
+              targetHex._pendingCFDamage = (targetHex._pendingCFDamage || 0) + absorbed;
               if (!(state._buildingCollapseQueue instanceof Set)) {
                 state._buildingCollapseQueue = new Set();
               }
@@ -551,15 +763,16 @@ export class GameEngine {
             }
           }
 
-          const damageResult = this.damageResolver.applyDamage(
-            target, hitLoc.location, hitLoc.damage, hitLoc.isRear, this.diceRoller
-          );
+          const damageResult = this._applyDamageTo(target, hitLoc.location, hitLoc.damage, hitLoc.isRear);
           hitLoc.damageResult = damageResult;
 
-          // p58: a head hit injures the MechWarrior, armour or no armour.
+          // p58: a head hit injures the MechWarrior, armour or no armour, and
+          // the damage forces an immediate Consciousness Roll.
           if (hitLoc.location === 'head' && typeof target.applyPilotDamage === 'function') {
+            const pilotHitsBefore = target.pilot ? (target.pilot.hits || 0) : 0;
             target.applyPilotDamage(1);
             hitLoc.pilotDamage = 1;
+            this.rollConsciousnessForNewPilotHits(target, pilotHitsBefore);
           }
         }
       }
@@ -629,6 +842,19 @@ export class GameEngine {
 
     if (!attacker || !target) return { success: false, error: 'Unit not found' };
 
+    // p52/p58: an immobile 'Mech cannot make physical attacks either.
+    if (this.phaseManager.isDestroyedUnit(attacker)) {
+      return { success: false, error: 'Attacker has been destroyed' };
+    }
+    if (this.phaseManager.isImmobile(attacker)) {
+      return {
+        success: false,
+        error: attacker.shutdown
+          ? 'A shut-down Mech cannot make a physical attack'
+          : 'A MechWarrior who is unconscious cannot make a physical attack'
+      };
+    }
+
     // Attacking across levels changes what is legal and which hit table
     // applies (Different Levels table, p140).
     const levelDifference = this._levelDifference(attacker, target, state);
@@ -668,13 +894,13 @@ export class GameEngine {
     this.stateManager.applyStateChange(() => {
       if (result.hit && result.hitLocations) {
         for (const hitLoc of result.hitLocations) {
-          this.damageResolver.applyDamage(target, hitLoc.location, hitLoc.damage, false, this.diceRoller);
+          hitLoc.damageResult = this._applyDamageTo(target, hitLoc.location, hitLoc.damage, false);
         }
       }
 
       if (result.type === 'dfa' && result.attackerDamage > 0) {
-        this.damageResolver.applyDamage(attacker, 'leftLeg', result.attackerDamage, false, this.diceRoller);
-        this.damageResolver.applyDamage(attacker, 'rightLeg', result.attackerDamage, false, this.diceRoller);
+        this._applyDamageTo(attacker, 'leftLeg', result.attackerDamage, false);
+        this._applyDamageTo(attacker, 'rightLeg', result.attackerDamage, false);
         if (result.attackerProne) {
           attacker.prone = true;
         }
@@ -818,30 +1044,6 @@ export class GameEngine {
   }
 
   /**
-   * Heat Phase fire damage: one roll per unit standing in a fire hex.
-   */
-  resolveFireDamage() {
-    const state = this.stateManager.getState();
-    if (!Array.isArray(state.fireHexes) || state.fireHexes.length === 0) return [];
-
-    const results = [];
-    for (const hexKey of state.fireHexes) {
-      for (const unit of Object.values(state.units)) {
-        if (unit.position.hexKey !== hexKey) continue;
-
-        const damage = fireDamageRoll(this.diceRoller);
-        const locRoll = this.diceRoller.roll2d6();
-        const loc = this.attackResolver.determineHitLocation(locRoll, 'front');
-        this.damageResolver.applyDamage(unit, loc.location, damage, loc.isRear ?? false, this.diceRoller);
-
-        results.push({ hexKey, unitId: unit.id, damage });
-        this.eventBus.emit('fireDamage', { hexKey, unitId: unit.id, damage });
-      }
-    }
-    return results;
-  }
-
-  /**
    * Book a Battlefield Support strike (p.75-79).  The acting player is the
    * owner by default and the type's BSP cost is spent from
    * `state.battlefieldSupport.points`; an insufficient pool or invalid
@@ -905,8 +1107,8 @@ export class GameEngine {
           if (!unit) continue;
           if (typeof unit.isDestroyed === 'function' && unit.isDestroyed()) continue;
 
-          hit.damageResult = this.damageResolver.applyDamage(
-            unit, hit.location, hit.damage, Boolean(hit.isRear), this.diceRoller
+          hit.damageResult = this._applyDamageTo(
+            unit, hit.location, hit.damage, Boolean(hit.isRear)
           );
 
           // Area-effect attacks reveal hidden 'Mechs in the blast (p82).
@@ -937,20 +1139,9 @@ export class GameEngine {
   }
 
   _handleEndPhase(playerId) {
-    // Building collapse from weapon damage resolves at the end of the Weapon
-    // Attack Phase (p73).
-    this._resolvePendingBuildingCollapses();
-
+    // End-of-phase work (banked building CF damage, per-phase snapshots) is
+    // applied by PhaseManager.nextPhase as it leaves the current phase (p72).
     const nextPhase = this.phaseManager.nextPhase();
-
-    // CF snapshots are per phase, so start the new one clean.
-    const state = this.stateManager.getState();
-    if (state.map && state.map.hexes) {
-      for (const [, hex] of state.map.hexes) {
-        delete hex._cfAtPhaseStart;
-      }
-    }
-
     return { success: true, nextPhase };
   }
 
@@ -994,7 +1185,7 @@ export class GameEngine {
       // Damage from moving into the hex is applied before collapse damage (p73).
       const roll = this.diceRoller.roll2d6();
       const loc = this.attackResolver.determineHitLocation(roll, 'front');
-      this.damageResolver.applyDamage(unit, loc.location, damage, loc.isRear ?? false, this.diceRoller);
+      this._applyDamageTo(unit, loc.location, damage, loc.isRear ?? false);
     }
 
     this.eventBus.emit('buildingEntered', {
@@ -1016,7 +1207,7 @@ export class GameEngine {
       const fallDamage = basementFallDamage(unit, depth);
       const locRoll = this.diceRoller.roll2d6();
       const loc = this.attackResolver.determineHitLocation(locRoll, 'front');
-      this.damageResolver.applyDamage(unit, loc.location, fallDamage, loc.isRear ?? false, this.diceRoller);
+      this._applyDamageTo(unit, loc.location, fallDamage, loc.isRear ?? false);
       unit.prone = true;
       unit.basementDepth = depth;
 
@@ -1050,7 +1241,7 @@ export class GameEngine {
       const damage = collapseDamage(cfAtPhaseStart, levelsAbove);
       const roll = this.diceRoller.roll2d6();
       const loc = this.attackResolver.determineHitLocation(roll, 'front');
-      this.damageResolver.applyDamage(occupant, loc.location, damage, loc.isRear ?? false, this.diceRoller);
+      this._applyDamageTo(occupant, loc.location, damage, loc.isRear ?? false);
       this.eventBus.emit('buildingCollapsed', { hexKey: hex.hexKey, unitId: occupant.id, damage });
     }
 

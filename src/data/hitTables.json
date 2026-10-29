@@ -1,4 +1,27 @@
 {
+  "_comment": [
+    "Source: BattleMech Manual (BMM) p139, 'Mech Hit Location Table.",
+    "p139 has exactly three columns, in this order: Left Side | Front/Rear | Right Side. It has no separate rear column.",
+    "p139 row-to-roll mapping (columns: Left Side | Front/Rear | Right Side):",
+    "  2 (critical - p139 footnote, p32) : Left Torso   | Center Torso | Right Torso",
+    "  3                                : Left Leg     | Right Arm    | Right Leg",
+    "  4                                : Left Arm     | Right Arm    | Right Arm",
+    "  5                                : Left Arm     | Right Leg    | Right Arm",
+    "  6                                : Left Leg     | Right Torso   | Right Leg",
+    "  7                                : Left Torso   | Center Torso | Right Torso",
+    "  8                                : Center Torso | Left Torso   | Center Torso",
+    "  9                                : Right Torso  | Left Leg     | Left Torso",
+    " 10                                : Right Arm    | Left Arm     | Left Arm",
+    " 11                                : Right Leg    | Left Arm     | Left Leg",
+    " 12                                : Head         | Head         | Head",
+    "'front' is the p139 Front/Rear column; 'left' and 'right' are the p139 Left Side and Right Side columns (see tests/rules/combat/HitTables.test.js).",
+    "'rear' is NOT a separate p139 column. Because the p139 middle column is labelled Front/Rear, rear attacks use the front locations; p44 (Transferring Damage) sends rear damage to the rear torso facing (for example, rear damage that hits a missing left leg transfers to the left rear torso). The rear table is therefore the front column with isRear:true on the three torso entries only: arms, legs and the head have no rear armour and must not carry isRear:true.",
+    "Physical attacks (p139/p140) use 1D6 tables keyed by attack-direction column: 'left' | 'front' | 'right'. A rear attack uses the Front/Rear column, so the resolver maps 'rear' to 'front'.",
+    "  punch = p140 'Mech Punch Location Table, biped (columns Left Side | Front/Rear | Right Side): 1 Left Torso|Left Arm|Right Torso; 2 Left Torso|Left Torso|Right Torso; 3 Center Torso|Center Torso|Center Torso; 4 Left Arm|Right Torso|Right Arm; 5 Left Arm|Right Arm|Right Arm; 6 Head|Head|Head.",
+    "  kick = p139 'Mech Kick Location Table, biped (columns Left Side | Front/Rear | Right Side): 1-3 Left Leg|Right Leg|Right Leg; 4-6 Left Leg|Left Leg|Right Leg.",
+    "The four-legged punch/kick columns (left/right front and rear legs) are not modelled: the unit model has no quad leg locations.",
+    "The resolver rolls 1D6 for punch, kick, charge and DFA locations (charge and DFA use the punch table), and keeps the 2D6 standard p139 table only for physical-weapon attacks that use the standard table."
+  ],
   "hitLocation": {
     "front": {
       "2": {
@@ -38,35 +61,35 @@
     },
     "left": {
       "2": {
-        "location": "centerTorso",
+        "location": "leftTorso",
         "critical": true
       },
       "3": {
-        "location": "rightArm"
-      },
-      "4": {
-        "location": "rightArm"
-      },
-      "5": {
-        "location": "rightLeg"
-      },
-      "6": {
-        "location": "rightTorso"
-      },
-      "7": {
-        "location": "centerTorso"
-      },
-      "8": {
-        "location": "leftTorso"
-      },
-      "9": {
         "location": "leftLeg"
       },
-      "10": {
+      "4": {
         "location": "leftArm"
       },
-      "11": {
+      "5": {
         "location": "leftArm"
+      },
+      "6": {
+        "location": "leftLeg"
+      },
+      "7": {
+        "location": "leftTorso"
+      },
+      "8": {
+        "location": "centerTorso"
+      },
+      "9": {
+        "location": "rightTorso"
+      },
+      "10": {
+        "location": "rightArm"
+      },
+      "11": {
+        "location": "rightLeg"
       },
       "12": {
         "location": "head"
@@ -74,35 +97,35 @@
     },
     "right": {
       "2": {
-        "location": "centerTorso",
+        "location": "rightTorso",
         "critical": true
       },
       "3": {
-        "location": "leftArm"
-      },
-      "4": {
-        "location": "leftArm"
-      },
-      "5": {
-        "location": "leftLeg"
-      },
-      "6": {
-        "location": "leftTorso"
-      },
-      "7": {
-        "location": "centerTorso"
-      },
-      "8": {
-        "location": "rightTorso"
-      },
-      "9": {
         "location": "rightLeg"
       },
-      "10": {
+      "4": {
         "location": "rightArm"
       },
-      "11": {
+      "5": {
         "location": "rightArm"
+      },
+      "6": {
+        "location": "rightLeg"
+      },
+      "7": {
+        "location": "rightTorso"
+      },
+      "8": {
+        "location": "centerTorso"
+      },
+      "9": {
+        "location": "leftTorso"
+      },
+      "10": {
+        "location": "leftArm"
+      },
+      "11": {
+        "location": "leftLeg"
       },
       "12": {
         "location": "head"
@@ -115,19 +138,16 @@
         "isRear": true
       },
       "3": {
-        "location": "leftArm",
-        "isRear": true
+        "location": "rightArm"
       },
       "4": {
-        "location": "leftTorso",
-        "isRear": true
+        "location": "rightArm"
       },
       "5": {
-        "location": "leftLeg",
-        "isRear": true
+        "location": "rightLeg"
       },
       "6": {
-        "location": "centerTorso",
+        "location": "rightTorso",
         "isRear": true
       },
       "7": {
@@ -135,93 +155,72 @@
         "isRear": true
       },
       "8": {
-        "location": "rightTorso",
+        "location": "leftTorso",
         "isRear": true
       },
       "9": {
-        "location": "rightLeg",
-        "isRear": true
+        "location": "leftLeg"
       },
       "10": {
-        "location": "rightArm",
-        "isRear": true
+        "location": "leftArm"
       },
       "11": {
-        "location": "rightArm",
-        "isRear": true
+        "location": "leftArm"
       },
       "12": {
         "location": "head"
       }
     },
     "punch": {
-      "2": {
-        "location": "head"
+      "left": {
+        "1": { "location": "leftTorso" },
+        "2": { "location": "leftTorso" },
+        "3": { "location": "centerTorso" },
+        "4": { "location": "leftArm" },
+        "5": { "location": "leftArm" },
+        "6": { "location": "head" }
       },
-      "3": {
-        "location": "rightArm"
+      "front": {
+        "1": { "location": "leftArm" },
+        "2": { "location": "leftTorso" },
+        "3": { "location": "centerTorso" },
+        "4": { "location": "rightTorso" },
+        "5": { "location": "rightArm" },
+        "6": { "location": "head" }
       },
-      "4": {
-        "location": "rightArm"
-      },
-      "5": {
-        "location": "rightTorso"
-      },
-      "6": {
-        "location": "rightTorso"
-      },
-      "7": {
-        "location": "centerTorso"
-      },
-      "8": {
-        "location": "leftTorso"
-      },
-      "9": {
-        "location": "leftTorso"
-      },
-      "10": {
-        "location": "leftArm"
-      },
-      "11": {
-        "location": "leftArm"
-      },
-      "12": {
-        "location": "head"
+      "right": {
+        "1": { "location": "rightTorso" },
+        "2": { "location": "rightTorso" },
+        "3": { "location": "centerTorso" },
+        "4": { "location": "rightArm" },
+        "5": { "location": "rightArm" },
+        "6": { "location": "head" }
       }
     },
     "kick": {
-      "2": {
-        "location": "leftLeg"
+      "left": {
+        "1": { "location": "leftLeg" },
+        "2": { "location": "leftLeg" },
+        "3": { "location": "leftLeg" },
+        "4": { "location": "leftLeg" },
+        "5": { "location": "leftLeg" },
+        "6": { "location": "leftLeg" }
       },
-      "3": {
-        "location": "rightLeg"
+      "front": {
+        "1": { "location": "rightLeg" },
+        "2": { "location": "rightLeg" },
+        "3": { "location": "rightLeg" },
+        "4": { "location": "leftLeg" },
+        "5": { "location": "leftLeg" },
+        "6": { "location": "leftLeg" }
       },
-      "4": {
-        "location": "leftLeg"
-      },
-      "5": {
-        "location": "rightLeg"
-      },
-      "6": {
-        "location": "leftLeg"
-      },
-      "7": {
-        "location": "rightLeg"
-      },
-      "8": {
-        "location": "leftLeg"
-      },
-      "9": {
-        "location": "rightLeg"
-      },
-      "10": {
-        "location": "leftLeg"
-      },
-      "11": {
-        "location": "rightLeg"
-      },
-      "12": {
-        "location": "leftLeg"
+      "right": {
+        "1": { "location": "rightLeg" },
+        "2": { "location": "rightLeg" },
+        "3": { "location": "rightLeg" },
+        "4": { "location": "rightLeg" },
+        "5": { "location": "rightLeg" },
+        "6": { "location": "rightLeg" }
       }
     }
   },

@@ -4,6 +4,19 @@ import { parseMTF } from "../../src/import/mtfParser.js";
 import { convertToMechDef, parseAndConvert } from "../../src/import/unitConverter.js";
 import mechsData from "../../src/data/mechs.json" with { type: "json" };
 
+/**
+ * Count the critical-slot lines of one MTF location section (between its header
+ * and the next blank line). Returns -1 when the section is missing.
+ */
+function sectionLineCount(mtf, header) {
+  const lines = mtf.split("\n");
+  const start = lines.indexOf(header);
+  if (start < 0) return -1;
+
+  let count = 0;
+  for (let i = start + 1; i < lines.length && lines[i] !== ""; i++) count++;
+  return count;
+}
 
 // Full Atlas MTF fixture for round-trip tests
 const fullAtlasMTF = "Version:1.0\n" +
@@ -391,7 +404,7 @@ describe("mechDefToMTF", () => {
       expect(mechDefToMTF(getMechDef("atlas-as7d"))).toContain("-Empty-");
     });
 
-    it("pads critical slots to expected count for each location", () => {
+    it("pads critical slots to the p6 count for each location", () => {
       const d = {
         id: "test", name: "Test TST-1", tonnage: 20,
         movement: { walk: 8, run: 12, jump: 0 },
@@ -407,14 +420,17 @@ describe("mechDefToMTF", () => {
         gyro: { type: "standard", hits: 0 }
       };
       const mtf = mechDefToMTF(d);
-      const lines = mtf.split("\n");
-      const headIdx = lines.findIndex(l => l === "Head:");
-      let emptyCount = 0;
-      for (let i = headIdx + 1; i < lines.length; i++) {
-        if (lines[i] === "") break;
-        if (lines[i] === "-Empty-") emptyCount++;
-      }
-      expect(emptyCount).toBe(5);
+
+      // p6 SLOT: "six in the head and legs, twelve in other locations" - arms
+      // are other locations, so they get 12 lines, not 10.
+      expect(sectionLineCount(mtf, "Head:"), "head").toBe(6);
+      expect(sectionLineCount(mtf, "Center Torso:"), "center torso").toBe(12);
+      expect(sectionLineCount(mtf, "Left Torso:"), "left torso").toBe(12);
+      expect(sectionLineCount(mtf, "Right Torso:"), "right torso").toBe(12);
+      expect(sectionLineCount(mtf, "Left Arm:"), "left arm").toBe(12);
+      expect(sectionLineCount(mtf, "Right Arm:"), "right arm").toBe(12);
+      expect(sectionLineCount(mtf, "Left Leg:"), "left leg").toBe(6);
+      expect(sectionLineCount(mtf, "Right Leg:"), "right leg").toBe(6);
     });
   });
 
@@ -483,6 +499,23 @@ describe("mechDefToMTF", () => {
       expect(reimported.engine.type).toBe("standard");
       expect(reimported.engine.rating).toBe(300);
       expect(reimported.gyro.type).toBe("standard");
+    });
+
+    it("round-trips 12 arm slots and 6 leg slots for the Atlas", () => {
+      const mtf = mechDefToMTF(getMechDef("atlas-as7d"));
+
+      // p6 SLOT: head and legs have six lines; every other location (incl. the
+      // arms) has twelve.
+      expect(sectionLineCount(mtf, "Left Arm:"), "left arm").toBe(12);
+      expect(sectionLineCount(mtf, "Right Arm:"), "right arm").toBe(12);
+      expect(sectionLineCount(mtf, "Left Leg:"), "left leg").toBe(6);
+      expect(sectionLineCount(mtf, "Right Leg:"), "right leg").toBe(6);
+
+      const parsed = parseMTF(mtf);
+      expect(parsed.criticalSlots.leftArm).toHaveLength(12);
+      expect(parsed.criticalSlots.rightArm).toHaveLength(12);
+      expect(parsed.criticalSlots.leftLeg).toHaveLength(6);
+      expect(parsed.criticalSlots.rightLeg).toHaveLength(6);
     });
 
     it("produces parseable MTF for all mechs in mechs.json", () => {

@@ -1871,3 +1871,108 @@ No finding now attributes a rule quote to an absent page. Where the source text 
 ---
 
 *End of report. Finding text is reproduced from the six read-only audits; no new finding or citation was added during consolidation. Where an audit's own tally and its finding list disagreed (t5), the counted list was used and the discrepancy is recorded in §1. Review rounds 1–2 corrected severities, withdrawals, page citations and coverage; review round 3 added the definitive KB page list and the mechanical citation audit in Appendix A. The corrected active totals remain 8 blockers / 39 high / 72 medium / 43 low = 162.*
+
+---
+
+## Remediation log (phases B-C)
+
+**Compiled by:** fix-data (t15), 2026-10-29, from the verifier's read-only draft (t9) plus the review-round-1 repairs (t12-t14) and this bookkeeping pass (t15).
+**Method:** full suite plus independent Node ESM probes of the shipped rules code against the KB page text. A fix is counted only where the probe reproduces the quoted page value; passing tests alone were not accepted as evidence.
+**KB pages used:** p6, p10, p12, p20, p32, p42, p44, p46, p48, p50, p52, p54/p142, p56/p57, p58, p72, p74, p96, p116, p118, p121, p136, p139/p140, p143.
+
+### Verification runs
+
+| Command | Exit | Result |
+|---|---:|---|
+| `npx vitest run --configLoader runner --pool=threads` (shim form) | 0 | 57 files / 1957 tests passed, 1.45 s (state after the review-round-1 repairs) |
+| `... tests/integration/heatScale.test.js tests/rules/heat/HeatManager.test.js tests/data/mechs.test.js` | 0 | 337 tests passed (R-07 heat-scale data change) |
+| coverage run | - | not re-run after the repairs; the only artifact in the tree is the pre-verification `coverage/clover.xml`: statements/lines 9244/9869 = 93.66 %, branches 2364/2781 = 85.01 %, functions 454/496 = 91.53 %. That is above the configured 90/83/86/90 floors but stale. |
+
+### Findings addressed (verified by probe, not by the test suite)
+
+| Finding | KB | Evidence |
+|---|---|---|
+| C-01 | p139 | `hitTables.left/front/right` match p139 row-for-row (33/33 roll x column pairs); roll 2 carries the through-armour critical flag in all three columns; `determineHitLocation()` returns the same rows. |
+| C-02 | p139, p44, p42 | `rear` = the front locations with `isRear: true` only on CT/LT/RT; a rear hit on a left torso consumes rear armour, and a rear hit on an arm consumes front armour (no armour bypass). |
+| C-03 | p32, p96 | `buildDamageGroupings`: LRM-20 with 12 hits = `[5,5,2]`; LRM-10 with 7 = `[5,2]`; SRM-6 = six 2-point groups; MRM-20 = `[5,4]`; ATM-9 = `[5,1]`; AC/20 = `[20]`. One hit-location roll per grouping. |
+| C-05 | p44 | `getTransferLocation`: side torso to centre torso, head/CT nowhere; the old side-torso-to-arm map is gone. |
+| C-06 | p46/p143 | Critical bands: 2-7 none, 8-9 one, 10-11 two, 12 blown-off head or limb (torso: three criticals). |
+| C-07 | p46 | Block and slot selection: an all-inapplicable block is skipped, inapplicable slots re-roll both dice, and further crits on a multi-slot component soak. See R-05 for the double-heat-sink case. |
+| C-08 | p32/p139 | A hit-location roll of 2 makes the through-armour critical roll at resolution (probe: AC/20, TAC roll 8, normal 20 damage still to armour); `_applyDamageTo` does not re-roll it. |
+| C-14, C-15 | p118, p44, p102 | CASE: internal structure only, excess ignored, arm blown off without stripping its armour; without CASE the explosion transfers inward past armour; pilot takes 2. |
+| C-16 | p42 | A hit that destroys the location passes `explosiveOnly`; non-explosive crits are returned as discarded. |
+| PHY-01 | p139/p140 | Punch/kick are 1D6 direction-column tables; the resolver uses `roll1d6` (2D6 only for physical weapons on the standard p139 table and for to-hit). |
+| PHY-02 | p140 | Kick rejected one level up, punch rejected one level down; forced tables are the manual's way round (punch at +1 uses the Kick table, kick at -1 uses the Punch table). |
+| M-01 | p136/p128 | Depth 1 from Level 0 = 3 MP; Depth 2 = 6 MP; Depth2 to Depth2 = 4 MP; Depth 3 is priced on the Depth 2+ row. |
+| M-02 | p136 | Level change up or down: +1 MP per level; 3+ levels is illegal in both directions. |
+| M-03 | p20 | Pavement = base 1 MP, preserving level-change, ice/mud/deep-snow and weather costs. |
+| M-07 | p44 | One leg destroyed gives walking 1 / running 0; the jump rating is untouched. |
+| M-08 | p48 | One hip gives walk 2 / run 3; two hips give 0/0; run is always `ceil(1.5 x walk)`. |
+| M-09 | p116 | MASC active leaves walk unchanged and gives run = 2 x walk. Activation is still dead (M-19). |
+| M-20 | p54/p142 | Damaged gyro/hip are standing modifiers, not extra walking triggers; the run/jump causes were added; a destroyed leg gives +5 and replaces that leg's actuator modifiers. |
+| M-21 | p52 | Shutdown auto-fails other PSRs (999) but the involuntary-shutdown PSR rolls at piloting +3. |
+| M-22 | p58/p143/p74 | Fall: prone set, Facing After Fall from 1D6, warrior's PSR before damage with the causing modifiers, pilot damage only on failure; damage is `ceil(tonnage/10) x (levels + 1)` in 5-point groups. The same-level levels bug is fixed by R-01; rear-facing armour by R-02. |
+| BLD-01 | p54/p142/p143 | `terrain.json` hardened PSR = 5, `entryPSRModifier('hardened')` = 5, Buildings tests and `RULES_ROADMAP.md` updated. |
+| BLD-03 | p72 | Phase-start CF snapshot: snapshot 38 with live CF 19 gives reduction 4 (not 2); CF damage is banked and charged at phase end; the urban test reproduces the manual's five-hit 38 to 19 example. |
+| H-04 | p58/p12 | Consciousness rolls happen when damage lands; the End Phase is recovery-only. |
+| H-05 | p44/p58 | Cockpit critical kills the pilot, head destruction kills the pilot, the sixth hit goes through one kill path, and the unit is removed on the next phase transition. |
+| H-06 (action guard) | p52/p58 | Shutdown/unconscious units are rejected by `validateAction`, `_handleMove` and `_handleFire`; the slot is consumed with `pass`. Immobile 0 MP remains missing (see below). |
+| H-07 | p52 | Restart in the Heat Phase: heat below 14 auto-restarts, 14-29 rolls 2D6 against the current Avoid target, 30+ is blocked as overflow. Since R-03 a 'Mech that shuts down in this phase waits for a later Heat Phase. |
+| H-10 | p10/p12 | The physical attack queue starts with the initiative loser. |
+| H-14 | p10/p131 | Destroyed units are filtered from `buildUnitQueue` and removed at the phase transition. |
+| H-15 | p52/p54 | The involuntary-shutdown PSR is piloting +3 (not auto-failed); a failed roll goes through `applyFall`. |
+| F-01 / H-03 (fire half) | p50 | Fire heat is live: +5 standing, +2 per burning hex moved through; outside heat (fire + plasma) is capped at 15 and applied before dissipation; armour is unchanged; `fireDamageRoll` and `GameEngine.resolveFireDamage` are gone. |
+| D-01 | p121 | `small_laser` added with the p121 stats (heat 1, damage 3, 0/1/2/3, 0.5 t, 1 crit); every roster weapon id resolves; data-integrity test added. |
+| D-02 | p6/p96 | The Atlas SRM-6 occupies leftTorso slots 8-9; the reverse-integrity test asserts every mounted weapon has a critical slot. |
+| D-07 | p6 | Atlas export lines: head 6, CT/LT/RT/LA/RA 12, legs 6 (arms were 10). |
+
+### Review-round-1 repairs (t12-t14)
+
+| Repair | KB | Fix and probe evidence |
+|---|---|---|
+| R-01 | p57/p143 | A same-level fall was passed to `resolveFall` as levelsFallen 1, doubling every flat fall. `GameEngine._handleMove` now starts at 0 and uses only the real start-to-end drop. Probes: 65 t flat fall 7 damage `[5,2]` (was 14); 100 t flat fall 10 `[5,5]` (the pinned test was corrected from 20); 100 t one-level drop 20 `[5,5,5,5]`. Fixed by t12. |
+| R-02 | p56/p57 | The Facing-After-Fall "Rear" result applied damage with `isRear=false`. `GameEngine.applyFall` now forwards the hit-location entry's `isRear`. Probe: facing roll 4 gives the rear column; rear centre torso 14 to 4, front centre torso 47 unchanged. Fixed by t12. |
+| R-03 | p52 | A 'Mech that shut down during a Heat Phase could restart in the same phase. `_enterHeatPhase` now passes the pre-phase `wasShutdown` map and `_resolveRestartAttempts` skips 'Mechs that were not already shut down. Probe: 0 `unitRestarted` events while shutdown stays true even though the roll would beat the target; the next Heat Phase restarts (roll 12 vs 4+). Fixed by t12. |
+| R-04 | p46 | Sensor slots were merged into one soakable component. Each sensor slot is now its own critical target, per the p46 engine/gyro/sensors exception. Fixed by t13. |
+| R-05 | p46 | A 3-slot double heat sink scored one destroyed sink per critical. The first critical now disables the sink and later slots soak the hit. Fixed by t13. |
+| R-06 | p44 | Both legs destroyed gave 1 walking MP and was treated as a destruction. `maxMP` now returns 0 walk/run/jump and marks nothing destroyed (t14); `Unit.isDestroyed()` no longer applies a both-legs clause, and the board-survival / 0 MP regression test is in place (t17). Fixed by t14 and t17. |
+| R-07 | p50/p52 | `src/data/heatScale.json` cited the deleted `RULES_AUDIT_REFERENCE.md`; its `source` now reads "BattleMech Manual p50 heat scale rows; effects and avoid targets per p52". Fixed by t15. |
+| R-08 | - | This section is the remediation log required by review round 1. Fixed by t15. |
+
+### Partially fixed or not addressed
+
+| Finding | Status | Evidence |
+|---|---|---|
+| H-01 (blocker) | **not addressed - Phase A (dead wiring), out of scope** | Walking one hex leaves `unit.heat = 0`; `HeatManager.calculateHeatGeneration` still has no production caller. p50 walking/running/jumping heat is still absent in play. |
+| C-04 (high) | not addressed | `unit._damageThisPhase` still has no writer anywhere in `src/`; the 20+ damage PSR cannot fire. |
+| M-19 / M-09 activation (high) | not addressed | `activateMASC`/`rollMASC` still have no caller; a MASC failure still destroys one actuator in the first leg found (p116: one critical hit to each surviving leg); `deactivateMASC` still resets the turn counter. |
+| M-31 (medium) | not addressed | Swamp is still 3 MP; p136 prices swamp as a +1 terrain modification (2 MP over clear). |
+| M-10 / M-11 (high) | not addressed | Jump movement is still neighbour BFS: pays facing per hop, blocked by occupied hexes, no height check, start hex at 0 MP. |
+| H-18 (medium) | not addressed | General unconscious-PSR auto-fail is missing; a probe with `pilot.conscious=false` still returns a normal target, not 999. Consciousness-before-PSR ordering exists only in the heat/shutdown path. |
+| H-06 remainder (high) | partial | Immobile units are blocked from acting, but 0 MP for immobile 'Mechs is not implemented (shutdown walk/run = 3/5, unconscious = 3/5). |
+| H-02, H-08, H-09 (high/medium) | not addressed | Engine-critical heat still lives only in the dead generator; a heat-induced ammo explosion still only zeroes the bin and adds 2 pilot damage (no shots x damage explosion); water cooling is still +1 per leg sink (no single/double distinction, no 6-point cap). |
+| H-11, H-12, H-19 (medium/low) | not addressed | `initiativeWinnerGoesFirst` house rule still exists (default false); the queue is still fixed 1:1 for unequal forces; `heatScale.json` still has the heat-29 row. |
+| C-09 (high) | not addressed | Fire still uses a caller-supplied weapon; no mounted/destroyed-weapon, one-attack-per-weapon-per-turn, or ammo-bin validation. |
+| C-17 (medium) | partial | The cockpit critical now kills the pilot; the engine 3rd hit is still only an effect string (`unit.destroyed` not set) and a destroyed gyro auto-fails PSRs but does not set `unit.prone`. |
+| M-25 / M-23 / M-24 (medium) | partial (dead code remains) | `PSRCalculator` still contains the fabricated "Large Level Drop", "Rapid Turn (Running)" and "Jumped Into Woods" triggers and woods-as-jungle modifiers (+1/+2). `GameEngine._move` hardcodes their flags false, so they are unreachable; sand is still absent and depth-0 water still pushes an "Entered Water: 0" trigger when called directly. |
+| BLD-02 (high) | not addressed | `buildingCombat` still counts building hexes only, never levels; a roof occupant still counts as "inside". |
+| D-05 (medium) | not addressed | Eight roster 'Mechs have more than one crit slot for a single ammo entry (e.g. Atlas `lrm20_ammo` x2 slots with `shots: 6`); an explosion zeroes the shared bin for all slots. |
+| D-06 (high per t6 tally) | not addressed | The Atlas export writes `Heat Sinks:10 Single` from `count:20`; reimport gives 10, i.e. dissipation is halved (probe). |
+| Phase A dead wiring | **not addressed, out of scope by design** | `HeatManager.calculateHeatGeneration`, `activateMASC`, `rollMASC` and `skiddingRules` still have no production caller. |
+| D-08...D-21, C-10...C-13, C-18...C-27, PHY-03+, BAS/**, S-**, W-**, Q-**, hidden-'Mech items | outside this run | Not touched by phases B-C; still open per the sweep sections above. |
+
+### Regression spot-checks (nothing found broken)
+
+- Full suite green for the other rules areas: urban 15 tests, minefields 13 + 15, quirks 14 + 42, hidden units 12 + 7, sync/replay/wire/serialization/determinism 8/2/3/8/7.
+- Source-diff review: only rule modules, their data and their tests changed. `Quirks.js`, `WeatherRules.js`, `visibility.js`, `StateManager.js` and `HexMath.js` are untouched; no test outside the rewrite list was altered to hide a behaviour change.
+- Urban: tests were strengthened (the new p72 five-hit example asserts start-of-phase CF 38 to 19 at phase end), not weakened.
+- Minefields: the 2D6 to 1D6 Kick-table change follows from PHY-01; the hit-location choice remains explicitly labelled an unverified p79 assumption (no p79 body in the KB), and the tests assert all six 1D6 rows.
+- Export/import: 12 arm slots round-trip; the pre-existing heat-sink header defect (D-06) is not introduced by this work but is still present.
+- Wire/sync/replay: no non-transferable values were added to new payloads (suite green); `unitRemoved` is emitted at removal instead of `unitDestroyed` for a pilot-only death - a semantic caveat, not a projection failure.
+
+### Residual risks
+
+1. Coverage was not re-measured after the repairs; the 93.66 % / 85.01 % / 91.53 % figures are the pre-verification artifact.
+2. The green suite includes tests rewritten in phase D; every audited value was re-derived from the KB text, but the dead-but-present PSR triggers (M-23/M-24/M-25) remain a gap a future test could mask.
+3. H-01 (movement heat) is a top-tier blocker still absent from play and is the main rules-visible gap left by this run.
+4. Jump-fall damage levels: `GameEngine._handleMove` charges the start-to-end level drop for an ordinary missed-PSR fall, including jumps. p56 reads that falls are 0-level unless the 'Mech is displaced downwards 2+ levels and explicitly includes 'Mechs that fall due to jumping, so a 35 t Jenner failing its landing PSR after jumping Level 2 to Level 0 should take 4 damage (0 levels), while the code gives 12 (2 levels). The one-level-drop test added in this run rests on p57, whose body is absent from the KB, so this needs a manual check before either value is treated as settled. Logged by review round 2, not fixed.

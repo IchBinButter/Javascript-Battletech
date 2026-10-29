@@ -1,5 +1,5 @@
 {
-  "source": "BattleMech Manual record sheet heat scale (see RULES_AUDIT_REFERENCE.md section 7)",
+  "source": "BattleMech Manual p50 heat scale rows; effects and avoid targets per p52",
   "notes": "Steps are cumulative: a field applies from its heat value upward until a later step overrides it. Shutdown and ammo targets are AVOID targets: roll 2d6, meet or beat the target to avoid the effect.",
   "steps": [
     { "heat": 5, "movementPenalty": 1 },

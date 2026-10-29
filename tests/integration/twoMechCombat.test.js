@@ -13,6 +13,21 @@ import {
 const PUNCH_TABLE = hitTables.hitLocation.punch;
 const KICK_TABLE = hitTables.hitLocation.kick;
 
+/**
+ * Dice that hand out fixed sequences: 2D6 results from twoD6, 1D6 results (the
+ * critical-hit block and slot rolls) from oneD6. Values repeat when a list runs
+ * out so a test can leave the tail of a sequence unspecified.
+ */
+function makeQueuedRoller({ twoD6 = [7], oneD6 = [1] } = {}) {
+  let i2 = 0;
+  let i1 = 0;
+  return {
+    roll2d6() { return twoD6[Math.min(i2++, twoD6.length - 1)]; },
+    roll1d6() { return oneD6[Math.min(i1++, oneD6.length - 1)]; },
+    next() { return 0.5; }
+  };
+}
+
 describe('Integration: Two Mechs Attacking Each Other', () => {
   function setupEngagement(atlasHex = '5,7', jennerHex = '7,7') {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
@@ -79,23 +94,25 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       expect(weaponQueue[1].unitId).toBe('jenner-1');
     });
 
-    it('winner always fires first in physical attack phase regardless of choice', () => {
+    it('physical attack phase repeats the weapon attack phase order (p12)', () => {
       const { engine } = setupEngagement();
 
       engine.diceRoller = makeSequencedDiceRoller([5, 8]);
       engine.phaseManager.enterPhase('initiative');
       expect(engine.stateManager.getState().initiativeWinner).toBe(1); // P1 wins
 
-      engine.phaseManager.chooseInitiative(false); // loser goes first in weapon
+      engine.phaseManager.chooseInitiative(false); // loser declares first
       engine.processAction(0, { type: 'endPhase' }); // init -> movement
       engine.processAction(0, { type: 'endPhase' }); // movement -> weapon
       engine.processAction(0, { type: 'endPhase' }); // weapon -> physical
 
+      // p12: "Players repeat the steps given for the Weapon Attack Phase, except
+      // for torso twisting" - the initiative loser declares first again.
       const physQueue = engine.phaseManager.phaseUnitQueue;
-      expect(physQueue[0].playerId).toBe(1); // winner always first in phys
-      expect(physQueue[0].unitId).toBe('jenner-1');
-      expect(physQueue[1].playerId).toBe(0);
-      expect(physQueue[1].unitId).toBe('atlas-0');
+      expect(physQueue[0].playerId).toBe(0);
+      expect(physQueue[0].unitId).toBe('atlas-0');
+      expect(physQueue[1].playerId).toBe(1);
+      expect(physQueue[1].unitId).toBe('jenner-1');
     });
 
     it('queue alternation: both units fire in correct order', () => {
@@ -394,12 +411,12 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
   // =========================================================================
 
   describe('physical attacks', () => {
-    it('punch uses punch hit table (head on roll 2 and 12, no legs)', () => {
+    it('punch uses the p139 1D6 punch table (head on a 6)', () => {
       const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
 
-      const sequencer = makeSequencedDiceRoller([8, 2]); // hit on roll 8, loc roll 2
-      engine.diceRoller = sequencer;
+      // Hit on the 2D6 attack roll, then a 1D6 location roll of 6 = head.
+      engine.diceRoller = makeQueuedRoller({ twoD6: [8], oneD6: [6] });
 
       const result = engine.processAction(0, {
         type: 'physicalAttack',
@@ -416,19 +433,20 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       expect(result.hitLocations[0].location).toBe('head');
     });
 
-    it('punch cannot hit legs (verify punch table has no leg entries)', () => {
-      for (let roll = 2; roll <= 12; roll++) {
-        const loc = PUNCH_TABLE[roll.toString()].location;
-        expect(['leftLeg', 'rightLeg']).not.toContain(loc);
+    it('punch cannot hit legs (p139 Punch Location Table)', () => {
+      for (const column of ['left', 'front', 'right']) {
+        for (let roll = 1; roll <= 6; roll++) {
+          const loc = PUNCH_TABLE[column][roll.toString()].location;
+          expect(['leftLeg', 'rightLeg']).not.toContain(loc);
+        }
       }
     });
 
-    it('kick uses kick table (legs only)', () => {
+    it('kick uses the p139 1D6 kick table (legs only)', () => {
       const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
 
-      const sequencer = makeSequencedDiceRoller([8, 3]); // hit on roll 8, loc roll 3
-      engine.diceRoller = sequencer;
+      engine.diceRoller = makeQueuedRoller({ twoD6: [8], oneD6: [3] });
 
       const result = engine.processAction(0, {
         type: 'physicalAttack',
@@ -447,22 +465,16 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
     });
 
     it('kick table only contains leg locations', () => {
-      for (let roll = 2; roll <= 12; roll++) {
-        const loc = KICK_TABLE[roll.toString()].location;
-        expect(['leftLeg', 'rightLeg']).toContain(loc);
+      for (const column of ['left', 'front', 'right']) {
+        for (let roll = 1; roll <= 6; roll++) {
+          const loc = KICK_TABLE[column][roll.toString()].location;
+          expect(['leftLeg', 'rightLeg']).toContain(loc);
+        }
       }
     });
 
-    it('kick roll 2 lands on leftLeg', () => {
-      expect(KICK_TABLE['2'].location).toBe('leftLeg');
-    });
-
-    it('kick roll 7 lands on rightLeg', () => {
-      expect(KICK_TABLE['7'].location).toBe('rightLeg');
-    });
-
-    it('punch roll 7 lands on centerTorso', () => {
-      expect(PUNCH_TABLE['7'].location).toBe('centerTorso');
+    it('punch front column roll 3 is the centre torso (p139)', () => {
+      expect(PUNCH_TABLE.front['3'].location).toBe('centerTorso');
     });
 
     it('punch is rejected when both arms are destroyed', () => {
@@ -484,7 +496,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       expect(result.reason).toContain('destroyed');
     });
 
-    it('kick is rejected when both legs are destroyed', () => {
+    it('a Mech with both legs destroyed cannot kick (p44)', () => {
       const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
       engine.diceRoller = makeDiceRoller(8);
@@ -500,7 +512,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.reason).toContain('destroyed');
+      expect(result.error || result.reason).toContain('destroyed');
     });
 
     it('missed kick requires PSR', () => {
@@ -854,12 +866,116 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       expect(jenner.isDestroyed()).toBe(true);
     });
 
+    it('resolves an LRM-20 salvo in 5-point Damage Value groupings (p32/p96)', () => {
+      const { engine, atlas, jenner } = setupEngagement();
+      setupWeaponPhase(engine, 0);
+      // Attack roll 12 (hit), cluster roll 7 = 12 missiles, then three location
+      // rolls. The atlas is in the Jenner's front arc, so 7 is the center torso.
+      engine.diceRoller = makeQueuedRoller({ twoD6: [12, 7, 7, 7, 7] });
+
+      const result = engine.processAction(0, {
+        type: 'fire',
+        attackerId: 'atlas-0',
+        targetId: 'jenner-1',
+        weapon: createWeaponDef('lrm20'),
+        weaponLocation: 'leftTorso'
+      });
+
+      expect(result.hit).toBe(true);
+      expect(result.clusterHits).toBe(12);
+      // 12 points of LRM damage is three groupings, not twelve 1-point hits.
+      expect(result.groupings).toEqual([5, 5, 2]);
+      expect(result.hitLocations).toHaveLength(3);
+      expect(result.hitLocations.map((h) => h.damage)).toEqual([5, 5, 2]);
+      expect(result.hitLocations.every((h) => h.location === 'centerTorso')).toBe(true);
+      // 10 center-torso armour then 2 internal.
+      expect(jenner.getArmor('centerTorso')).toBe(0);
+      expect(jenner.getInternal('centerTorso')).toBe(9);
+    });
+
+    it('a hit-location roll of 2 rolls a through-armour critical (p32/p139)', () => {
+      const { engine, atlas, jenner } = setupEngagement();
+      setupWeaponPhase(engine, 0);
+      // Attack roll 12 (hit), location 2 = center torso [critical], crit roll 9,
+      // block 1 then slot 1 = the first engine slot. The armour still holds.
+      engine.diceRoller = makeQueuedRoller({ twoD6: [12, 2, 9], oneD6: [1, 1] });
+
+      const result = engine.processAction(0, {
+        type: 'fire',
+        attackerId: 'atlas-0',
+        targetId: 'jenner-1',
+        weapon: createWeaponDef('med_laser'),
+        weaponLocation: 'rightArm'
+      });
+
+      expect(result.hit).toBe(true);
+      expect(result.hitLocations[0].location).toBe('centerTorso');
+      expect(result.hitLocations[0].critical).toBe(true);
+      expect(result.hitLocations[0].throughArmorCritical.roll).toBe(9);
+      expect(result.hitLocations[0].throughArmorCritical.criticals).toHaveLength(1);
+      // The critical is real: an engine hit on a torso whose armour is intact.
+      expect(jenner.engine.hits).toBe(1);
+      expect(jenner.getArmor('centerTorso')).toBe(5); // 10 - 5 normal damage
+    });
+
+    it('damage that destroys a side torso transfers to the centre torso (p44)', () => {
+      const { engine, atlas, jenner } = setupEngagement();
+      setupWeaponPhase(engine, 0);
+      engine.diceRoller = makeDiceRoller(6); // hit, then roll 6 = right torso
+
+      jenner.armor.rightTorso.front = 0;
+      jenner.internalStructure.rightTorso = 2;
+
+      const result = engine.processAction(0, {
+        type: 'fire',
+        attackerId: 'atlas-0',
+        targetId: 'jenner-1',
+        weapon: createWeaponDef('ac20'),
+        weaponLocation: 'rightTorso'
+      });
+
+      expect(result.hit).toBe(true);
+      expect(result.hitLocations[0].location).toBe('rightTorso');
+      expect(result.hitLocations[0].damageResult.transferLocation).toBe('centerTorso');
+      expect(jenner.isLocationDestroyed('rightTorso')).toBe(true);
+      // 20 damage - 2 internal = 18 into the centre torso: 10 armour + 8 internal.
+      expect(jenner.getArmor('centerTorso')).toBe(0);
+      expect(jenner.getInternal('centerTorso')).toBe(3);
+      // p44: the arm blows off with the torso but keeps its own armour.
+      expect(jenner.isLocationDestroyed('rightArm')).toBe(true);
+      expect(jenner.getArmor('rightArm')).toBe(6);
+    });
+
+    it('destroying the head kills the MechWarrior (p44)', () => {
+      const { engine, atlas, jenner } = setupEngagement();
+      setupWeaponPhase(engine, 0);
+      engine.diceRoller = makeDiceRoller(12); // hit, then roll 12 = head
+
+      jenner.armor.head.front = 0;
+      jenner.internalStructure.head = 2;
+
+      const result = engine.processAction(0, {
+        type: 'fire',
+        attackerId: 'atlas-0',
+        targetId: 'jenner-1',
+        weapon: createWeaponDef('med_laser'),
+        weaponLocation: 'rightArm'
+      });
+
+      expect(result.hit).toBe(true);
+      expect(result.hitLocations[0].location).toBe('head');
+      expect(jenner.isLocationDestroyed('head')).toBe(true);
+      expect(jenner.pilot.dead).toBe(true);
+      expect(jenner.pilot.conscious).toBe(false);
+    });
+
     it('physical attack also resolves damage', () => {
       const { engine, atlas, jenner } = setupEngagement('5,8', '5,7');
       setupPhysicalPhase(engine, 0);
 
       const initialArmor = jenner.getArmor('centerTorso');
-      engine.diceRoller = makeSequencedDiceRoller([8, 7]);
+      // Hit on the attack roll, then a 1D6 punch roll of 3 = centre torso.
+      engine.diceRoller = makeQueuedRoller({ twoD6: [8], oneD6: [3] });
 
       const result = engine.processAction(0, {
         type: 'physicalAttack',
@@ -869,9 +985,8 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       });
 
       expect(result.success).toBe(true);
-      if (result.hit) {
-        expect(jenner.getArmor('centerTorso')).toBeLessThan(initialArmor);
-      }
+      expect(result.hitLocations[0].location).toBe('centerTorso');
+      expect(jenner.getArmor('centerTorso')).toBeLessThan(initialArmor);
     });
   });
 

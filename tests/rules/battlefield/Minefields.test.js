@@ -4,7 +4,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import hitTables from '../../../src/data/hitTables.json' with { type: 'json' };
 import {
   MINEFIELD_DENSITIES,
   normalizeMinefieldType, createMinefield, placeMinefield, minefieldAt,
@@ -72,12 +71,15 @@ describe('Minefield Support table (p.78)', () => {
 
 describe('minefield attacks (hit locations assumed; KB has no p.79 body)', () => {
   // ASSUMPTION: the project KB does not contain the p.79 minefield body, so
-  // rolling each Damage Value grouping on the front column of the Kick
+  // rolling each Damage Value grouping on the front column of the p139 Kick
   // Location Table is an assumption encoded in Minefields.js; this test mirrors
   // that implementation choice, not a verified manual citation.
-  it('assumed: rolls 2D6 against the density target number and one Kick-table hit per grouping', () => {
+  //
+  // p139 Kick Location Table, Front/Rear column (1D6): 1-3 Right Leg,
+  // 4-6 Left Leg.
+  it('assumed: 2D6 against the density target number, then one 1D6 Kick-table hit per grouping', () => {
     const field = { type: 'light', strength: 2 };
-    const result = resolveMinefieldTrigger(field, queueRoller([9, 7, 8]));
+    const result = resolveMinefieldTrigger(field, queueRoller([9, 2, 5]));
 
     expect(result).toMatchObject({
       type: 'light',
@@ -90,12 +92,23 @@ describe('minefield attacks (hit locations assumed; KB has no p.79 body)', () =>
     });
     expect(result.hits).toHaveLength(2);
     expect(result.hits[0]).toMatchObject({
-      location: hitTables.hitLocation.kick['7'].location,
+      location: 'rightLeg',
       damage: 5,
-      roll: 7,
+      roll: 2,
       isRear: false
     });
-    expect(result.hits[1].location).toBe(hitTables.hitLocation.kick['8'].location);
+    expect(result.hits[1]).toMatchObject({ location: 'leftLeg', roll: 5 });
+  });
+
+  it('maps all six 1D6 location rolls onto the p139 front Kick column', () => {
+    // strength 6 = one hit per possible 1D6 result.
+    const result = resolveMinefieldTrigger({ type: 'heavy', strength: 6 }, queueRoller([7, 1, 2, 3, 4, 5, 6]));
+
+    expect(result.hits.map((hit) => hit.roll)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(result.hits.map((hit) => hit.location)).toEqual([
+      'rightLeg', 'rightLeg', 'rightLeg', 'leftLeg', 'leftLeg', 'leftLeg'
+    ]);
+    expect(result.strengthAfter).toBe(5);
   });
 
   it('leaves the field active and undamaged on a miss', () => {
@@ -144,7 +157,7 @@ describe('minefield placement and entry', () => {
 describe('minefields through the engine', () => {
   it('damages a Mech entering a mined hex and consumes one grouping', () => {
     const { engine, mech } = minedEngine({ fields: { '5,6': { type: 'light', strength: 2 } } });
-    engine.diceRoller = queueRoller([9, 7, 7]);
+    engine.diceRoller = queueRoller([9, 1, 3]);
 
     const events = [];
     engine.eventBus.on('minefieldTriggered', event => events.push(event));
@@ -173,6 +186,8 @@ describe('minefields through the engine', () => {
       strengthAfter: 1
     });
     expect(events[0].hits).toHaveLength(2);
+    // p139 Kick Location Table, Front/Rear column: 1-3 = Right Leg.
+    expect(events[0].hits.map(hit => hit.location)).toEqual(['rightLeg', 'rightLeg']);
     expect(events[0].hits[0].damageResult).toBeDefined();
     expect(JSON.parse(JSON.stringify(events[0]))).toEqual(events[0]);
   });
@@ -197,7 +212,7 @@ describe('minefields through the engine', () => {
 
   it('triggers a field that is walked through, not just the destination', () => {
     const { engine } = minedEngine({ fields: { '5,6': { type: 'light', strength: 1 } } });
-    engine.diceRoller = queueRoller([9, 7]);
+    engine.diceRoller = queueRoller([9, 1]);
 
     const result = engine.processAction(0, {
       type: 'move', unitId: 'mover', path: ['5,5', '5,6', '5,7'], movementType: 'walk'
@@ -215,7 +230,7 @@ describe('minefields through the engine', () => {
         '5,7': { type: 'light', strength: 1 }
       }
     });
-    engine.diceRoller = queueRoller([9, 7]);
+    engine.diceRoller = queueRoller([9, 1]);
 
     const result = engine.processAction(0, {
       type: 'move', unitId: 'mover', path: ['5,5', '5,6', '5,7'], movementType: 'jump'

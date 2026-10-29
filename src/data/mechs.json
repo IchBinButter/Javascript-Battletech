@@ -186,12 +186,12 @@
           },
           {
             "slot": 8,
-            "item": "heat_sink",
+            "item": "srm6",
             "status": "ok"
           },
           {
             "slot": 9,
-            "item": "heat_sink",
+            "item": "srm6",
             "status": "ok"
           },
           {
@@ -295,12 +295,12 @@
           },
           {
             "slot": 5,
-            "item": "empty",
+            "item": "heat_sink",
             "status": "ok"
           },
           {
             "slot": 6,
-            "item": "empty",
+            "item": "heat_sink",
             "status": "ok"
           },
           {
@@ -426,36 +426,6 @@
             "slot": 6,
             "item": "heat_sink",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -487,36 +457,6 @@
           {
             "slot": 6,
             "item": "heat_sink",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
             "status": "ok"
           }
         ]
@@ -1015,36 +955,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -1075,36 +985,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }
@@ -1587,36 +1467,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -1647,36 +1497,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }
@@ -2154,36 +1974,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -2214,36 +2004,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }
@@ -2748,36 +2508,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -2808,36 +2538,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }
@@ -3310,36 +3010,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -3370,36 +3040,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }
@@ -3887,36 +3527,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -3947,36 +3557,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }
@@ -4444,36 +4024,6 @@
             "slot": 6,
             "item": "heat_sink",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -4505,36 +4055,6 @@
           {
             "slot": 6,
             "item": "heat_sink",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
             "status": "ok"
           }
         ]
@@ -5021,36 +4541,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -5081,36 +4571,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }
@@ -5583,36 +5043,6 @@
             "slot": 6,
             "item": "heat_sink",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -5644,36 +5074,6 @@
           {
             "slot": 6,
             "item": "heat_sink",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
             "status": "ok"
           }
         ]
@@ -6180,36 +5580,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -6240,36 +5610,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }
@@ -6491,7 +5831,7 @@
           },
           {
             "slot": 6,
-            "item": "empty",
+            "item": "heat_sink",
             "status": "ok"
           },
           {
@@ -6741,36 +6081,6 @@
             "slot": 6,
             "item": "heat_sink",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "heat_sink",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -6802,36 +6112,6 @@
           {
             "slot": 6,
             "item": "heat_sink",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
             "status": "ok"
           }
         ]
@@ -7085,12 +6365,12 @@
           },
           {
             "slot": 11,
-            "item": "heat_sink",
+            "item": "srm6",
             "status": "ok"
           },
           {
             "slot": 12,
-            "item": "heat_sink",
+            "item": "srm6",
             "status": "ok"
           }
         ],
@@ -7179,12 +6459,12 @@
           },
           {
             "slot": 5,
-            "item": "empty",
+            "item": "heat_sink",
             "status": "ok"
           },
           {
             "slot": 6,
-            "item": "empty",
+            "item": "heat_sink",
             "status": "ok"
           },
           {
@@ -7310,36 +6590,6 @@
             "slot": 6,
             "item": "heat_sink",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -7371,36 +6621,6 @@
           {
             "slot": 6,
             "item": "heat_sink",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
             "status": "ok"
           }
         ]
@@ -7909,36 +7129,6 @@
             "slot": 6,
             "item": "empty",
             "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
-            "item": "empty",
-            "status": "ok"
           }
         ],
         "rightLeg": [
@@ -7969,36 +7159,6 @@
           },
           {
             "slot": 6,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 7,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 8,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 9,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 10,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 11,
-            "item": "empty",
-            "status": "ok"
-          },
-          {
-            "slot": 12,
             "item": "empty",
             "status": "ok"
           }

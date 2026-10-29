@@ -13,9 +13,9 @@
  *
  * Hit-location assumption (not verified against the project KB): the KB page
  * set does not contain the p.79 minefield body, so this module resolves each
- * Damage Value grouping on the front column of the project's Kick Location
- * Table.  That hit-location rule is an assumption encoded here, not a quoted
- * manual rule; re-check it if a p.79 extract is added to the KB.
+ * Damage Value grouping with a 1D6 roll on the front column of the p139 Kick
+ * Location Table.  That hit-location rule is an assumption encoded here, not a
+ * quoted manual rule; re-check it if a p.79 extract is added to the KB.
  *
  * Entering a mined hex triggers the field immediately, whether the moving
  * 'Mech is friendly or hostile; jumping only triggers a field in the hex the
@@ -132,9 +132,10 @@ export function minefieldHexesEntered(path, movementType = 'walk') {
 
 // ASSUMPTION (see the module header): the project KB has no p.79 minefield
 // body, so every Damage Value grouping is resolved on the front column of the
-// project's Kick Location Table rather than a verified manual citation.
+// p139 Kick Location Table (1D6) rather than a verified manual citation.
 function kickLocationTable() {
-  return hitTables.hitLocation.kick || hitTables.hitLocation.front;
+  const kick = hitTables.hitLocation.kick;
+  return (kick && kick.front) || null;
 }
 
 function minefieldStrength(field, density) {
@@ -147,10 +148,10 @@ function minefieldStrength(field, density) {
  * Roll a minefield attack (p.79) without touching the game state.
  *
  * One 2D6 roll is made against the density's Target Number.  On success the
- * field rolls one hit per remaining Damage Value grouping on the front column
- * of the Kick Location Table - an assumption, because the KB has no p.79
- * minefield body (see the module header); on a miss the field stays active and
- * unchanged.
+ * field rolls one 1D6 hit location per remaining Damage Value grouping on the
+ * front column of the p139 Kick Location Table - an assumption, because the KB
+ * has no p.79 minefield body (see the module header); on a miss the field
+ * stays active and unchanged.
  *
  * @returns {object} plain-data resolution with `hits` and before/after strength
  */
@@ -192,8 +193,8 @@ export function resolveMinefieldTrigger(field, diceRoller) {
 
   const table = kickLocationTable();
   for (let group = 0; group < strengthBefore; group++) {
-    const locationRoll = diceRoller.roll2d6();
-    const entry = table[String(locationRoll)] || table['7'];
+    const locationRoll = diceRoller.roll1d6();
+    const entry = (table && table[String(locationRoll)]) || { location: 'leftLeg' };
     resolution.hits.push({
       location: entry.location,
       isRear: false,

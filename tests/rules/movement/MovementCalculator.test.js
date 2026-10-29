@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { MovementCalculator } from '../../../src/rules/movement/MovementCalculator.js';
 import { Hex } from '../../../src/models/Hex.js';
 import { hexNeighbors, directionBetween } from '../../../src/hex/HexMath.js';
+import { createTestUnit } from '../../helpers/testUtils.js';
 
 // =============================================================================
 // Helpers
@@ -87,6 +88,9 @@ describe('MovementCalculator', () => {
   // TERRAIN COSTS (calculateMPCost)
   // ==========================================================
   describe('terrain costs (calculateMPCost)', () => {
+    // p136 Movement Costs Table: 1 MP to enter any hex, plus the terrain cost
+    // (Clear +0, Light Woods +1, Heavy Woods +2, Rough +1, Rubble +1,
+    // Paved/Bridge +0). p60 repeats the woods/clear values.
     it('clear costs 1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'clear', 0);
@@ -105,16 +109,42 @@ describe('MovementCalculator', () => {
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
     });
 
-    it('water_depth1 costs 2 MP', () => {
+    // p128 worked example: "entering Depth 1 water from a Level 0 hex costs
+    // 3 MP. It always costs 1 MP to enter any hex. In addition, it costs 1 MP
+    // for changing from Level 0 to Depth 1, and 1 MP to enter a Depth 1 water
+    // hex." Water depth is a level offset (p64: "treating depth as negative
+    // numbers"), so the entry cost is 1 (hex) + water + level change.
+    it('water_depth1 costs 3 MP from Level 0 (p128)', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'water_depth1', 0);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
     });
 
-    it('water_depth2 costs 3 MP', () => {
+    it('water_depth2 costs 6 MP from Level 0 (p128)', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'water_depth2', 0);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(6);
+    });
+
+    it('water_depth3 uses the Depth 2+ row: +3 water and a 2-level change', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'water_depth3', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(6);
+    });
+
+    it('moving between Depth 2 hexes costs 4 MP (p20 pond example)', () => {
+      // p20: "This would cost 4 MP (1 for the hex, and 3 MP for entering
+      // Depth 2+ water)" — no level change between two Depth 2 hexes.
+      const from = makeHex('4,4', 'water_depth2', 0);
+      const to = makeHex('4,5', 'water_depth2', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(4);
+    });
+
+    it('water entry adds the hex level change to the depth change', () => {
+      // Level 1 shore down into the pond: two levels down to Depth 1 water.
+      const from = makeHex('4,4', 'clear', 1);
+      const to = makeHex('4,5', 'water_depth1', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(4);
     });
 
     it('rough costs 2 MP', () => {
@@ -129,11 +159,9 @@ describe('MovementCalculator', () => {
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
     });
 
-    it('swamp costs 3 MP', () => {
-      const from = makeHex('4,4', 'clear', 0);
-      const to = makeHex('4,5', 'swamp', 0);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
-    });
+    // p136 lists Swamp as a *terrain modification* (+1 MP and +1 PSR), i.e. 2
+    // MP over clear; the code still carries a 3 MP swamp terrain entry and the
+    // data file agrees with it (M-31, open). No test asserts that wrong value.
 
     it('pavement costs 1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
@@ -147,6 +175,8 @@ describe('MovementCalculator', () => {
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
     });
 
+    // p60: "If a hex is not marked as containing another terrain type, assume
+    // it is clear. ... It costs only 1 MP to enter a clear hex."
     it('unknown terrain defaults to 1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'magma_field', 0);
@@ -157,6 +187,7 @@ describe('MovementCalculator', () => {
   // ==========================================================
   // LEVEL CHANGE COSTS
   // ==========================================================
+  // p17/p136: "Level change (up or down) 1 level +1 - 2 levels +2".
   describe('level change costs', () => {
     it('adds +1 MP per level climbed', () => {
       const from = makeHex('4,4', 'clear', 0);
@@ -170,10 +201,16 @@ describe('MovementCalculator', () => {
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
     });
 
-    it('does not reduce cost for downhill', () => {
+    it('adds +1 MP per level descended too (p17: up or down)', () => {
       const from = makeHex('4,4', 'clear', 2);
       const to = makeHex('4,5', 'clear', 0);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
+    it('adds +1 MP for a one-level descent', () => {
+      const from = makeHex('4,4', 'clear', 1);
+      const to = makeHex('4,5', 'clear', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
     });
 
     it('level change on heavy_woods: 3 terrain + 1 climb = 4', () => {
@@ -182,16 +219,43 @@ describe('MovementCalculator', () => {
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(4);
     });
 
-    it('pavement overrides level climb cost to 1', () => {
+    it('pavement keeps the level change cost (p20 Road Movement)', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'pavement', 2);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
+    it('pavement keeps ice, mud and deep snow costs (p20)', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'pavement', 0, { ice: true, mud: true, deepSnow: true });
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(4);
+    });
+
+    it('pavement keeps the weather MP modifier (p62)', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'pavement', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk', { fog: 'heavy' })).toBe(3);
+    });
+
+    it('a road only waives the terrain cost, not the level change', () => {
+      // p20: "'Mechs traveling on roads pay only 1 MP per hex; however, any MP
+      // costs for changing levels are still required."
+      const flat = calc.calculateMPCost(
+        makeHex('4,4', 'pavement', 0), makeHex('4,5', 'pavement', 0), makeUnit(), 'walk');
+      const climbing = calc.calculateMPCost(
+        makeHex('4,4', 'pavement', 0), makeHex('4,5', 'pavement', 1), makeUnit(), 'walk');
+      expect(flat).toBe(1);
+      expect(climbing).toBe(2);
     });
   });
 
   // ==========================================================
   // LEVEL 3+ RESTRICTION
   // ==========================================================
+  // The 3+ level prohibition itself is unverified: BMM p15 (Ground Movement) is
+  // absent from the KB and only the +1/+2 rows are quotable (sweep §4.4). The
+  // rule is kept as the project's adopted model; a 3+ change is a fall, not a
+  // move, in both directions (M-02).
   describe('level 3+ restriction', () => {
     it('returns Infinity for exactly 3-level climb', () => {
       const from = makeHex('4,4', 'clear', 0);
@@ -211,10 +275,16 @@ describe('MovementCalculator', () => {
       expect(calc.calculateMPCost(from, to, makeUnit(), 'run')).toBe(Infinity);
     });
 
-    it('allows downhill of any magnitude', () => {
+    it('returns Infinity for a 3-level descent too (no free falls)', () => {
+      const from = makeHex('4,4', 'clear', 10);
+      const to = makeHex('4,5', 'clear', 7);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(Infinity);
+    });
+
+    it('returns Infinity for a 3+ level drop of any magnitude', () => {
       const from = makeHex('4,4', 'clear', 10);
       const to = makeHex('4,5', 'clear', 0);
-      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(Infinity);
     });
 
     it('jump jets bypass level 3+ restriction', () => {
@@ -249,6 +319,8 @@ describe('MovementCalculator', () => {
   // ==========================================================
   // TERRAIN MODIFIERS
   // ==========================================================
+  // p136 Terrain Modifications: Ice +1 MP (+3 PSR), Mud +1 (+1 PSR),
+  // Deep Snow +1 (+1 PSR).
   describe('terrain modifiers', () => {
     it('ice adds +1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
@@ -286,6 +358,12 @@ describe('MovementCalculator', () => {
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
     });
 
+    it('mud + deepSnow stack (+2 total)', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'clear', 0, { mud: true, deepSnow: true });
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
     it('jump ignores terrain modifiers', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'clear', 0, { ice: true, mud: true, deepSnow: true });
@@ -296,6 +374,9 @@ describe('MovementCalculator', () => {
   // ==========================================================
   // FACING CHANGE COSTS (calculateFacingChange)
   // ==========================================================
+  // p14: "Changing facing costs 1 MP per hexside. For example, ... a
+  // 180-degree turn (three facings, from Hex A to Hex B) costs 3 MP." The
+  // shortest way round is used, so 4-5 hexsides cost 2-1 (M-04 was withdrawn).
   describe('facing change cost (calculateFacingChange)', () => {
     it('returns 0 for same hex', () => {
       expect(calc.calculateFacingChange('4,4', '4,4', 0)).toBe(0);
@@ -398,8 +479,15 @@ describe('MovementCalculator', () => {
       expect(calc.getMaxMP(makeUnit(4, 6, 3), 'walk')).toBe(4);
     });
 
-    it('returns run MP', () => {
+    it('returns run MP derived from walk MP (p48: x1.5, round up)', () => {
+      // p68: "Walking MP of 6 and a Running MP of 9"; a 4-walk Mech runs 6.
       expect(calc.getMaxMP(makeUnit(4, 6, 3), 'run')).toBe(6);
+      expect(calc.getMaxMP(makeUnit(5, 8, 3), 'run')).toBe(8);
+      expect(calc.getMaxMP(makeUnit(3, 5, 3), 'run')).toBe(5);
+    });
+
+    it('ignores a stale stored run rating and derives it from walk', () => {
+      expect(calc.getMaxMP(makeUnit(4, 99, 3), 'run')).toBe(6);
     });
 
     it('returns jump MP', () => {
@@ -412,6 +500,114 @@ describe('MovementCalculator', () => {
 
     it('zero jump MP means cannot jump', () => {
       expect(calc.getMaxMP(makeUnit(4, 6, 0), 'jump')).toBe(0);
+    });
+
+    // p44 Leg Destruction: "A 'Mech with one leg is reduced to 1 Walking MP
+    // (this overrides all MP increases) and cannot run."
+    it('a destroyed leg leaves 1 Walking MP and no running (p44)', () => {
+      const unit = makeUnit(5, 8, 0);
+      unit.internalStructure = { leftLeg: 0, rightLeg: 10 };
+      unit.isLocationDestroyed = (loc) => loc === 'leftLeg';
+      expect(calc.getMaxMP(unit, 'walk')).toBe(1);
+      expect(calc.getMaxMP(unit, 'run')).toBe(0);
+    });
+
+    it('a destroyed leg overrides TSM and MASC increases (p44)', () => {
+      const unit = makeUnit(5, 8, 0, 0, 9);
+      unit.equipment = { other: { masc: {}, tsm: { installed: true } } };
+      unit.mascActive = true;
+      unit.internalStructure = { leftLeg: 10, rightLeg: 0 };
+      unit.isLocationDestroyed = (loc) => loc === 'rightLeg';
+      expect(calc.getMaxMP(unit, 'walk')).toBe(1);
+      expect(calc.getMaxMP(unit, 'run')).toBe(0);
+    });
+
+    it('a one-legged Mech keeps its Jumping MP (p44)', () => {
+      const unit = makeUnit(5, 8, 3);
+      unit.internalStructure = { leftLeg: 0, rightLeg: 10 };
+      unit.isLocationDestroyed = (loc) => loc === 'leftLeg';
+      expect(calc.getMaxMP(unit, 'jump')).toBe(3);
+    });
+
+    // p44 Leg Destruction: "A 'Mech that loses both of its legs automatically
+    // falls as well. It is not considered immobile (see p. 18), but it has
+    // 0 MP available." R-06: both legs gone is not a destruction.
+    it('both legs destroyed: 0 Walking MP, 0 Running MP and no MASC/TSM rescue (p44)', () => {
+      const unit = makeUnit(5, 8, 3, 0, 9);
+      unit.equipment = { other: { masc: {}, tsm: { installed: true } } };
+      unit.mascActive = true;
+      unit.internalStructure = { leftLeg: 0, rightLeg: 0 };
+      unit.isLocationDestroyed = (loc) => loc === 'leftLeg' || loc === 'rightLeg';
+
+      expect(calc.getMaxMP(unit, 'walk')).toBe(0);
+      expect(calc.getMaxMP(unit, 'run')).toBe(0);
+      // "0 MP available" covers jumping too: a legless 'Mech cannot stand up
+      // to use its jump jets.
+      expect(calc.getMaxMP(unit, 'jump')).toBe(0);
+    });
+
+    it('both legs destroyed is not a destruction in the movement layer (p44, R-06)', () => {
+      const unit = makeUnit(5, 8, 0);
+      unit.internalStructure = { leftLeg: 0, rightLeg: 0 };
+      unit.isLocationDestroyed = (loc) => loc === 'leftLeg' || loc === 'rightLeg';
+
+      expect(calc.getMaxMP(unit, 'walk')).toBe(0);
+      // p44: 0 MP, but still in play and not immobile - maxMP must not mark it.
+      expect(unit.destroyed).toBeUndefined();
+      expect(unit.immobile).toBeUndefined();
+    });
+
+    it('a both-legs Mech still owns its hex but cannot move out of it (0 MP)', () => {
+      const unit = makeUnit(5, 8, 0);
+      unit.position = { hexKey: '4,4', facing: 0 };
+      unit.internalStructure = { leftLeg: 0, rightLeg: 0 };
+      unit.isLocationDestroyed = (loc) => loc === 'leftLeg' || loc === 'rightLeg';
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 0)
+      });
+
+      const moves = calc.getValidMoves(unit, gs, 'walk');
+      expect(moves.has('4,4')).toBe(true);  // still on the board
+      expect(moves.size).toBe(1);           // 0 MP, no destination
+    });
+
+    // p44/R-06: both legs gone is NOT a destruction (Unit.isDestroyed only
+    // covers the head and centre torso). The board-presence half of this
+    // regression test lives in tests/engine/phaseSystem.test.js, where the
+    // PhaseManager removal hook runs.
+    it('a real both-legs Mech is not isDestroyed() and keeps 0 MP (p44, R-06)', () => {
+      const unit = createTestUnit('atlas-as7d', 0, 'two-legs');
+      unit.position = { hexKey: '5,7', facing: 0 };
+      unit.internalStructure.leftLeg = 0;
+      unit.internalStructure.rightLeg = 0;
+
+      expect(unit.isLocationDestroyed('leftLeg')).toBe(true);
+      expect(unit.isLocationDestroyed('rightLeg')).toBe(true);
+      // p44: 0 MP available, but the 'Mech is not destroyed and not immobile.
+      expect(unit.isDestroyed()).toBe(false);
+      expect(unit.currentMP).toBe(0);
+      expect(calc.getMaxMP(unit, 'walk')).toBe(0);
+      expect(calc.getMaxMP(unit, 'run')).toBe(0);
+      expect(calc.getMaxMP(unit, 'jump')).toBe(0);
+    });
+
+    // p48 Hip: "its Walking MP is cut in half (round up) ... Recalculate its
+    // Running MP accordingly by multiplying the new Walking MP by 1.5,
+    // rounding up."
+    it('a destroyed hip halves walking MP and recalculates running MP (p48)', () => {
+      const unit = makeUnit(5, 8, 0);
+      unit.criticalSlots.leftLeg[0].status = 'destroyed'; // hip_actuator
+      expect(calc.getMaxMP(unit, 'walk')).toBe(3);  // ceil(5 / 2)
+      expect(calc.getMaxMP(unit, 'run')).toBe(5);   // ceil(3 x 1.5)
+    });
+
+    it('a second destroyed hip leaves no ground MP (p48)', () => {
+      const unit = makeUnit(5, 8, 0);
+      unit.criticalSlots.leftLeg[0].status = 'destroyed';
+      unit.criticalSlots.rightLeg[0].status = 'destroyed';
+      expect(calc.getMaxMP(unit, 'walk')).toBe(0);
+      expect(calc.getMaxMP(unit, 'run')).toBe(0);
     });
   });
 
@@ -474,18 +670,26 @@ describe('MovementCalculator', () => {
       });
     });
 
-    describe('MASC doubles walk MP', () => {
-      it('walk MP is doubled when MASC is active', () => {
+    // p116 MASC: "On a result of 3 or higher, the 'Mech can run that turn at a
+    // speed equal to double its current Walking MP." Walking MP is unchanged.
+    describe('MASC doubles running MP', () => {
+      it('walk MP is unchanged when MASC is active', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
-        expect(calc.getMaxMP(unit, 'walk')).toBe(8);
+        expect(calc.getMaxMP(unit, 'walk')).toBe(4);
       });
 
-      it('run MP is NOT doubled by MASC', () => {
+      it('run MP is doubled by MASC (p116)', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
+        expect(calc.getMaxMP(unit, 'run')).toBe(8);
+      });
+
+      it('running MP without MASC stays at 1.5 x walk', () => {
+        const unit = makeUnit(4, 6, 3);
+        unit.equipment = { other: { masc: {} } };
         expect(calc.getMaxMP(unit, 'run')).toBe(6);
       });
 
@@ -497,136 +701,72 @@ describe('MovementCalculator', () => {
       });
     });
 
-    describe('MASC failure scaling', () => {
-      it('target is 2 on first active turn (turnsActive=1)', () => {
+    // p116 MASC Table: the Avoid Number is 3+ on the first consecutive turn,
+    // 5+ on the second, 7+ on the third, 11+ on the fourth and automatic on
+    // the fifth. A roll below it assigns a critical hit to each surviving leg.
+    describe('MASC failure scaling (p116 MASC Table)', () => {
+      function mascUnit(turnsActive) {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = true;
-        unit.mascTurnsActive = 1;
-        const dr = makeDiceRoller([4]);
-        const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(2);
-        expect(result.roll).toBe(4);
-        expect(result.failed).toBe(false);
+        unit.mascTurnsActive = turnsActive;
+        return unit;
+      }
+
+      it('turn 1: a 3+ avoids the critical hits, a 2 does not (p116)', () => {
+        const pass = calc.rollMASC(mascUnit(1), makeDiceRoller([3]));
+        expect(pass.roll).toBe(3);
+        expect(pass.failed).toBe(false);
+
+        const fail = calc.rollMASC(mascUnit(1), makeDiceRoller([2]));
+        expect(fail.failed).toBe(true);
       });
 
-      it('fails on first turn when roll <= 2', () => {
-        const unit = makeUnit(4, 6, 3);
-        unit.equipment = { other: { masc: {} } };
-        unit.mascActive = true;
-        unit.mascTurnsActive = 1;
-        const dr = makeDiceRoller([2]);
-        const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(2);
+      it('turn 2: the avoid number rises to 5+ (p116)', () => {
+        expect(calc.rollMASC(mascUnit(2), makeDiceRoller([5])).failed).toBe(false);
+        expect(calc.rollMASC(mascUnit(2), makeDiceRoller([4])).failed).toBe(true);
+      });
+
+      it('turn 3: the avoid number rises to 7+ (p116)', () => {
+        expect(calc.rollMASC(mascUnit(3), makeDiceRoller([7])).failed).toBe(false);
+        expect(calc.rollMASC(mascUnit(3), makeDiceRoller([6])).failed).toBe(true);
+      });
+
+      it('turn 4: the avoid number rises to 11+ (p116)', () => {
+        expect(calc.rollMASC(mascUnit(4), makeDiceRoller([11])).failed).toBe(false);
+        expect(calc.rollMASC(mascUnit(4), makeDiceRoller([10])).failed).toBe(true);
+      });
+
+      it('turn 5: a critical hit is assigned automatically (p116)', () => {
+        const result = calc.rollMASC(mascUnit(5), makeDiceRoller([12]));
         expect(result.failed).toBe(true);
-      });
-
-      it('target = 4 on second turn (lookup[2,4,6,10])', () => {
-        const unit = makeUnit(4, 6, 3);
-        unit.equipment = { other: { masc: {} } };
-        unit.mascActive = true;
-        unit.mascTurnsActive = 2;
-        const dr = makeDiceRoller([6]);
-        const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(4);
-        expect(result.roll).toBe(6);
-        expect(result.failed).toBe(false);
-      });
-
-      it('target = 6 on third turn (lookup[2,4,6,10])', () => {
-        const unit = makeUnit(4, 6, 3);
-        unit.equipment = { other: { masc: {} } };
-        unit.mascActive = true;
-        unit.mascTurnsActive = 3;
-        const dr = makeDiceRoller([6]);
-        const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(6);
-        expect(result.failed).toBe(true); // 6 <= 6
-      });
-
-      it('target = 10 on fourth turn (lookup[2,4,6,10])', () => {
-        const unit = makeUnit(4, 6, 3);
-        unit.equipment = { other: { masc: {} } };
-        unit.mascActive = true;
-        unit.mascTurnsActive = 4;
-        const dr = makeDiceRoller([11]);
-        const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe(10);
-        expect(result.failed).toBe(false); // 11 > 10, no fail
-      });
-
-      it('auto-fail on fifth turn (turnsActive >= 5)', () => {
-        const unit = makeUnit(4, 6, 3);
-        unit.equipment = { other: { masc: {} } };
-        unit.mascActive = true;
-        unit.mascTurnsActive = 5;
-        const dr = makeDiceRoller([12]);
-        const result = calc.rollMASC(unit, dr);
-        expect(result.target).toBe("auto-fail (turn 5+)");
-        expect(result.failed).toBe(true);
-      });
-    });
-
-    describe('MASC failure damage', () => {
-      it('destroys one leg actuator on failure', () => {
-        const unit = makeUnit(4, 6, 3);
-        unit.equipment = { other: { masc: {} } };
-        unit.mascActive = true;
-        unit.mascTurnsActive = 1;
-
-        const dr = makeDiceRoller([2]); // 2 <= 3 = fail
-        calc.rollMASC(unit, dr);
-
-        const destroyedLeft = unit.criticalSlots.leftLeg.filter(
-          s => s.item.includes('actuator') && s.status === 'destroyed'
-        ).length;
-        const destroyedRight = unit.criticalSlots.rightLeg.filter(
-          s => s.item.includes('actuator') && s.status === 'destroyed'
-        ).length;
-        expect(destroyedLeft + destroyedRight).toBe(1);
-      });
-
-      it('deactivates MASC and resets counter on failure', () => {
-        const unit = makeUnit(4, 6, 3);
-        unit.equipment = { other: { masc: {} } };
-        unit.mascActive = true;
-        unit.mascTurnsActive = 3;
-
-        const dr = makeDiceRoller([2]);
-        calc.rollMASC(unit, dr);
-        expect(unit.mascActive).toBe(false);
-        expect(unit.mascTurnsActive).toBe(0);
-      });
-
-      it('destroys first OK actuator in left leg before right leg', () => {
-        const unit = makeUnit(4, 6, 3);
-        unit.equipment = { other: { masc: {} } };
-        unit.mascActive = true;
-        unit.mascTurnsActive = 1;
-
-        const dr = makeDiceRoller([1]);
-        calc.rollMASC(unit, dr);
-
-        const leftActuator = unit.criticalSlots.leftLeg.find(s => s.status === 'destroyed');
-        expect(leftActuator).toBeTruthy();
-        expect(leftActuator.item).toContain('actuator');
       });
 
       it('returns null roll when MASC is not active', () => {
         const unit = makeUnit(4, 6, 3);
         unit.equipment = { other: { masc: {} } };
         unit.mascActive = false;
-        const dr = makeDiceRoller([2]);
-        const result = calc.rollMASC(unit, dr);
+        const result = calc.rollMASC(unit, makeDiceRoller([2]));
         expect(result.roll).toBeNull();
         expect(result.failed).toBe(false);
       });
     });
+
+    // p116: on a failed activation "the player automatically assigns one
+    // critical hit to each leg that has not yet been destroyed" and the failure
+    // threshold decays by one interval per idle turn. The current MASC failure
+    // damage (single actuator, counter reset to 0) does not match that text and
+    // MASC has no live caller (M-19, open), so no test pins the wrong count or
+    // the invented counter reset until the source fix lands.
   });
 
   // ==========================================================
   // HEAT-BASED MP REDUCTION
   // ==========================================================
+  // The p52 Hatamoto-Chi example confirms only the 5-9 (-1) and 10-14 (-2)
+  // bands ("must reduce its Walking MP by 1 ... to 2"). The 15+/20+/25+ bands
+  // come from the project's heat scale: BMM p51 is absent from the KB, so they
+  // are unverified constants rather than manual values (sweep §4.4).
   describe('heat-based MP reduction', () => {
     it('no reduction below heat 5', () => {
       expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 0), 'walk')).toBe(5);
@@ -658,10 +798,16 @@ describe('MovementCalculator', () => {
       expect(calc.getMaxMP(makeUnit(5, 8, 0, 0, 30), 'walk')).toBe(0);
     });
 
-    it('reduces run MP by the same penalties', () => {
-      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 10), 'run')).toBe(6);
-      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 15), 'run')).toBe(5);
-      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 20), 'run')).toBe(4);
+    // p14: "If damage reduces a 'Mech's Walking MP rating, the player must
+    // recalculate the 'Mech's Running MP rating" — so run MP is derived from
+    // the heat-reduced walk MP (x1.5, round up), not reduced independently.
+    it('derives run MP from the heat-reduced walk MP', () => {
+      // walk 4 - 2 = 2 -> run ceil(3) = 3
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 10), 'run')).toBe(3);
+      // walk 4 - 3 = 1 -> run ceil(1.5) = 2
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 15), 'run')).toBe(2);
+      // walk 4 - 4 = 0 -> run 0
+      expect(calc.getMaxMP(makeUnit(4, 8, 0, 0, 20), 'run')).toBe(0);
     });
 
     it('does NOT reduce jump MP at any heat', () => {
@@ -676,16 +822,20 @@ describe('MovementCalculator', () => {
       expect(calc.getMaxMP(makeUnit(1, 0, 0, 0, 20), 'walk')).toBe(0);
     });
 
-    it('MASC-doubled MP still gets heat reduction', () => {
+    it('MASC doubles the heat-reduced walking MP', () => {
+      // p116: "double its current Walking MP" — 4 - 3 = 1, so the MASC run is 2.
       const unit = makeUnit(4, 6, 0, 0, 15);
       unit.mascActive = true;
-      expect(calc.getMaxMP(unit, 'walk')).toBe(5); // 4*2=8, -3 at heat 15
+      expect(calc.getMaxMP(unit, 'walk')).toBe(1);
+      expect(calc.getMaxMP(unit, 'run')).toBe(2);
     });
   });
 
   // ==========================================================
   // TSM (moved here from HeatManager, which no longer computes MP)
   // ==========================================================
+  // TSM's +2 Walking MP and the heat-9 threshold are project constants: the KB
+  // has no p117 body, so these are unverified rather than quoted (sweep §4.4).
   describe('TSM walk MP bonus', () => {
     function withTSM(walk, heat) {
       const unit = makeUnit(walk, Math.ceil(walk * 1.5), 0, 0, heat);

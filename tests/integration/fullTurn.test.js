@@ -67,9 +67,10 @@ describe('Integration: Full Turn Simulation', () => {
     engine.processAction(0, { type: 'endPhase' });
     expect(engine.phaseManager.currentPhase).toBe('physical_attack');
 
-    // Physical attack: winner goes first (P0=atlas first, P1=jenner second)
+    // Physical attack: p12 repeats the steps of the Weapon Attack Phase, so
+    // the initiative loser (P1=jenner) declares first
     const physQueue = engine.phaseManager.phaseUnitQueue;
-    expect(physQueue[0].playerId).toBe(0);
+    expect(physQueue[0].playerId).toBe(1);
 
     // Skip physical attacks; endPhase -> heat (auto-resolve)
     engine.processAction(0, { type: 'endPhase' });
@@ -197,104 +198,119 @@ describe('Integration: Full Turn Simulation', () => {
     expect(heatResults[0][0].effects).toContain('Unit SHUTDOWN (rolled 2, needed 6+)');
   });
 
-  it('handles consciousness checks in end phase', () => {
+  it('a pilot knocked unconscious on an earlier turn recovers in the End Phase', () => {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
     atlas.position = { hexKey: '5,7', facing: 0 };
-    atlas.pilot.hits = 3; // target 7
+    atlas.pilot.hits = 3; // p58: a 7+ brings this warrior back
+    atlas.pilot.conscious = false;
+    atlas.pilot.unconsciousTurn = 0; // lost consciousness before this turn
 
     const engine = createTestEngine({
       units: { 'atlas-0': atlas }
     });
 
-    // Roll 6 (< 7): pilot goes unconscious
+    const regained = [];
+    engine.eventBus.on('pilotRegainedConsciousness', (data) => {
+      regained.push(data);
+    });
+
+    // Roll 6 (< 7): the warrior stays out.
     engine.diceRoller = makeDiceRoller(6);
-
-    const unconsciousEvents = [];
-    engine.eventBus.on('pilotUnconscious', (data) => {
-      unconsciousEvents.push(data);
-    });
-
     engine.phaseManager.enterPhase('end');
 
     expect(atlas.pilot.conscious).toBe(false);
-    expect(unconsciousEvents.length).toBe(1);
-    expect(unconsciousEvents[0].unitId).toBe('atlas-0');
-    expect(unconsciousEvents[0].roll).toBe(6);
-    expect(unconsciousEvents[0].target).toBe(7);
-    expect(unconsciousEvents[0].hits).toBe(3);
-    expect(unconsciousEvents[0].auto).toBe(false);
+    expect(regained).toHaveLength(0);
+
+    // Roll 7: exactly the consciousness number for 3 points of damage.
+    engine.diceRoller = makeDiceRoller(7);
+    engine.phaseManager.enterPhase('end');
+
+    expect(atlas.pilot.conscious).toBe(true);
+    expect(regained).toHaveLength(1);
+    expect(regained[0]).toMatchObject({ unitId: 'atlas-0', roll: 7, target: 7, hits: 3 });
   });
 
-  it('a pilot with six hits is out of the fight', () => {
+  it('a pilot with six hits is dead and the Mech leaves play', () => {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
     atlas.position = { hexKey: '5,7', facing: 0 };
-    atlas.pilot.hits = 6; // p58: the sixth point of damage kills
+    atlas.pilot.hits = 5; // p58: the sixth point of damage kills
 
     const engine = createTestEngine({
       units: { 'atlas-0': atlas }
     });
 
-    const unconsciousEvents = [];
-    engine.eventBus.on('pilotUnconscious', (data) => {
-      unconsciousEvents.push(data);
-    });
+    const killed = [];
+    const removed = [];
+    engine.eventBus.on('pilotKilled', (data) => killed.push(data));
+    engine.eventBus.on('unitRemoved', (data) => removed.push(data));
 
+    // The sixth point of MechWarrior damage kills outright; it is not an
+    // "automatically unconscious" result.
+    const hitsBefore = atlas.pilot.hits;
+    atlas.applyPilotDamage(1);
+    engine.rollConsciousnessForNewPilotHits(atlas, hitsBefore);
+
+    expect(atlas.pilot.hits).toBe(6);
+    expect(atlas.pilot.dead).toBe(true);
+    expect(atlas.pilot.conscious).toBe(false);
+    expect(killed).toHaveLength(1);
+
+    // p58: the 'Mech is removed in the End Phase of the turn the warrior died.
     engine.phaseManager.enterPhase('end');
 
-    expect(atlas.pilot.conscious).toBe(false);
-    expect(unconsciousEvents.length).toBe(1);
-    expect(unconsciousEvents[0].auto).toBe(true);
+    expect(engine.stateManager.getState().getUnit('atlas-0')).toBeNull();
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).toMatchObject({ unitId: 'atlas-0', playerId: 0 });
   });
 
-  it('handles shutdown restart in end phase', () => {
+  it('restarts a shut-down Mech in the Heat Phase when below 14 heat', () => {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
     atlas.position = { hexKey: '5,7', facing: 0 };
     atlas.shutdown = true;
+    atlas.heat = 10; // heat dissipates below 14 in the Heat Phase
 
     const engine = createTestEngine({
       units: { 'atlas-0': atlas }
     });
 
-    // Roll 9 (>= 8): restart succeeds
-    engine.diceRoller = makeDiceRoller(9);
+    engine.diceRoller = makeDiceRoller(7);
 
     const restartEvents = [];
     engine.eventBus.on('unitRestarted', (data) => {
       restartEvents.push(data);
     });
 
-    engine.phaseManager.enterPhase('end');
+    engine.phaseManager.enterPhase('heat');
 
     expect(atlas.shutdown).toBe(false);
     expect(restartEvents.length).toBe(1);
-    expect(restartEvents[0].unitId).toBe('atlas-0');
-    expect(restartEvents[0].roll).toBe(9);
+    expect(restartEvents[0]).toMatchObject({ unitId: 'atlas-0', auto: true });
   });
 
-  it('handles failed shutdown restart in end phase', () => {
+  it('a high-heat restart must beat the current shutdown-avoid target', () => {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
     atlas.position = { hexKey: '5,7', facing: 0 };
     atlas.shutdown = true;
+    atlas.heat = atlas.getHeatDissipation() + 14; // 14 heat left: avoid on 4+
 
     const engine = createTestEngine({
       units: { 'atlas-0': atlas }
     });
 
-    // Roll 7 (< 8): restart fails
-    engine.diceRoller = makeDiceRoller(7);
+    // Roll 3: fails both the shutdown-avoid check and the a 4+ restart.
+    engine.diceRoller = makeDiceRoller(3);
 
     const failEvents = [];
     engine.eventBus.on('unitRestartFailed', (data) => {
       failEvents.push(data);
     });
 
-    engine.phaseManager.enterPhase('end');
+    engine.phaseManager.enterPhase('heat');
 
-    // Shutdown persists since roll < 8
+    expect(atlas.heat).toBe(14);
     expect(atlas.shutdown).toBe(true);
     expect(failEvents.length).toBe(1);
-    expect(failEvents[0].unitId).toBe('atlas-0');
-    expect(failEvents[0].roll).toBe(7);
+    expect(failEvents[0]).toMatchObject({ unitId: 'atlas-0', roll: 3, target: 4 });
   });
 
   it('re-seeds dice roller at new turn', () => {

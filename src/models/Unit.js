@@ -181,10 +181,16 @@ export class Unit {
     return result;
   }
 
-  /** Check if the unit is destroyed (head gone, CT gone, or both legs gone) */
+  /**
+   * Check if the unit is destroyed: head gone or centre torso gone (p44).
+   *
+   * Losing both legs is NOT a destruction (p44 Leg Destruction): the 'Mech
+   * automatically falls, is not considered immobile, but "has 0 MP available"
+   * and stays in play. That is enforced by maxMP (0 MP) and by the absence of
+   * a both-legs clause here.
+   */
   isDestroyed() {
-    return this.internalStructure.head <= 0 || this.internalStructure.centerTorso <= 0
-      || (this.internalStructure.leftLeg <= 0 && this.internalStructure.rightLeg <= 0);
+    return this.internalStructure.head <= 0 || this.internalStructure.centerTorso <= 0;
   }
 
   /** Check if location is destroyed (internal structure gone) */

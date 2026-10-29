@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import mechsData from '../../src/data/mechs.json' with { type: 'json' };
+import weaponsData from '../../src/data/weapons.json' with { type: 'json' };
 
 const { mechs } = mechsData;
+const WEAPON_IDS = new Set(weaponsData.weapons.map((weapon) => weapon.id));
 
 const LOCATIONS = [
   'head',
@@ -29,6 +31,10 @@ const EXPECTED_MECHS = [
   { id: 'awesome-aws8q', tonnage: 80, walk: 3, run: 5, jump: 0 },
 ];
 
+// p6 (SLOT): "each line within a location (six in the head and legs, twelve in
+// other locations) is referred to as a 'slot'." The p46 critical-hit example
+// likewise gives the legs a 1D6 (six-line) table and the arms a 2D6 (twelve-line)
+// table.
 const EXPECTED_FIXED_SLOTS = {
   head: 6,
   centerTorso: 12,
@@ -36,8 +42,8 @@ const EXPECTED_FIXED_SLOTS = {
   rightTorso: 12,
   leftArm: 12,
   rightArm: 12,
-  leftLeg: 12,
-  rightLeg: 12,
+  leftLeg: 6,
+  rightLeg: 6,
 };
 
 describe('Mech Roster Data', () => {
@@ -219,12 +225,73 @@ describe('Mech Roster Data', () => {
 });
 
 // =============================================================================
+// Weapon definitions: every weapon the roster mounts must exist and have a slot
+// =============================================================================
+
+describe('weapons data integrity', () => {
+  it('defines the p121 small laser with the manual stats', () => {
+    // p121 Inner Sphere Weapons: Small Laser DE, Heat 1, Damage 3,
+    // Minimum 0, Short 1, Medium 2, Long 3, Tons 0.5, Critical Slots 1.
+    const smallLaser = weaponsData.weapons.find((weapon) => weapon.id === 'small_laser');
+
+    expect(smallLaser).toBeDefined();
+    expect(smallLaser).toMatchObject({
+      type: 'DE',
+      heat: 1,
+      damage: 3,
+      minRange: 0,
+      shortRange: 1,
+      mediumRange: 2,
+      longRange: 3,
+      tons: 0.5,
+      crits: 1,
+    });
+  });
+
+  // D-01: the small laser was listed on four roster units but missing from
+  // weapons.json, so the UI silently skipped it. Every weapon id must resolve.
+  it('resolves every weapon mounted by any Mech in weapons.json', () => {
+    for (const mech of mechs) {
+      for (const weapon of mech.equipment.weapons) {
+        expect(
+          WEAPON_IDS.has(weapon.type),
+          `${mech.id} lists weapon '${weapon.type}' that is not in weapons.json`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  // D-02: both Atlases listed an SRM-6 with no critical slot, making it immune
+  // to critical hits. Every mounted weapon needs at least one matching slot.
+  it('gives every weapon mounted by any Mech at least one critical slot', () => {
+    for (const mech of mechs) {
+      const criticalItems = Object.values(mech.criticalSlots).flat().map((slot) => slot.item);
+      for (const weapon of mech.equipment.weapons) {
+        expect(
+          criticalItems.filter((item) => item === weapon.type).length,
+          `${mech.id} has no critical slot for '${weapon.type}'`,
+        ).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
+// =============================================================================
 // Critical slot completeness: the rules that read slots need them to exist
 // =============================================================================
 
 describe('critical slot completeness', () => {
   const ARM_ACTUATORS = ['shoulder', 'upper_arm_actuator', 'lower_arm_actuator'];
   const LEG_ACTUATORS = ['hip', 'upper_leg_actuator', 'lower_leg_actuator', 'foot_actuator'];
+
+  // Covers the two non-canon refits too, which the per-design checks skip.
+  it('gives every Mech the p6 location slot counts (head/legs 6, arms/torsos 12)', () => {
+    for (const mech of mechs) {
+      for (const [loc, count] of Object.entries(EXPECTED_FIXED_SLOTS)) {
+        expect(mech.criticalSlots[loc], `${mech.id} ${loc} slots`).toHaveLength(count);
+      }
+    }
+  });
 
   it('every arm carries shoulder, upper and lower arm actuators', () => {
     for (const mech of mechs) {

@@ -44,17 +44,21 @@ export class InitiativeManager {
   }
 
   /**
-   * Get the move order for a given phase.
-   * Movement/Weapon phases: initiative loser moves first.
-   * Physical attack phase: initiative winner moves first.
+   * Get the declaration order for a phase.
+   *
+   * p10: "The side that lost Initiative must act first." p12: the Physical
+   * Attack Phase "repeat[s] the steps given for the Weapon Attack Phase", so
+   * the initiative loser declares physical attacks first as well - there is no
+   * winner-first phase in the sequence of play.
+   *
+   * @param {number} winner - player id that won initiative
+   * @param {Array<{id:number}>} players
+   * @param {string} [phase] - kept for callers that pass the phase
+   * @returns {number[]} player ids in declaration order (loser first)
    */
   getInitiativeOrder(winner, players, phase) {
     const loser = players.find(p => p.id !== winner) || players[0];
     const winnerPlayer = players.find(p => p.id === winner) || players[0];
-
-    if (phase === 'physical_attack') {
-      return [winnerPlayer.id, loser.id];
-    }
 
     return [loser.id, winnerPlayer.id];
   }

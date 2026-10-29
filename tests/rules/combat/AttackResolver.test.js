@@ -79,6 +79,24 @@ function makeDiceRoller(fixedRoll) {
   };
 }
 
+/**
+ * Dice that hand out a fixed sequence of 2D6 results, with separate 1D6 results
+ * for the critical-hit routines.
+ */
+function makeQueuedRoller({ twoD6 = [7], oneD6 = [1] } = {}) {
+  let i2 = 0;
+  let i1 = 0;
+  return {
+    roll2d6() { return twoD6[Math.min(i2++, twoD6.length - 1)]; },
+    roll1d6() { return oneD6[Math.min(i1++, oneD6.length - 1)]; },
+    next() { return 0.5; }
+  };
+}
+
+function slotList(items) {
+  return items.map((item, index) => ({ slot: index + 1, item, status: 'ok' }));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -908,11 +926,12 @@ describe('AttackResolver', () => {
       expect(result.hitLocations[0].location).toBeDefined();
     });
 
-    it('resolves cluster hits for missile weapons on hit', () => {
+    it('resolves SRM hits in 2-point Damage Value groupings (p32/p96)', () => {
       const attacker = makeUnit('4,4', 0, 4);
       const target = makeUnit('4,6', 0, 4);
       const weapon = makeWeaponDef({
-        type: 'M',
+        type: 'SRM',
+        damage: 2,
         cluster: true,
         clusterSize: 6
       });
@@ -922,7 +941,48 @@ describe('AttackResolver', () => {
       const result = resolver.resolveWeaponAttack(attacker, weapon, {}, target, gs, dice);
       expect(result.hit).toBe(true);
       expect(result.clusterHits).toBe(6); // roll 12 = full cluster
-      expect(result.hitLocations.length).toBe(6);
+      // p96: every 2 points of SRM damage is a separate hit location.
+      expect(result.groupings).toEqual([2, 2, 2, 2, 2, 2]);
+      expect(result.hitLocations).toHaveLength(6);
+      expect(result.hitLocations.every(h => h.damage === 2)).toBe(true);
+    });
+
+    it('resolves an LRM-20 that scores 12 hits as three 5-point groupings (p32/p96)', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef({
+        type: 'LRM',
+        damage: 1,
+        cluster: true,
+        clusterSize: 20
+      });
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      // attack roll 12 (hit), cluster roll 7 = 12 hits, then one roll per grouping
+      const dice = makeQueuedRoller({ twoD6: [12, 7, 7, 7, 7] });
+
+      const result = resolver.resolveWeaponAttack(attacker, weapon, {}, target, gs, dice);
+
+      expect(result.hit).toBe(true);
+      expect(result.clusterHits).toBe(12);
+      // 12 points of LRM damage is 5 + 5 + 2, so three location rolls - not 12.
+      expect(result.groupings).toEqual([5, 5, 2]);
+      expect(result.hitLocations).toHaveLength(3);
+      expect(result.hitLocations.map(h => h.damage)).toEqual([5, 5, 2]);
+      expect(result.hitLocations.map(h => h.roll)).toEqual([7, 7, 7]);
+      expect(result.hitLocations.reduce((sum, h) => sum + h.damage, 0)).toBe(12);
+    });
+
+    it('groups MRM and ATM launchers in 5-point groupings too (p96)', () => {
+      expect(resolver.getDamageValueGrouping({ type: 'MRM', damage: 1 })).toBe(5);
+      expect(resolver.getDamageValueGrouping({ type: 'ATM', damage: 3 })).toBe(5);
+      expect(resolver.getDamageValueGrouping({ type: 'SRM', damage: 2 })).toBe(2);
+      // 6 ATM missiles at 3 damage each = 18 points -> 5 + 5 + 5 + 3.
+      expect(resolver.buildDamageGroupings({ type: 'ATM', cluster: true, damage: 3 }, 6))
+        .toEqual([5, 5, 5, 3]);
+    });
+
+    it('leaves a single non-cluster weapon as one grouping', () => {
+      expect(resolver.buildDamageGroupings(makeWeaponDef(), 1)).toEqual([10]);
     });
 
     it('no hit locations on a miss', () => {
@@ -948,6 +1008,77 @@ describe('AttackResolver', () => {
       const result = resolver.resolveWeaponAttack(attacker, weapon, instance, target, gs, dice);
       expect(result.weaponDef).toBe(weapon);
       expect(result.weaponInstance).toBe(instance);
+    });
+  });
+
+  // =========================================================================
+  // Through-armour critical (p32/p139)
+  // =========================================================================
+
+  describe('through-armour critical (p32/p139)', () => {
+    function critTarget(overrides = {}) {
+      return makeUnit('4,6', 0, 4, {
+        engine: { hits: 0 },
+        gyro: { hits: 0 },
+        criticalSlots: {
+          centerTorso: slotList([
+            'engine', 'engine', 'engine', 'gyro', 'gyro', 'gyro',
+            'gyro', 'empty', 'empty', 'empty', 'empty', 'empty'
+          ]),
+          leftTorso: slotList([
+            'lrm20', 'lrm20', 'lrm20', 'lrm20', 'lrm20', 'empty',
+            'empty', 'empty', 'empty', 'empty', 'empty', 'empty'
+          ])
+        },
+        ...overrides
+      });
+    }
+
+    it('a front hit-location roll of 2 also rolls on the crit table', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = critTarget();
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      // attack roll 7 (hit), location 2 = centerTorso [critical], crit roll 9,
+      // block 1 then slot 1 = the first engine slot.
+      const dice = makeQueuedRoller({ twoD6: [7, 2, 9], oneD6: [1, 1] });
+
+      const result = resolver.resolveWeaponAttack(attacker, makeWeaponDef(), {}, target, gs, dice);
+
+      expect(result.hit).toBe(true);
+      expect(result.hitLocations[0].location).toBe('centerTorso');
+      expect(result.hitLocations[0].critical).toBe(true);
+      expect(result.hitLocations[0].throughArmorCritical.roll).toBe(9);
+      expect(result.hitLocations[0].throughArmorCritical.criticals).toHaveLength(1);
+      expect(target.engine.hits).toBe(1);
+      // p139: the normal damage still applies to the armour.
+      expect(result.hitLocations[0].damage).toBe(10);
+    });
+
+    it('a side hit-location roll of 2 crits the near-side torso', () => {
+      const attacker = makeUnit('3,4', 0, 4);
+      const target = critTarget({ position: { hexKey: '4,4', facing: 0 } });
+      const gs = makeGameState({ '3,4': {}, '4,4': {} });
+      // Location 2 on the Left Side column is the left torso, also [critical].
+      const dice = makeQueuedRoller({ twoD6: [7, 2, 9], oneD6: [1, 1] });
+
+      const result = resolver.resolveWeaponAttack(attacker, makeWeaponDef(), {}, target, gs, dice);
+
+      expect(result.hitLocations[0].location).toBe('leftTorso');
+      expect(result.hitLocations[0].critical).toBe(true);
+      expect(result.hitLocations[0].throughArmorCritical.criticals).toHaveLength(1);
+      expect(target.criticalSlots.leftTorso[0].status).toBe('destroyed');
+    });
+
+    it('a roll of 3 or more does not create a through-armour critical', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = critTarget();
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      const dice = makeQueuedRoller({ twoD6: [7, 8] });
+
+      const result = resolver.resolveWeaponAttack(attacker, makeWeaponDef(), {}, target, gs, dice);
+
+      expect(result.hitLocations[0].critical).toBe(false);
+      expect(result.hitLocations[0].throughArmorCritical).toBeUndefined();
     });
   });
 });

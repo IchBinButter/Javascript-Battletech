@@ -292,8 +292,20 @@ describe('Integration: GameEngine Action Processing Flow', () => {
       expect(firstEntry.unitId).toBe('atlas-0');
     });
 
-    it('physical_attack always has winner first regardless of goFirst', () => {
+    // p12: "Players repeat the steps given for the Weapon Attack Phase, except
+    // for torso twisting" — so the Physical Attack Phase declares in the same
+    // order as the Weapon Attack Phase (p10: the initiative loser declares
+    // first), not winner-first.
+    it('physical_attack declares in weapon-attack order: loser first (p12)', () => {
       const { engine } = setupPhaseWithWinner('physical_attack', 0, false);
+      const firstEntry = getCurrentQueueEntry(engine);
+
+      expect(firstEntry.playerId).toBe(1);
+      expect(firstEntry.unitId).toBe('jenner-1');
+    });
+
+    it('physical_attack follows the winner-goes-first option when chosen (p10 optional rule)', () => {
+      const { engine } = setupPhaseWithWinner('physical_attack', 0, true);
       const firstEntry = getCurrentQueueEntry(engine);
 
       expect(firstEntry.playerId).toBe(0);

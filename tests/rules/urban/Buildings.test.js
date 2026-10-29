@@ -43,7 +43,8 @@ describe('building type mapping', () => {
     expect(buildingDefaults('light')).toMatchObject({ type: 'light', levels: 1, cf: 15, psrModifier: 0 });
     expect(buildingDefaults('medium')).toMatchObject({ type: 'medium', levels: 2, cf: 40, psrModifier: 1 });
     expect(buildingDefaults('heavy')).toMatchObject({ type: 'heavy', levels: 3, cf: 90, psrModifier: 2 });
-    expect(buildingDefaults('hardened')).toMatchObject({ type: 'hardened', levels: 4, cf: 120, psrModifier: 3 });
+    // p54/p142 Building Movement: entering a hardened building hex is +5.
+    expect(buildingDefaults('hardened')).toMatchObject({ type: 'hardened', levels: 4, cf: 120, psrModifier: 5 });
     expect(buildingDefaults('nonsense')).toBeNull();
   });
 });
@@ -148,7 +149,7 @@ describe('urban helpers (p67-73)', () => {
     expect(entryPSRModifier('light')).toBe(0);
     expect(entryPSRModifier('medium')).toBe(1);
     expect(entryPSRModifier('heavy')).toBe(2);
-    expect(entryPSRModifier('hardened')).toBe(3);
+    expect(entryPSRModifier('hardened')).toBe(5); // p54/p142
     expect(entryPSRModifier('nonsense')).toBe(0);
   });
 

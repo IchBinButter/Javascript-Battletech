@@ -1,9 +1,54 @@
+/**
+ * Physical attack hit locations and modifiers (BMM p29, p38, p139, p140).
+ *
+ * p140 'Mech Punch Location Table (1D6, biped) — columns Left Side | Front/Rear | Right Side:
+ *   1 Left Torso | Left Arm | Right Torso
+ *   2 Left Torso | Left Torso | Right Torso
+ *   3 Center Torso | Center Torso | Center Torso
+ *   4 Left Arm | Right Torso | Right Arm
+ *   5 Left Arm | Right Arm | Right Arm
+ *   6 Head | Head | Head
+ *
+ * p139 'Mech Kick Location Table (1D6, biped) — columns Left Side | Front/Rear | Right Side:
+ *   1-3 Left Leg | Right Leg | Right Leg
+ *   4-6 Left Leg | Left Leg | Right Leg
+ *
+ * p140 Different Levels Table:
+ *   target 1 level higher: Charge, Club (Kick Table), DFA, Physical Weapon (Kick
+ *     Table), Punch (Kick Table)  => kick is not allowed
+ *   target 1 level lower:  Charge, Club (Punch Table), DFA, Kick (Punch Table),
+ *     Physical Weapon (Punch Table) => punch is not allowed
+ *
+ * p38: "Determine the damage location by rolling 1D6 and consulting the
+ * appropriate column of the Kick Location Table."
+ * p29/p138: an upper/lower arm actuator adds +2 to punching and physical weapon
+ * attacks, but halves damage only for punching.
+ * p38: "A 'Mech cannot kick with a leg if it fired weapons mounted in that leg
+ * that turn."
+ */
+
 import { describe, it, expect } from 'vitest';
 import { PhysicalAttackResolver } from '../../../src/rules/combat/PhysicalAttackResolver.js';
 import hitTables from '../../../src/data/hitTables.json' with { type: 'json' };
 
 const PUNCH = hitTables.hitLocation.punch;
-const KICK  = hitTables.hitLocation.kick;
+const KICK = hitTables.hitLocation.kick;
+
+// p140 'Mech Punch Location Table (biped).
+const P140_PUNCH = {
+  left: { 1: 'leftTorso', 2: 'leftTorso', 3: 'centerTorso', 4: 'leftArm', 5: 'leftArm', 6: 'head' },
+  front: { 1: 'leftArm', 2: 'leftTorso', 3: 'centerTorso', 4: 'rightTorso', 5: 'rightArm', 6: 'head' },
+  right: { 1: 'rightTorso', 2: 'rightTorso', 3: 'centerTorso', 4: 'rightArm', 5: 'rightArm', 6: 'head' }
+};
+
+// p139 'Mech Kick Location Table (biped).
+const P139_KICK = {
+  left: { 1: 'leftLeg', 2: 'leftLeg', 3: 'leftLeg', 4: 'leftLeg', 5: 'leftLeg', 6: 'leftLeg' },
+  front: { 1: 'rightLeg', 2: 'rightLeg', 3: 'rightLeg', 4: 'leftLeg', 5: 'leftLeg', 6: 'leftLeg' },
+  right: { 1: 'rightLeg', 2: 'rightLeg', 3: 'rightLeg', 4: 'rightLeg', 5: 'rightLeg', 6: 'rightLeg' }
+};
+
+const COLUMNS = ['left', 'front', 'right'];
 
 function makeUnit(overrides = {}) {
   return {
@@ -31,61 +76,123 @@ function withDestroyed(location, items) {
   return base;
 }
 
-function makeDiceRoller(fixedRoll) {
-  return { roll2d6() { return fixedRoll; } };
+/** Dice roller with independent 2D6 (to-hit) and 1D6 (location) results. */
+function makeDice({ hit = 12, location = 1 } = {}) {
+  return {
+    roll2d6() { return hit; },
+    roll1d6() { return location; }
+  };
 }
 
-describe('PhysicalAttackResolver - punch table (JSON)', () => {
+/** Dice roller that records which dice were asked for. */
+function makeRecordingDice({ hit = 12, location = 3 } = {}) {
+  const calls = [];
+  return {
+    calls,
+    roll2d6() { calls.push('2d6'); return hit; },
+    roll1d6() { calls.push('1d6'); return location; }
+  };
+}
+
+// =============================================================================
+// Hit location tables (p139/p140)
+// =============================================================================
+
+describe('PhysicalAttackResolver - p140 punch table (1D6, three columns)', () => {
   const resolver = new PhysicalAttackResolver();
 
-  const EXPECTED_PUNCH = {
-    2: 'head',  3: 'rightArm', 4: 'rightArm',
-    5: 'rightTorso', 6: 'rightTorso', 7: 'centerTorso',
-    8: 'leftTorso', 9: 'leftTorso', 10: 'leftArm',
-    11: 'leftArm', 12: 'head'
-  };
-
-  for (let roll = 2; roll <= 12; roll++) {
-    it(`roll ${roll} -> ${EXPECTED_PUNCH[roll]}`, () => {
-      expect(PUNCH[roll.toString()].location).toBe(EXPECTED_PUNCH[roll]);
-      expect(resolver.punchLocation(roll)).toBe(EXPECTED_PUNCH[roll]);
-    });
-  }
-});
-
-describe('PhysicalAttackResolver - kick table (JSON)', () => {
-  const resolver = new PhysicalAttackResolver();
-
-  const EXPECTED_KICK = {
-    2: 'leftLeg',  3: 'rightLeg', 4: 'leftLeg',
-    5: 'rightLeg', 6: 'leftLeg',  7: 'rightLeg',
-    8: 'leftLeg',  9: 'rightLeg', 10: 'leftLeg',
-    11: 'rightLeg', 12: 'leftLeg'
-  };
-
-  for (let roll = 2; roll <= 12; roll++) {
-    it(`roll ${roll} -> ${EXPECTED_KICK[roll]}`, () => {
-      expect(KICK[roll.toString()].location).toBe(EXPECTED_KICK[roll]);
-      expect(resolver.kickLocation(roll)).toBe(EXPECTED_KICK[roll]);
-    });
-  }
-
-  it('all kick locations are legs only', () => {
-    for (let roll = 2; roll <= 12; roll++) {
-      const loc = KICK[roll.toString()].location;
-      expect(['leftLeg', 'rightLeg']).toContain(loc);
+  for (const column of COLUMNS) {
+    for (let roll = 1; roll <= 6; roll++) {
+      it(`${column} column, 1D6 roll ${roll} -> ${P140_PUNCH[column][roll]}`, () => {
+        expect(PUNCH[column][roll.toString()].location).toBe(P140_PUNCH[column][roll]);
+        expect(resolver.punchLocation(roll, column)).toBe(P140_PUNCH[column][roll]);
+      });
     }
+  }
+
+  it('has exactly the six 1D6 results in every column (no fabricated 2D6 rows)', () => {
+    for (const column of COLUMNS) {
+      expect(Object.keys(PUNCH[column]).sort()).toEqual(['1', '2', '3', '4', '5', '6']);
+    }
+    expect(Object.keys(PUNCH).sort()).toEqual([...COLUMNS].sort());
+  });
+
+  it('uses the Front/Rear column for a rear attack (p140), and front as the default', () => {
+    expect(resolver.punchLocation(1, 'rear')).toBe(P140_PUNCH.front[1]);
+    expect(resolver.punchLocation(1)).toBe(P140_PUNCH.front[1]);
   });
 });
 
-describe('PhysicalAttackResolver - charge uses punch table', () => {
+describe('PhysicalAttackResolver - p139 kick table (1D6, three columns)', () => {
   const resolver = new PhysicalAttackResolver();
 
-  for (let roll = 2; roll <= 12; roll++) {
-    it(`chargeLocation(${roll}) === punchLocation(${roll})`, () => {
-      expect(resolver.chargeLocation(roll)).toBe(resolver.punchLocation(roll));
-    });
+  for (const column of COLUMNS) {
+    for (let roll = 1; roll <= 6; roll++) {
+      it(`${column} column, 1D6 roll ${roll} -> ${P139_KICK[column][roll]}`, () => {
+        expect(KICK[column][roll.toString()].location).toBe(P139_KICK[column][roll]);
+        expect(resolver.kickLocation(roll, column)).toBe(P139_KICK[column][roll]);
+      });
+    }
   }
+
+  it('has exactly the six 1D6 results in every column (no fabricated 2D6 rows)', () => {
+    for (const column of COLUMNS) {
+      expect(Object.keys(KICK[column]).sort()).toEqual(['1', '2', '3', '4', '5', '6']);
+    }
+    expect(Object.keys(KICK).sort()).toEqual([...COLUMNS].sort());
+  });
+
+  it('every kick location is a leg', () => {
+    for (const column of COLUMNS) {
+      for (let roll = 1; roll <= 6; roll++) {
+        expect(['leftLeg', 'rightLeg']).toContain(KICK[column][roll.toString()].location);
+      }
+    }
+  });
+
+  it('uses the Front/Rear column for a rear attack (p139), and front as the default', () => {
+    expect(resolver.kickLocation(1, 'rear')).toBe(P139_KICK.front[1]);
+    expect(resolver.kickLocation(1)).toBe(P139_KICK.front[1]);
+  });
+});
+
+describe('PhysicalAttackResolver - charge and DFA use the punch table', () => {
+  const resolver = new PhysicalAttackResolver();
+
+  it('chargeLocation matches the punch table in every column', () => {
+    for (const column of COLUMNS) {
+      for (let roll = 1; roll <= 6; roll++) {
+        expect(resolver.chargeLocation(roll, column)).toBe(resolver.punchLocation(roll, column));
+      }
+    }
+  });
+
+  it('a charge resolves its location with 1D6 on the punch table (p140)', () => {
+    const dice = makeRecordingDice({ hit: 12, location: 1 });
+    const result = resolver.resolveCharge(makeUnit(), makeUnit(), 3, dice);
+    expect(result.hit).toBe(true);
+    expect(result.hitLocations[0].location).toBe(P140_PUNCH.front[1]);
+    expect(dice.calls).toEqual(['2d6', '1d6']);
+  });
+
+  it('a DFA resolves its location with 1D6 on the punch table (p140)', () => {
+    const dice = makeRecordingDice({ hit: 12, location: 4 });
+    const attacker = makeUnit({ movement: { jump: 4 } });
+    const result = resolver.resolveDFA(attacker, makeUnit(), dice);
+    expect(result.hit).toBe(true);
+    expect(result.hitLocations[0].location).toBe(P140_PUNCH.front[4]);
+    expect(dice.calls).toEqual(['2d6', '1d6']);
+  });
+
+  it('punch and kick resolve locations with 1D6, not 2D6', () => {
+    const punchDice = makeRecordingDice({ hit: 12, location: 2 });
+    resolver.resolvePunch(makeUnit(), makeUnit(), punchDice);
+    expect(punchDice.calls).toEqual(['2d6', '1d6']);
+
+    const kickDice = makeRecordingDice({ hit: 12, location: 2 });
+    resolver.resolveKick(makeUnit(), makeUnit(), kickDice);
+    expect(kickDice.calls).toEqual(['2d6', '1d6']);
+  });
 });
 
 // =============================================================================
@@ -160,7 +267,7 @@ describe('calculatePhysicalTN - base table', () => {
 
 describe('actuator damage', () => {
   const resolver = new PhysicalAttackResolver();
-  const dice = makeDiceRoller(12);
+  const dice = makeDice();
 
   it('a destroyed shoulder forbids punching with that arm', () => {
     const a = makeUnit({ criticalSlots: withDestroyed('rightArm', ['shoulder']) });
@@ -169,7 +276,7 @@ describe('actuator damage', () => {
     expect(result.reason).toContain('Shoulder');
   });
 
-  it('an arm actuator adds +2 to the punch and halves the damage', () => {
+  it('an arm actuator adds +2 to the punch and halves the damage (p29/p138)', () => {
     const a = makeUnit({ tonnage: 50, criticalSlots: withDestroyed('rightArm', ['lower_arm_actuator']) });
     expect(resolver.calculatePhysicalTN(a, makeUnit(), 'punch', { arm: 'rightArm' })).toBe(7);
 
@@ -213,6 +320,29 @@ describe('actuator damage', () => {
     const result = resolver.resolveKick(a, makeUnit(), dice);
     expect(result.damage).toBe(10);
   });
+
+  it('an arm actuator adds +2 to a physical weapon but does not halve its damage (p29/p138)', () => {
+    const a = makeUnit({
+      tonnage: 50,
+      criticalSlots: withDestroyed('rightArm', ['lower_arm_actuator'])
+    });
+    expect(resolver.calculatePhysicalTN(a, makeUnit(), 'physicalWeapon', {
+      weapon: resolver.getPhysicalWeapon('hatchet'),
+      arm: 'rightArm'
+    })).toBe(6); // 5 - 1 (hatchet) + 2 (actuator)
+
+    const result = resolver.resolvePhysicalWeapon(a, makeUnit(), 'hatchet', dice, { arm: 'rightArm' });
+    expect(result.damage).toBe(10); // ceil(50/5), not halved
+  });
+
+  it('the flail keeps its fixed 9 damage with a damaged actuator (p38 footnote †)', () => {
+    const a = makeUnit({
+      tonnage: 50,
+      criticalSlots: withDestroyed('rightArm', ['upper_arm_actuator'])
+    });
+    const result = resolver.resolvePhysicalWeapon(a, makeUnit(), 'flail', dice, { arm: 'rightArm' });
+    expect(result.damage).toBe(9);
+  });
 });
 
 // =============================================================================
@@ -221,7 +351,7 @@ describe('actuator damage', () => {
 
 describe('PhysicalAttackResolver - DFA', () => {
   const resolver = new PhysicalAttackResolver();
-  const dice = makeDiceRoller(12);
+  const dice = makeDice();
 
   it('uses comparative piloting plus the jumping modifier, no attacker move mod', () => {
     const attacker = makeUnit({ _movementModifier: 2 });
@@ -236,18 +366,18 @@ describe('PhysicalAttackResolver - DFA', () => {
     expect(result.reason).toBe('No jump jets');
   });
 
-  it('all DFA damage uses the punch table', () => {
+  it('all DFA damage uses the punch table (p140)', () => {
     const attacker = makeUnit({ tonnage: 50, movement: { jump: 4 } });
     const result = resolver.resolveDFA(attacker, makeUnit(), dice);
     expect(result.hitLocations.length).toBe(1);
-    const validPunchLocations = Object.values(PUNCH).map(e => e.location);
+    const validPunchLocations = Object.values(PUNCH.front).map(e => e.location);
     expect(validPunchLocations).toContain(result.hitLocations[0].location);
   });
 });
 
 describe('PhysicalAttackResolver - punch', () => {
   const resolver = new PhysicalAttackResolver();
-  const dice = makeDiceRoller(12);
+  const dice = makeDice();
 
   it('rejects punching when both arms are destroyed', () => {
     const attacker = makeUnit({
@@ -268,16 +398,16 @@ describe('PhysicalAttackResolver - punch', () => {
 
   it('rejects a target outside the forward arc', () => {
     const attacker = makeUnit();
-    const behind = makeUnit({ position: { hexKey: '5,8', facing: 0 } }); // south = rear
-    const result = resolver.resolveKick(attacker, behind, dice);
+    const behind = makeUnit({ position: { hexKey: '5,8', facing: 0 } });
+    const result = resolver.resolvePunch(attacker, behind, dice);
     expect(result.success).toBe(false);
-    expect(result.reason).toBe('Target not in forward arc');
+    expect(result.reason).toContain('forward or side arc');
   });
 });
 
 describe('PhysicalAttackResolver - kick', () => {
   const resolver = new PhysicalAttackResolver();
-  const dice = makeDiceRoller(12);
+  const dice = makeDice();
 
   it('rejects kicking when a leg is destroyed', () => {
     const attacker = makeUnit({ isLocationDestroyed: (loc) => loc === 'leftLeg' });
@@ -294,38 +424,51 @@ describe('PhysicalAttackResolver - kick', () => {
 
   it('a missed kick requires a PSR', () => {
     const attacker = makeUnit();
-    const result = resolver.resolveKick(attacker, makeUnit(), makeDiceRoller(2));
+    const result = resolver.resolveKick(attacker, makeUnit(), makeDice({ hit: 2 }));
     expect(result.hit).toBe(false);
     expect(result.psrRequired).toBe(true);
   });
 });
 
-describe('PhysicalAttackResolver - charge and push', () => {
+describe('fired-leg restriction on kicks (p38)', () => {
   const resolver = new PhysicalAttackResolver();
-  const dice = makeDiceRoller(12);
+  const dice = makeDice();
 
-  it('charge damage is tonnage / 10 per hex, rounded up (p38 example)', () => {
-    // 65 tons, 5 hexes: 6.5 x 5 = 32.5 -> 33
-    const attacker = makeUnit({ tonnage: 65 });
-    const target = makeUnit({ tonnage: 45 });
-    const result = resolver.resolveCharge(attacker, target, 5, dice);
-    expect(result.targetDamage).toBe(33);
-    expect(result.attackerDamage).toBe(5); // ceil(45/10)
+  for (const leg of ['leftLeg', 'rightLeg']) {
+    it(`cannot kick when the ${leg} fired this turn`, () => {
+      const attacker = makeUnit({ firedThisTurn: new Set([leg]) });
+      const result = resolver.resolveKick(attacker, makeUnit(), dice);
+      expect(result.success).toBe(false);
+      expect(result.reason).toContain('fired');
+    });
+  }
+
+  it('can kick when only an arm fired this turn', () => {
+    const attacker = makeUnit({ firedThisTurn: new Set(['rightArm']) });
+    expect(resolver.resolveKick(attacker, makeUnit(), dice).success).toBe(true);
+  });
+});
+
+// =============================================================================
+// Physical weapons (p38)
+// =============================================================================
+
+describe('PhysicalAttackResolver - physical weapons', () => {
+  const resolver = new PhysicalAttackResolver();
+  const dice = makeDice();
+
+  it('claws always roll on the punch table (1D6)', () => {
+    const recording = makeRecordingDice({ hit: 12, location: 6 });
+    const result = resolver.resolvePhysicalWeapon(makeUnit(), makeUnit(), 'claws', recording);
+    expect(result.hitLocations[0].location).toBe('head');
+    expect(recording.calls).toEqual(['2d6', '1d6']);
   });
 
-  it('push requires an adjacent target', () => {
-    const attacker = makeUnit();
-    const far = makeUnit({ position: { hexKey: '5,4', facing: 0 } });
-    const result = resolver.resolvePush(attacker, far, dice);
-    expect(result.success).toBe(false);
-    expect(result.reason).toContain('adjacent');
-  });
-
-  it('push requires the target directly in front', () => {
-    const attacker = makeUnit();
-    const side = makeUnit({ position: { hexKey: '5,8', facing: 0 } }); // directly behind
-    const result = resolver.resolvePush(attacker, side, dice);
-    expect(result.success).toBe(false);
-    expect(result.reason).toContain('front');
+  it('a standard-table weapon rolls 2D6 on the p139 hit-location table', () => {
+    // Lance uses the standard table; 2D6 roll 12 is the head on the Front column.
+    const recording = makeRecordingDice({ hit: 12, location: 1 });
+    const result = resolver.resolvePhysicalWeapon(makeUnit(), makeUnit(), 'lance', recording);
+    expect(result.hitLocations[0].location).toBe('head');
+    expect(recording.calls).toEqual(['2d6', '2d6']);
   });
 });

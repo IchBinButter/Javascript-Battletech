@@ -8,6 +8,11 @@
  * Damage (p38): punch 1 per 10 tons, kick 1 per 5 tons, physical weapons per
  * the p38 table, charge attacker tonnage/10 per hex charged. Fractions round up.
  *
+ * Hit location: punch, kick, charge and DFA roll 1D6 on the p139/p140 tables
+ * (columns Left Side | Front/Rear | Right Side); physical weapons that use the
+ * standard table roll 2D6 on the p139 'Mech Hit Location Table (p38: "roll 1D6
+ * and consult the appropriate column of the Kick Location Table").
+ *
  * Attacking across levels uses the Different Levels table (p140), which decides
  * both what can be attempted and which hit location table applies.
  */
@@ -104,7 +109,10 @@ export class PhysicalAttackResolver {
 
   /**
    * Physical weapon modifiers for one arm (p29, p38): the weapon needs its arm,
-   * and a destroyed hand actuator rules it out entirely.
+   * and a destroyed hand actuator rules it out entirely. An upper or lower arm
+   * actuator adds +2, but unlike a punch it does not halve the damage
+   * (p29/p138: "half damage for punching attack with arm"; p38 footnote †:
+   * the flail is "not reduced by absent or missing actuators").
    */
   physicalWeaponModifiers(unit, arm) {
     if (this._destroyed(unit, arm)) {
@@ -122,23 +130,31 @@ export class PhysicalAttackResolver {
       return { legal: false, reason: `Hand actuator destroyed on ${arm}` };
     }
 
+    // p29/p138: +2 per upper/lower arm actuator for punching AND physical
+    // weapons; only punch damage is halved. Physical weapons keep full damage.
     let tn = 0;
-    let multiplier = 1;
-    if (damage.upperArm) { tn += 2; multiplier *= 0.5; }
-    if (damage.lowerArm) { tn += 2; multiplier *= 0.5; }
+    if (damage.upperArm) { tn += 2; }
+    if (damage.lowerArm) { tn += 2; }
 
-    return { legal: true, tn, damageMultiplier: multiplier };
+    return { legal: true, tn, damageMultiplier: 1 };
   }
 
   /**
    * Kick modifiers (p29/p38): both hip actuators must be undamaged to kick at
-   * all; each upper or lower leg actuator adds +2 and halves the damage
-   * cumulatively; a foot actuator adds +1.
+   * all; a leg that fired weapons this turn cannot kick; each upper or lower
+   * leg actuator adds +2 and halves the damage cumulatively; a foot actuator
+   * adds +1.
    */
   kickModifiers(unit) {
     for (const leg of ['leftLeg', 'rightLeg']) {
       if (this._destroyed(unit, leg)) {
         return { legal: false, reason: `${leg} destroyed` };
+      }
+      // p38: "A 'Mech cannot kick with a leg if it fired weapons mounted in
+      // that leg that turn." The API does not name the kicking leg, so either
+      // leg firing blocks the kick.
+      if (this._firedFrom(unit, leg)) {
+        return { legal: false, reason: `Weapons fired from ${leg} this turn` };
       }
       if (this.getActuatorDamage(unit, leg).hip) {
         return { legal: false, reason: 'Hip actuator destroyed' };
@@ -199,7 +215,12 @@ export class PhysicalAttackResolver {
     }
 
     if (diff < -1 || diff > 1) return 'Physical attacks only reach one level up or down';
-    if (type === 'kick') return diff === -1 ? 'Cannot kick a target one level lower' : null;
+    // p140 Different Levels table: a kick cannot reach a target one level
+    // higher (one level lower it rolls on the Punch table); a punch cannot
+    // reach a target one level lower (one level higher it rolls on the Kick
+    // table). The inverse cases are legal.
+    if (type === 'kick') return diff === 1 ? 'Cannot kick a target one level higher' : null;
+    if (type === 'punch') return diff === -1 ? 'Cannot punch a target one level lower' : null;
     if (type === 'push') return diff === 0 ? null : 'A push needs the target at the same level';
     return null;
   }
@@ -210,13 +231,21 @@ export class PhysicalAttackResolver {
    */
   _tableFor(type, levelDiff) {
     if (type === 'punch') return levelDiff === 1 ? 'kick' : 'punch';
-    if (type === 'kick') return levelDiff === 1 ? 'punch' : 'kick';
+    if (type === 'kick') return levelDiff === -1 ? 'punch' : 'kick';
     if (type === 'physicalWeapon') {
       if (levelDiff === 1) return 'kick';
       if (levelDiff === -1) return 'punch';
       return null;
     }
     return null;
+  }
+
+  /**
+   * Column of the 1D6 physical-attack tables (p139/p140). The middle column is
+   * labelled Front/Rear, so a rear attack uses 'front'.
+   */
+  _physicalColumn(direction) {
+    return direction === 'left' || direction === 'right' ? direction : 'front';
   }
 
   _pickPunchArm(attacker, target) {
@@ -261,11 +290,12 @@ export class PhysicalAttackResolver {
     if (hit) {
       const base = Math.ceil(attacker.tonnage / 10);
       damage = Math.max(1, Math.floor(base * armMods.damageMultiplier));
-      const locRoll = diceRoller.roll2d6();
+      const direction = this._attackDirection(attacker, target);
+      const locRoll = diceRoller.roll1d6();
       const table = this._tableFor('punch', levelDiff);
       const location = table === 'kick'
-        ? this.kickLocation(locRoll)
-        : this.punchLocation(locRoll);
+        ? this.kickLocation(locRoll, direction)
+        : this.punchLocation(locRoll, direction);
       locations = [{ location, damage }];
     }
 
@@ -312,11 +342,12 @@ export class PhysicalAttackResolver {
     if (hit) {
       const base = Math.ceil(attacker.tonnage / 5);
       damage = Math.max(1, Math.floor(base * legMods.damageMultiplier));
-      const locRoll = diceRoller.roll2d6();
+      const direction = this._attackDirection(attacker, target);
+      const locRoll = diceRoller.roll1d6();
       const table = this._tableFor('kick', levelDiff);
       const location = table === 'punch'
-        ? this.punchLocation(locRoll)
-        : this.kickLocation(locRoll);
+        ? this.punchLocation(locRoll, direction)
+        : this.kickLocation(locRoll, direction);
       locations = [{ location, damage }];
     } else {
       psrRequired = true; // missed kick: PSR (p54, modifier 0)
@@ -359,8 +390,10 @@ export class PhysicalAttackResolver {
 
     if (hit) {
       targetDamage = Math.ceil((attacker.tonnage / 10) * distanceCharged);
-      const locRoll = diceRoller.roll2d6();
-      locations = [{ location: this.punchLocation(locRoll), damage: targetDamage }];
+      // p140: charge uses the Punch Location Table (1D6).
+      const direction = this._attackDirection(attacker, target);
+      const locRoll = diceRoller.roll1d6();
+      locations = [{ location: this.punchLocation(locRoll, direction), damage: targetDamage }];
       attackerDamage = Math.ceil(target.tonnage / 10);
     }
 
@@ -401,8 +434,10 @@ export class PhysicalAttackResolver {
       // formula, and guessing it would be worse than keeping the old value.
       targetDamage = Math.floor(attacker.tonnage / 10) + Math.floor(attacker.tonnage / 5);
       attackerDamage = Math.floor(attacker.tonnage / 10);
-      const locRoll = diceRoller.roll2d6();
-      locations = [{ location: this.punchLocation(locRoll), damage: targetDamage }];
+      // p140: DFA uses the Punch Location Table (1D6).
+      const direction = this._attackDirection(attacker, target);
+      const locRoll = diceRoller.roll1d6();
+      locations = [{ location: this.punchLocation(locRoll, direction), damage: targetDamage }];
     } else {
       attackerDamage = Math.floor(attacker.tonnage / 10);
     }
@@ -514,18 +549,19 @@ export class PhysicalAttackResolver {
 
       damage = Math.max(1, Math.floor(base * armMods.damageMultiplier));
 
-      const locRoll = diceRoller.roll2d6();
       let table = this._tableFor('physicalWeapon', levelDiff);
       if (weapon.table === 'punch') table = 'punch';
       if (weapon.table === 'option' && options.usePunchTable && !table) table = 'punch';
 
+      const direction = this._attackDirection(attacker, target);
       let location;
       if (table === 'punch') {
-        location = this.punchLocation(locRoll);
+        location = this.punchLocation(diceRoller.roll1d6(), direction);
       } else if (table === 'kick') {
-        location = this.kickLocation(locRoll);
+        location = this.kickLocation(diceRoller.roll1d6(), direction);
       } else {
-        const std = this._standardLocation(locRoll, this._attackDirection(attacker, target));
+        // The standard p139 hit-location table is 2D6.
+        const std = this._standardLocation(diceRoller.roll2d6(), direction);
         location = std.location;
       }
       locations = [{ location, damage }];
@@ -593,17 +629,22 @@ export class PhysicalAttackResolver {
     return Math.max(2, Math.min(12, tn));
   }
 
-  punchLocation(roll) {
-    const entry = PUNCH_TABLE[roll.toString()];
+  /** p140 Punch Location Table (1D6) for the attack-direction column. */
+  punchLocation(roll, direction = 'front') {
+    const column = PUNCH_TABLE[this._physicalColumn(direction)];
+    const entry = column ? column[roll.toString()] : null;
     return entry ? entry.location : 'centerTorso';
   }
 
-  kickLocation(roll) {
-    const entry = KICK_TABLE[roll.toString()];
+  /** p139 Kick Location Table (1D6) for the attack-direction column. */
+  kickLocation(roll, direction = 'front') {
+    const column = KICK_TABLE[this._physicalColumn(direction)];
+    const entry = column ? column[roll.toString()] : null;
     return entry ? entry.location : 'leftLeg';
   }
 
-  chargeLocation(roll) {
-    return this.punchLocation(roll);
+  /** Charge attacks use the Punch Location Table (p140). */
+  chargeLocation(roll, direction = 'front') {
+    return this.punchLocation(roll, direction);
   }
 }

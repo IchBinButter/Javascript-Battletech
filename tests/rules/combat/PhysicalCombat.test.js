@@ -15,7 +15,11 @@ import {
 } from '../../helpers/testUtils.js';
 
 const resolver = new PhysicalAttackResolver();
-const dice = (n) => ({ roll2d6: () => n });
+// Physical hit locations are 1D6 (p139/p140); to-hit rolls stay 2D6.
+const dice = (n) => ({
+  roll2d6: () => n,
+  roll1d6: () => ((Math.max(1, Math.floor(n)) - 1) % 6) + 1
+});
 
 function mk(overrides = {}) {
   return {
@@ -41,24 +45,31 @@ const north = (overrides = {}) => mk({ position: { hexKey: '5,6', facing: 3 }, .
 // Different Levels table (p140)
 // =============================================================================
 
-describe('physical attacks across levels', () => {
-  it('a punch one level up rolls on the kick table', () => {
+describe('physical attacks across levels (p140)', () => {
+  it('a punch one level higher is forced onto the kick table', () => {
     const result = resolver.resolvePunch(mk(), north(), dice(12), { levelDifference: 1 });
     expect(result.success).toBe(true);
     expect(result.hit).toBe(true);
     expect(['leftLeg', 'rightLeg']).toContain(result.hitLocations[0].location);
   });
 
-  it('a kick one level up rolls on the punch table', () => {
-    const result = resolver.resolveKick(mk(), north(), dice(12), { levelDifference: 1 });
-    expect(result.success).toBe(true);
-    expect(result.hitLocations[0].location).not.toBe('leftLeg');
-  });
-
-  it('a kick one level down is not allowed', () => {
-    const result = resolver.resolveKick(mk(), north(), dice(12), { levelDifference: -1 });
+  it('a punch cannot reach a target one level lower (p140)', () => {
+    const result = resolver.resolvePunch(mk(), north(), dice(12), { levelDifference: -1 });
     expect(result.success).toBe(false);
     expect(result.reason).toContain('one level lower');
+  });
+
+  it('a kick cannot reach a target one level higher (p140)', () => {
+    const result = resolver.resolveKick(mk(), north(), dice(12), { levelDifference: 1 });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('one level higher');
+  });
+
+  it('a kick one level lower is forced onto the punch table', () => {
+    const result = resolver.resolveKick(mk(), north(), dice(12), { levelDifference: -1 });
+    expect(result.success).toBe(true);
+    expect(result.hit).toBe(true);
+    expect(['leftLeg', 'rightLeg']).not.toContain(result.hitLocations[0].location);
   });
 
   it('a charge reaches one level up or down but not two', () => {
@@ -181,10 +192,58 @@ describe('physical weapons', () => {
     expect(result.reason).toContain('Hand actuator');
   });
 
+  it('an arm actuator adds +2 to a physical weapon but does not halve its damage (p29/p138)', () => {
+    const attacker = mk({
+      tonnage: 50,
+      criticalSlots: {
+        leftArm: [], rightArm: [{ item: 'lower_arm_actuator', status: 'destroyed' }],
+        leftLeg: [], rightLeg: []
+      }
+    });
+    // p29/p138: +2 to the attack; half damage is for punching only.
+    expect(resolver.calculatePhysicalTN(attacker, north(), 'physicalWeapon', {
+      weapon: resolver.getPhysicalWeapon('hatchet'),
+      arm: 'rightArm'
+    })).toBe(6); // 5 piloting - 1 hatchet + 2 actuator
+
+    const result = resolver.resolvePhysicalWeapon(attacker, north(), 'hatchet', dice(12), { arm: 'rightArm' });
+    expect(result.damage).toBe(10); // ceil(50/5), not halved
+  });
+
+  it('the flail keeps its fixed 9 damage with a damaged actuator (p38 footnote †)', () => {
+    const attacker = mk({
+      tonnage: 50,
+      criticalSlots: {
+        leftArm: [], rightArm: [{ item: 'upper_arm_actuator', status: 'destroyed' }],
+        leftLeg: [], rightLeg: []
+      }
+    });
+    const result = resolver.resolvePhysicalWeapon(attacker, north(), 'flail', dice(12), { arm: 'rightArm' });
+    expect(result.damage).toBe(9);
+  });
+
   it('rejects an unknown weapon', () => {
     const result = resolver.resolvePhysicalWeapon(mk(), north(), 'chainsaw', dice(12));
     expect(result.success).toBe(false);
     expect(result.reason).toBe('Unknown physical weapon');
+  });
+});
+
+// =============================================================================
+// Fired-leg restriction (p38)
+// =============================================================================
+
+describe('fired leg restriction', () => {
+  it('cannot kick with a leg that fired weapons this turn', () => {
+    const attacker = mk({ firedThisTurn: new Set(['rightLeg']) });
+    const result = resolver.resolveKick(attacker, north(), dice(12));
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('fired');
+  });
+
+  it('can kick when only an arm fired this turn', () => {
+    const attacker = mk({ firedThisTurn: new Set(['leftArm']) });
+    expect(resolver.resolveKick(attacker, north(), dice(12)).success).toBe(true);
   });
 });
 

@@ -76,7 +76,7 @@ function collect(engine, eventName) {
 describe('minefields during movement', () => {
   it('attacks the Mech, reports the trigger and reduces the field', () => {
     const { engine, mech } = movementEngine({ fields: { '5,6': { type: 'light', strength: 2 } } });
-    engine.diceRoller = queueRoller([9, 7, 7]);
+    engine.diceRoller = queueRoller([9, 1, 2]);
     const events = collect(engine, 'minefieldTriggered');
 
     const result = engine.processAction(0, {
@@ -84,7 +84,8 @@ describe('minefields during movement', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(mech.armor.rightLeg.front).toBe(31); // 41 - two 5-point groups
+    // Two 5-point groupings on the right leg (p139 front Kick column, 1-3).
+    expect(mech.armor.rightLeg.front).toBe(31); // 41 - 10
     expect(engine.stateManager.getState().minefields['5,6'].strength).toBe(1);
 
     expect(events).toHaveLength(1);
@@ -129,7 +130,7 @@ describe('hidden Mech minefield exit (p82)', () => {
       fields: { '5,5': { type: 'light', strength: 2 } },
       hidden: true
     });
-    engine.diceRoller = queueRoller([9, 7, 7]);
+    engine.diceRoller = queueRoller([9, 1, 2]);
     const events = collect(engine, 'minefieldTriggered');
 
     const result = walkOut(engine);
@@ -141,7 +142,8 @@ describe('hidden Mech minefield exit (p82)', () => {
     expect(result.minefields).toHaveLength(1);
     expect(result.minefields[0]).toMatchObject({ unitId: 'mover', hexKey: '5,5', triggered: true });
     expect(engine.stateManager.getState().minefields['5,5'].strength).toBe(1);
-    expect(mech.armor.rightLeg.front).toBe(31); // two 5-point groups, front table 7
+    // Two 5-point groups on the right leg (p139 front Kick column, 1-3).
+    expect(mech.armor.rightLeg.front).toBe(31);
     expect(events).toHaveLength(1);
     expect(events[0].hexKey).toBe('5,5');
   });
@@ -165,7 +167,7 @@ describe('hidden Mech minefield exit (p82)', () => {
       fields: { '5,5': { type: 'light', strength: 2 } },
       hidden: true
     });
-    engine.diceRoller = queueRoller([9, 7, 7]);
+    engine.diceRoller = queueRoller([9, 1, 2]);
 
     const result = engine.processAction(0, {
       type: 'move', unitId: 'mover', path: ['5,5', '5,6'], movementType: 'run'

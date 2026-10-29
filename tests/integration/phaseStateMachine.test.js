@@ -135,11 +135,22 @@ describe('Initiative', () => {
     expect(engine.phaseManager.phaseUnitQueue[1].playerId).toBe(1);
   });
 
-  it('physical_attack phase always has winner first regardless of choice', () => {
+  it('physical_attack repeats the weapon attack order: loser declares first (p12)', () => {
     const { engine } = twoMechEngine([8, 5]);
     engine.phaseManager.enterPhase('initiative');
 
     engine.phaseManager.chooseInitiative(false);
+    engine.phaseManager.enterPhase('physical_attack');
+
+    expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(1);
+    expect(engine.phaseManager.phaseUnitQueue[1].playerId).toBe(0);
+  });
+
+  it('physical_attack honours the initiative choice like the weapon attack phase', () => {
+    const { engine } = twoMechEngine([8, 5]);
+    engine.phaseManager.enterPhase('initiative');
+
+    engine.phaseManager.chooseInitiative(true);
     engine.phaseManager.enterPhase('physical_attack');
 
     expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(0);
@@ -183,13 +194,13 @@ describe('Per-unit alternation', () => {
     expect(engine.phaseManager.phaseUnitQueue[0].unitId).toBe('jenner-1');
   });
 
-  it('_enterPhysicalAttack builds queue with winner first', () => {
+  it('_enterPhysicalAttack builds queue with the initiative loser first', () => {
     const { engine } = twoMechEngine([8, 5]);
     engine.phaseManager.enterPhase('initiative');
     engine.phaseManager.enterPhase('physical_attack');
 
     expect(engine.phaseManager.phaseUnitQueue).toHaveLength(2);
-    expect(engine.phaseManager.phaseUnitQueue[0].unitId).toBe('atlas-0');
+    expect(engine.phaseManager.phaseUnitQueue[0].unitId).toBe('jenner-1');
   });
 
   it('advanceQueue increments index and emits queueAdvanced', () => {
@@ -272,15 +283,17 @@ describe('Action validation', () => {
     expect(engine.phaseManager.validateAction('fire', 0).valid).toBe(false);
   });
 
-  it('physicalAttack valid only in physical_attack phase', () => {
+  it('physicalAttack valid only in physical_attack phase (and for the declaring side)', () => {
     const { engine } = twoMechEngine([8, 5]);
     engine.phaseManager.enterPhase('initiative');
     engine.phaseManager.enterPhase('physical_attack');
 
-    expect(engine.phaseManager.validateAction('physicalAttack', 0).valid).toBe(true);
+    // p12: the initiative loser declares first.
+    expect(engine.phaseManager.validateAction('physicalAttack', 1).valid).toBe(true);
+    expect(engine.phaseManager.validateAction('physicalAttack', 0).valid).toBe(false);
 
     engine.phaseManager.enterPhase('movement');
-    expect(engine.phaseManager.validateAction('physicalAttack', 0).valid).toBe(false);
+    expect(engine.phaseManager.validateAction('physicalAttack', 1).valid).toBe(false);
   });
 
   it('endPhase and selectUnit are always valid regardless of phase', () => {
@@ -396,6 +409,71 @@ describe('Heat phase', () => {
     expect(atlas.shutdown).toBe(true);
   });
 
+  it('rolls Consciousness before the shutdown PSR and only once per damage point (p58)', () => {
+    const { engine, atlas } = twoMechEngine([8, 5]);
+    const totalSinks = atlas.getHeatDissipation();
+    atlas.heat = totalSinks + 23; // 23 heat: shutdown on 8+, ammo explosion on 6+
+    engine.diceRoller = makeDiceRoller(2); // fails every avoid roll
+
+    const rolls = [];
+    const shutdowns = [];
+    engine.eventBus.on('consciousnessRoll', d => rolls.push(d));
+    engine.eventBus.on('involuntaryShutdown', d => shutdowns.push(d));
+
+    engine.phaseManager.enterPhase('heat');
+
+    // The ammunition explosion adds 2 points of MechWarrior damage; the first
+    // roll (2 vs 3+) knocks the warrior out, so no further rolls are made.
+    expect(atlas.pilot.hits).toBe(3); // 2 from the ammo explosion + 1 from the fall
+    expect(atlas.pilot.conscious).toBe(false);
+    expect(rolls).toHaveLength(1);
+    expect(rolls[0]).toMatchObject({ hits: 1, roll: 2, target: 3 });
+
+    // p58: an unconscious warrior's PSRs fail automatically, so the shut-down
+    // Mech falls and the warrior takes the p54 footnote-2 point of damage.
+    expect(atlas.shutdown).toBe(true);
+    expect(atlas.prone).toBe(true);
+    expect(shutdowns).toHaveLength(1);
+    expect(shutdowns[0].psr.passed).toBe(false);
+    expect(shutdowns[0].fall).not.toBeNull();
+  });
+
+  it('a failed involuntary-shutdown PSR falls the Mech and injures the warrior (p52/p54/p58)', () => {
+    const { engine, atlas } = twoMechEngine([8, 5]);
+    const totalSinks = atlas.getHeatDissipation();
+    atlas.heat = totalSinks + 18; // 18 heat: avoid shutdown on 6+
+    engine.diceRoller = makeDiceRoller(2); // fails the shutdown check and the +3 PSR
+
+    const falls = [];
+    const shutdowns = [];
+    engine.eventBus.on('unitFell', d => falls.push(d));
+    engine.eventBus.on('involuntaryShutdown', d => shutdowns.push(d));
+
+    engine.phaseManager.enterPhase('heat');
+
+    expect(atlas.shutdown).toBe(true);
+    expect(atlas.prone).toBe(true);
+    expect(shutdowns).toHaveLength(1);
+
+    // p56/p74: a standing fall of a 100-ton Mech is ceil(100/10) = 10 damage,
+    // applied in 5-point groupings.
+    expect(shutdowns[0].fall).toMatchObject({
+      pilotHit: true,
+      levelsFallen: 0,
+      damage: 10,
+      damageGroupings: [5, 5],
+      hitLocationColumn: 'front'
+    });
+
+    // p54 footnote 2 / p58: the shutdown 'Mech is immobile, so the warrior
+    // takes the point of damage automatically; the injury then forces an
+    // immediate Consciousness Roll.
+    expect(shutdowns[0].fall.pilotPSR).toMatchObject({ autoDamage: true, passed: false });
+    expect(atlas.pilot.hits).toBe(1);
+    expect(atlas.pilot.conscious).toBe(false);
+    expect(falls).toHaveLength(1);
+  });
+
   it('emits heatResolved and heatPhase events', () => {
     const { engine } = twoMechEngine([8, 5]);
     const events = [];
@@ -412,165 +490,158 @@ describe('Heat phase', () => {
 });
 
 // =============================================================================
-// Consciousness checks
+// Consciousness: damage-time rolls and End-Phase recovery (p12/p58)
 // =============================================================================
 
-describe('Consciousness checks', () => {
-  it('conscious pilot with 1 hit stays conscious on roll >= 3', () => {
+describe('Consciousness', () => {
+  it('a conscious pilot does not roll in the End Phase', () => {
     const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(12);
-    atlas.pilot.hits = 1;
+    engine.diceRoller = makeDiceRoller(2);
+    atlas.pilot.hits = 3;
     atlas.pilot.conscious = true;
+
+    const rolls = [];
+    engine.eventBus.on('consciousnessRoll', d => rolls.push(d));
 
     engine.phaseManager.enterPhase('end');
 
     expect(atlas.pilot.conscious).toBe(true);
+    expect(rolls).toHaveLength(0);
   });
 
-  it('conscious pilot with 1 hit goes unconscious on roll < 3', () => {
+  it('an unconscious pilot recovers in the End Phase of a later turn', () => {
     const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(2);
-    atlas.pilot.hits = 1;
-    atlas.pilot.conscious = true;
-
-    const events = [];
-    engine.eventBus.on('pilotUnconscious', d => events.push(d));
-
-    engine.phaseManager.enterPhase('end');
-
-    expect(atlas.pilot.conscious).toBe(false);
-    expect(events).toHaveLength(1);
-    expect(events[0].unitId).toBe('atlas-0');
-    expect(events[0].roll).toBe(2);
-    expect(events[0].target).toBe(3);
-    expect(events[0].hits).toBe(1);
-    expect(events[0].auto).toBe(false);
-  });
-
-  it('2 pilot hits require roll >= 5 to stay conscious', () => {
-    const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(4);
-    atlas.pilot.hits = 2;
-    atlas.pilot.conscious = true;
-
-    engine.phaseManager.enterPhase('end');
-    expect(atlas.pilot.conscious).toBe(false);
-  });
-
-  it('3 pilot hits require roll >= 7 to stay conscious', () => {
-    const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(6);
+    engine.diceRoller = makeDiceRoller(7);
     atlas.pilot.hits = 3;
-    atlas.pilot.conscious = true;
-
-    engine.phaseManager.enterPhase('end');
-    expect(atlas.pilot.conscious).toBe(false);
-  });
-
-  it('4 pilot hits require roll >= 10 to stay conscious', () => {
-    const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(9);
-    atlas.pilot.hits = 4;
-    atlas.pilot.conscious = true;
-
-    engine.phaseManager.enterPhase('end');
-    expect(atlas.pilot.conscious).toBe(false);
-  });
-
-  it('a pilot with 5 hits needs 11+ to stay conscious', () => {
-    const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(10); // fails the 11+
-    atlas.pilot.hits = 5;
-    atlas.pilot.conscious = true;
+    atlas.pilot.conscious = false;
+    atlas.pilot.unconsciousTurn = 0;
 
     const events = [];
-    engine.eventBus.on('pilotUnconscious', d => events.push(d));
+    engine.eventBus.on('pilotRegainedConsciousness', d => events.push(d));
 
     engine.phaseManager.enterPhase('end');
 
-    expect(atlas.pilot.conscious).toBe(false);
-    expect(events[0].auto).toBe(false);
+    expect(atlas.pilot.conscious).toBe(true);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ unitId: 'atlas-0', roll: 7, target: 7 });
   });
 
-  it('a pilot with 6 hits is dead and auto-unconscious', () => {
+  it.each([[1, 3], [2, 5], [3, 7], [4, 10], [5, 11]])(
+    'a warrior with %i hits needs %i+ to regain consciousness',
+    (hits, target) => {
+      const { engine, atlas } = twoMechEngine([8, 5]);
+      engine.diceRoller = makeDiceRoller(target - 1);
+      atlas.pilot.hits = hits;
+      atlas.pilot.conscious = false;
+      atlas.pilot.unconsciousTurn = 0;
+
+      const stillOut = [];
+      engine.eventBus.on('pilotStillUnconscious', d => stillOut.push(d));
+
+      engine.phaseManager.enterPhase('end');
+
+      expect(atlas.pilot.conscious).toBe(false);
+      expect(stillOut).toHaveLength(1);
+      expect(stillOut[0].target).toBe(target);
+    }
+  );
+
+  it('does not roll for a pilot knocked out during this turn', () => {
     const { engine, atlas } = twoMechEngine([8, 5]);
     engine.diceRoller = makeDiceRoller(12);
-    atlas.pilot.hits = 6;
-    atlas.pilot.conscious = true;
+    atlas.pilot.hits = 1;
+    atlas.pilot.conscious = false;
+    atlas.pilot.unconsciousTurn = engine.stateManager.getState().turn;
 
     const events = [];
-    engine.eventBus.on('pilotUnconscious', d => events.push(d));
+    engine.eventBus.on('pilotRegainedConsciousness', d => events.push(d));
 
     engine.phaseManager.enterPhase('end');
 
     expect(atlas.pilot.conscious).toBe(false);
-    expect(events[0].auto).toBe(true);
+    expect(events).toHaveLength(0);
   });
 
-  it('already unconscious pilot is not checked again', () => {
+  it('the sixth point of damage kills the warrior', () => {
     const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(2);
-    atlas.pilot.hits = 1;
+    const killed = [];
+    engine.eventBus.on('pilotKilled', d => killed.push(d));
+
+    engine.phaseManager.rollConsciousness(atlas, { hits: 6 });
+
+    expect(atlas.pilot.dead).toBe(true);
+    expect(atlas.pilot.conscious).toBe(false);
+    expect(killed).toHaveLength(1);
+  });
+
+  it('an unconscious pilot is immobile and cannot act', () => {
+    const { engine, atlas } = twoMechEngine([8, 5]);
+    engine.phaseManager.enterPhase('initiative');
+    engine.phaseManager.enterPhase('movement');
+
     atlas.pilot.conscious = false;
+    engine.phaseManager.advanceQueue(); // atlas-0 declares second in movement
 
-    const events = [];
-    engine.eventBus.on('pilotUnconscious', d => events.push(d));
-
-    engine.phaseManager.enterPhase('end');
-    expect(events).toHaveLength(0);
-  });
-
-  it('pilot with 0 hits is not checked for consciousness', () => {
-    const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(2);
-    atlas.pilot.hits = 0;
-    atlas.pilot.conscious = true;
-
-    const events = [];
-    engine.eventBus.on('pilotUnconscious', d => events.push(d));
-
-    engine.phaseManager.enterPhase('end');
-    expect(events).toHaveLength(0);
+    expect(engine.phaseManager.validateAction('move', 0, 'atlas-0').valid).toBe(false);
+    expect(engine.phaseManager.validateAction('pass', 0, 'atlas-0').valid).toBe(true);
   });
 });
 
 // =============================================================================
-// Shutdown restart
+// Shutdown restart (p12/p52)
 // =============================================================================
 
 describe('Shutdown restart', () => {
-  it('shutdown unit restarts on roll >= 8', () => {
+  it('restarts automatically below 14 heat in the Heat Phase', () => {
     const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(8);
+    engine.diceRoller = makeDiceRoller(12);
     atlas.shutdown = true;
+    atlas.heat = 10;
 
     const events = [];
     engine.eventBus.on('unitRestarted', d => events.push(d));
-    engine.eventBus.on('unitRestartFailed', d => events.push(d));
 
-    engine.phaseManager.enterPhase('end');
+    engine.phaseManager.enterPhase('heat');
 
     expect(atlas.shutdown).toBe(false);
     expect(events).toHaveLength(1);
-    expect(events[0].unitId).toBe('atlas-0');
-    expect(events[0].roll).toBe(8);
+    expect(events[0]).toMatchObject({ unitId: 'atlas-0', auto: true });
   });
 
-  it('shutdown unit fails to restart on roll < 8', () => {
+  it('rolls against the current avoid target in the Heat Phase', () => {
     const { engine, atlas } = twoMechEngine([8, 5]);
-    engine.diceRoller = makeDiceRoller(7);
+    const sinks = atlas.getHeatDissipation();
+    atlas.heat = sinks + 14; // 14 heat -> avoid on 4+
     atlas.shutdown = true;
+    // Shutdown-avoid roll first (12), then the restart roll (3 < 4).
+    engine.diceRoller = makeSequencedDiceRoller([12, 3]);
 
     const events = [];
-    engine.eventBus.on('unitRestarted', d => events.push(d));
     engine.eventBus.on('unitRestartFailed', d => events.push(d));
 
-    engine.phaseManager.enterPhase('end');
+    engine.phaseManager.enterPhase('heat');
 
+    expect(atlas.heat).toBe(14);
     expect(atlas.shutdown).toBe(true);
     expect(events).toHaveLength(1);
-    expect(events[0].unitId).toBe('atlas-0');
-    expect(events[0].roll).toBe(7);
+    expect(events[0]).toMatchObject({ roll: 3, target: 4 });
+  });
+
+  it('no restart is possible at 30 or more heat', () => {
+    const { engine, atlas } = twoMechEngine([8, 5]);
+    const sinks = atlas.getHeatDissipation();
+    atlas.heat = sinks + 30;
+    atlas.shutdown = true;
+    engine.diceRoller = makeDiceRoller(12);
+
+    const blocked = [];
+    engine.eventBus.on('unitRestartBlocked', d => blocked.push(d));
+
+    engine.phaseManager.enterPhase('heat');
+
+    expect(atlas.shutdown).toBe(true);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0].reason).toBe('overflow heat');
   });
 
   it('non-shutdown unit is not checked for restart', () => {
@@ -581,8 +652,9 @@ describe('Shutdown restart', () => {
     const events = [];
     engine.eventBus.on('unitRestarted', d => events.push(d));
     engine.eventBus.on('unitRestartFailed', d => events.push(d));
+    engine.eventBus.on('unitRestartBlocked', d => events.push(d));
 
-    engine.phaseManager.enterPhase('end');
+    engine.phaseManager.enterPhase('heat');
     expect(events).toHaveLength(0);
   });
 });

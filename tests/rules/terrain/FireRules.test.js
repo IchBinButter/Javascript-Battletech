@@ -6,8 +6,11 @@ import { describe, it, expect } from 'vitest';
 import { Hex } from '../../../src/models/Hex.js';
 import {
   canBurn, environmentModifier, fireTargetNumber, attemptIgnition,
-  spreadsOnRoll, spreadDistance, downwindHexes, temperatureModifier
+  spreadsOnRoll, spreadDistance, downwindHexes, temperatureModifier,
+  fireHeat, capOutsideHeat,
+  FIRE_HEAT_STANDING, FIRE_HEAT_MOVED_THROUGH, OUTSIDE_HEAT_CAP
 } from '../../../src/rules/terrain/FireRules.js';
+import * as FireRules from '../../../src/rules/terrain/FireRules.js';
 
 const woods = () => new Hex('1,1', { terrainType: 'light_woods' });
 const building = (type) => new Hex('1,1', { terrainType: 'clear', building: { type, levels: 2, cf: 40, currentCF: 40 } });
@@ -67,6 +70,42 @@ describe('Fire Table (p63)', () => {
     expect(attemptIgnition({ id: 'med_laser', type: 'DE' }, new Hex('1,1'), 12)).toMatchObject({
       ignited: false, targetNumber: null
     });
+  });
+});
+
+describe('heat from fire (p50)', () => {
+  it('a Mech standing in a burning hex absorbs 5 heat', () => {
+    expect(FIRE_HEAT_STANDING).toBe(5);
+    expect(fireHeat({ standingInFire: true })).toBe(5);
+  });
+
+  it('a Mech absorbs 2 heat for each burning hex it moved through', () => {
+    expect(FIRE_HEAT_MOVED_THROUGH).toBe(2);
+    expect(fireHeat({ burningHexesMovedThrough: 1 })).toBe(2);
+    expect(fireHeat({ burningHexesMovedThrough: 2 })).toBe(4);
+    expect(fireHeat({ burningHexesMovedThrough: 3 })).toBe(6);
+  });
+
+  it('standing in fire and moving through burning hexes are cumulative', () => {
+    expect(fireHeat({ standingInFire: true, burningHexesMovedThrough: 2 })).toBe(9);
+  });
+
+  it('no fire means no heat', () => {
+    expect(fireHeat()).toBe(0);
+    expect(fireHeat({ standingInFire: false, burningHexesMovedThrough: 0 })).toBe(0);
+  });
+
+  it('caps cumulative outside heat at 15 per turn (p50)', () => {
+    expect(OUTSIDE_HEAT_CAP).toBe(15);
+    expect(capOutsideHeat(20)).toBe(15);
+    expect(capOutsideHeat(15)).toBe(15);
+    expect(capOutsideHeat(7)).toBe(7);
+    // Cold weather cools the Mech; it is not a heat source and is not capped.
+    expect(capOutsideHeat(-2)).toBe(-2);
+  });
+
+  it('has no armour-damage roll - fire is heat only', () => {
+    expect(FireRules.fireDamageRoll).toBeUndefined();
   });
 });
 

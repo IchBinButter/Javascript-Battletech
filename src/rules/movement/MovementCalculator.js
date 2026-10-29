@@ -13,22 +13,83 @@ import { movementModifier } from '../weather/WeatherRules.js';
 
 const MASC_DATA = equipmentData.equipment.find(e => e.id === 'masc') || { mpMultiplier: 2, failureRollTarget: 3 };
 
+/**
+ * Movement Costs Table (BMM p17/p136): the total cost to enter a dry hex —
+ * "Cost to Enter Any Hex 1" plus the terrain's own cost (Clear +0,
+ * Light Woods +1, Heavy Woods +2, Rough +1, Rubble +1, Swamp +1, Paved/Bridge
+ * +0). Level changes, ice / mud / deep snow and weather are priced separately
+ * by the table and are added afterwards. Water is not in this table because
+ * its depth is a level offset; see WATER_DEPTH_BY_TERRAIN and
+ * calculateMPCost.
+ */
 const TERRAIN_MP_COSTS = {
   clear: 1,
   light_woods: 2,
   heavy_woods: 3,
-  water_depth1: 2,
-  water_depth2: 3,
   rough: 2,
   rubble: 2,
+  // Swamp is a terrain type in this project; p17/p136 plus p61's missing body
+  // leave it at the existing 3 MP (see M-31, owned by the data fix).
   swamp: 3,
+  // Paved/Bridge are +0 terrain; a road hex therefore costs the base 1 MP and
+  // level changes are still charged (p20 Road Movement).
   pavement: 1,
   bridge: 1
 };
 
+/**
+ * Water is priced as terrain depth, not as an absolute entry cost (p60/p136):
+ * Depth 1 is +1 MP, Depth 2+ is +3 MP, and the level change is charged
+ * separately. Depth is a negative level offset (p64: "treating depth as
+ * negative numbers"), which is what produces p128's worked example —
+ * Depth 1 from Level 0 = 1 (hex) + 1 (water) + 1 (level change) = 3 MP and
+ * Depth 2 from Level 0 = 1 + 3 + 2 = 6 MP.
+ */
+const WATER_DEPTH_BY_TERRAIN = {
+  water_depth1: 1,
+  water_depth2: 2,
+  water_depth3: 3,
+  water_depth4: 4
+};
+
 export class MovementCalculator {
   /**
+   * Depth of a water hex, 0 for dry terrain.
+   * @param {Hex} hex
+   * @returns {number}
+   */
+  waterDepthOf(hex) {
+    if (!hex) return 0;
+    if (Number.isFinite(hex.waterDepth)) return hex.waterDepth;
+    const byType = WATER_DEPTH_BY_TERRAIN[hex.terrainType];
+    if (byType) return byType;
+    const match = /^water_depth(\d+)$/.exec(hex.terrainType || '');
+    return match ? Number(match[1]) : 0;
+  }
+
+  /**
+   * The level movement sees for a hex. Water depth counts as a negative level
+   * (BMM p64), so a Depth 1 hex is one level below its surface (p128).
+   *
+   * Depth is capped at two levels for costing: p136 prices "Depth 2+" as one
+   * row, and capping keeps a Depth 3+ hex reachable instead of tripping the
+   * p15 three-level prohibition.
+   */
+  movementLevelOf(hex) {
+    if (!hex) return 0;
+    return (hex.level || 0) - Math.min(this.waterDepthOf(hex), 2);
+  }
+
+  /**
    * Calculate MP cost to enter a specific hex.
+   *
+   * Formula (BMM p17/p136, p20, p128):
+   *   1 MP to enter any hex
+   *   + the target hex's terrain cost (+0 clear/pavement, +1 light woods, ...)
+   *   + 1 MP per level changed, up OR down (1-2 levels; 3+ is not a legal move)
+   *   + 1 MP each for ice, mud and deep snow
+   *   + the weather MP modifier
+   *
    * @param {Hex} fromHex - Hex being left (for level change check)
    * @param {Hex} toHex - Hex being entered
    * @param {Unit} unit - Moving unit
@@ -36,10 +97,16 @@ export class MovementCalculator {
    * @returns {number} MP cost
    */
   calculateMPCost(fromHex, toHex, unit, movementType, weather = null) {
-    // Jump jets ignore terrain
+    // Jump jets ignore terrain and level changes (p18).
     if (movementType === 'jump') return 1;
 
-    let cost = TERRAIN_MP_COSTS[toHex.terrainType] || 1;
+    // "Cost to Enter Any Hex 1" plus the terrain's own cost (p136). Water is
+    // not a terrain row — p60/p136 price it as Depth 1 +1 and Depth 2+ +3, and
+    // its depth is charged as a level change below.
+    const waterDepth = this.waterDepthOf(toHex);
+    let cost = waterDepth > 0
+      ? 1 + (waterDepth === 1 ? 1 : 3)
+      : (TERRAIN_MP_COSTS[toHex.terrainType] || 1);
 
     // Building terrain cost (Movement Costs Table, p136): light +1, medium +2,
     // heavy +3, hardened +4 on top of the cost to enter any hex.
@@ -48,30 +115,24 @@ export class MovementCalculator {
       cost += buildingCosts[toHex.building.type] || 0;
     }
 
-    const levelDiff = toHex.level - fromHex.level;
-    if (levelDiff >= 3) {
+    // Level change (up or down): 1 level +1, 2 levels +2 (p17/p136). A 3+ level
+    // change is a fall, not a move (the prohibition itself is unverified, see
+    // M-02), and it applies to descents too — the old code only charged climbs.
+    const levelDiff = this.movementLevelOf(toHex) - this.movementLevelOf(fromHex);
+    if (Math.abs(levelDiff) >= 3) {
       return Infinity;
     }
-    if (levelDiff > 0) {
-      cost += levelDiff;
-    }
+    cost += Math.abs(levelDiff);
 
-    // Modifiers for ice, mud, deep snow (additive +1 MP each)
-    if (toHex.modifiers.ice) {
-      cost += 1;
-    }
-    if (toHex.modifiers.mud || toHex.modifiers.deepSnow) {
-      cost += 1;
-    }
+    // Terrain modifications for ice, mud and deep snow: +1 MP each (p136).
+    const modifiers = toHex.modifiers || {};
+    if (modifiers.ice) cost += 1;
+    if (modifiers.mud) cost += 1;
+    if (modifiers.deepSnow) cost += 1;
 
-    // Weather: fog and darkness add MP per hex.
+    // Weather: fog and darkness add MP per hex (p62).
     if (weather) {
       cost += movementModifier(weather);
-    }
-
-    // Road bonus: pavement overrides terrain cost (flat 1)
-    if (toHex.terrainType === 'pavement') {
-      cost = 1;
     }
 
     return cost;

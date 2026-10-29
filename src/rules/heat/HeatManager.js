@@ -8,6 +8,7 @@ import { getHeatEffects, describeHeatEffects } from './HeatScale.js';
 import { hasLifeSupportHit } from '../combat/UnitDamage.js';
 import weaponsData from '../../data/weapons.json' with { type: 'json' };
 import { heatPerTurn } from '../weather/WeatherRules.js';
+import { fireHeat, capOutsideHeat } from '../terrain/FireRules.js';
 
 const WEAPON_DAMAGE = {};
 for (const weapon of weaponsData.weapons) {
@@ -21,6 +22,11 @@ for (const weapon of weaponsData.weapons) {
 export class HeatManager {
   /**
    * Calculate total heat generation for the turn.
+   *
+   * Note: this helper is not on the live turn pipeline (movement heat is still
+   * unwired - Phase A). Fire is outside heat and is recorded by the Heat Phase
+   * itself through `resolveOutsideHeat` below, so it is deliberately absent
+   * here.
    * @param {Unit} unit
    * @param {Array} weaponsFired - Array of weapon defs fired
    * @param {string} movementType - 'stationary', 'walk', 'run', 'jump'
@@ -187,20 +193,82 @@ export class HeatManager {
   }
 
   /**
+   * Is the 'Mech standing in a burning hex during the Heat Phase? (p50)
+   */
+  isStandingInFire(unit, gameState) {
+    const hexKey = unit && unit.position && unit.position.hexKey;
+    const fireHexes = gameState && Array.isArray(gameState.fireHexes)
+      ? gameState.fireHexes
+      : [];
+    return Boolean(hexKey && fireHexes.includes(hexKey));
+  }
+
+  /**
+   * Burning hexes the 'Mech moved through during this turn's Movement Phase
+   * (p50). GameEngine records the entered burning hexes on the unit together
+   * with the turn they belong to, so a list left over from an earlier turn is
+   * ignored rather than counted twice.
+   */
+  burningHexesMovedThrough(unit, gameState) {
+    const record = unit && unit._burningHexesMovedThrough;
+    if (!record || !Array.isArray(record.hexes)) return 0;
+    const turn = gameState && gameState.turn;
+    if (Number.isFinite(turn) && record.turn !== turn) return 0;
+    return record.hexes.length;
+  }
+
+  /**
+   * Outside heat for the turn (p50 "Outside Heat Sources"): fire, plasma and
+   * weather are cumulative, to a maximum of 15 heat points in a single turn.
+   * "Fire: During the Heat Phase, a 'Mech in a burning hex absorbs an
+   * additional 5 Heat Points. A 'Mech also absorbs 2 Heat Points for each
+   * burning hex it moved through during the Movement Phase."
+   *
+   * @returns {{total: number, weather: number, fire: number, plasma: number,
+   *   capped: boolean, standingInFire: boolean, burningHexesMovedThrough: number}}
+   */
+  resolveOutsideHeat(unit, gameState) {
+    const weather = heatPerTurn(gameState.weather);
+    const standingInFire = this.isStandingInFire(unit, gameState);
+    const burningHexesMovedThrough = this.burningHexesMovedThrough(unit, gameState);
+    const fire = fireHeat({ standingInFire, burningHexesMovedThrough });
+    // Plasma weapons and other outside sources feed the same accumulator.
+    const plasma = Math.max(0, unit._externalHeat || 0);
+
+    const uncapped = weather + fire + plasma;
+    const total = capOutsideHeat(uncapped);
+
+    return {
+      total,
+      weather,
+      fire,
+      plasma,
+      capped: total !== uncapped,
+      standingInFire,
+      burningHexesMovedThrough
+    };
+  }
+
+  /**
    * Resolve heat phase for all units.
    */
   resolveHeatPhase(gameState, diceRoller) {
     const results = [];
 
     for (const unit of Object.values(gameState.units)) {
-      // p62: extreme temperatures add or remove heat every turn.
-      const ambientHeat = heatPerTurn(gameState.weather);
-      if (ambientHeat !== 0) {
-        unit.heat = Math.max(0, unit.heat + ambientHeat);
+      // p50: outside heat sources (fire, plasma, weather) are cumulative, up to
+      // 15 heat points in a single turn, and are recorded before dissipation.
+      const outside = this.resolveOutsideHeat(unit, gameState);
+      if (outside.total !== 0) {
+        unit.heat = Math.max(0, unit.heat + outside.total);
       }
 
       const dissipation = this.applyHeatDissipation(unit, gameState);
       const heatEffects = this.applyHeatEffects(unit);
+
+      if (outside.fire > 0) {
+        heatEffects.effects.push(`Fire: +${outside.fire} heat`);
+      }
 
       if (heatEffects.autoShutdown) {
         unit.shutdown = true;
@@ -242,6 +310,8 @@ export class HeatManager {
         unitId: unit.id,
         heat: unit.heat,
         dissipation,
+        outsideHeat: outside.total,
+        fireHeat: outside.fire,
         effects: heatEffects.effects
       });
     }

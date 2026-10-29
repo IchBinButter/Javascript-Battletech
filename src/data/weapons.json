@@ -46,6 +46,23 @@
       "special": {}
     },
     {
+      "id": "small_laser",
+      "name": "Small Laser",
+      "type": "DE",
+      "heat": 1,
+      "damage": 3,
+      "minRange": 0,
+      "shortRange": 1,
+      "mediumRange": 2,
+      "longRange": 3,
+      "tons": 0.5,
+      "crits": 1,
+      "cluster": false,
+      "clusterSize": null,
+      "ammoPerShot": 0,
+      "special": {}
+    },
+    {
       "id": "ppc",
       "name": "PPC",
       "type": "DE",

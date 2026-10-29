@@ -5,6 +5,7 @@
 
 import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { LineOfSight } from './LineOfSight.js';
+import { DamageResolver } from './DamageResolver.js';
 import { canWeaponFireAt, isLegLocation } from './ArcRules.js';
 import { armWeaponModifier, hasSensorHit } from './UnitDamage.js';
 import { quirkTargetModifier } from '../quirks/Quirks.js';
@@ -12,9 +13,12 @@ import { getHeatEffects } from '../heat/HeatScale.js';
 import { attackModifier } from '../weather/WeatherRules.js';
 
 export class AttackResolver {
-  constructor(hitTables) {
+  constructor(hitTables, damageResolver = null) {
     this.hitTables = hitTables;
     this.los = new LineOfSight();
+    // A hit-location roll of 2 also rolls once on the Determining Critical Hits
+    // Table (p32/p139), which is the DamageResolver's job.
+    this.damageResolver = damageResolver || new DamageResolver();
   }
 
   /**
@@ -353,18 +357,30 @@ export class AttackResolver {
         result.details += `\n        Cluster roll: ${clusterRoll} = ${result.clusterHits} missiles hit`;
       }
 
-      // Determine hit location(s)
+      // p32/p96: the hits of a cluster weapon are collected into Damage Value
+      // groupings, and each grouping gets one hit-location roll. An LRM-20 that
+      // scores 12 hits is three groupings (5 + 5 + 2), not twelve 1-point hits.
+      const groupings = this.buildDamageGroupings(weaponDef, result.clusterHits);
+      result.groupings = groupings;
+      if (weaponDef.cluster) {
+        result.details += `\n        Damage groupings: ${groupings.join(' + ')}`;
+      }
+
+      // Determine hit location(s), one roll per grouping
       const attackDirection = this.getAttackDirection(attacker, target);
-      for (let i = 0; i < result.clusterHits; i++) {
+      for (let i = 0; i < groupings.length; i++) {
         const locRoll = diceRoller.roll2d6();
-        let location = this.determineHitLocation(locRoll, attackDirection);
+        const rolledLocation = this.determineHitLocation(locRoll, attackDirection);
+        let location = rolledLocation;
+        let aimedOverride = false;
 
         // Aimed shot (p30): on 6, 7 or 8 the shot lands on the designated spot.
         if (isAimed && i === 0) {
           const aimRoll = diceRoller.roll2d6();
           result.aimRoll = aimRoll;
           if (aimRoll >= 6 && aimRoll <= 8) {
-            location = { location: options.aimedLocation, isRear: false };
+            location = { location: options.aimedLocation, isRear: false, critical: false };
+            aimedOverride = true;
             result.details += `\n        Aimed shot (${aimRoll}) hits ${options.aimedLocation}`;
           } else {
             result.details += `\n        Aimed shot (${aimRoll}) misses the mark`;
@@ -383,18 +399,71 @@ export class AttackResolver {
           result.details += `\n        Leg hit (${location.location}) absorbed by partial cover`;
         }
 
-        result.hitLocations.push({
+        const hitLoc = {
           location: location.location,
           isRear: location.isRear || false,
-          damage: absorbedByCover ? 0 : weaponDef.damage,
+          damage: absorbedByCover ? 0 : groupings[i],
           roll: locRoll,
+          group: i,
+          // p32/p139: a hit-location roll of 2 is the through-armour critical.
+          critical: Boolean(rolledLocation.critical) && !aimedOverride,
           absorbedByCover,
           coverHex: absorbedByCover ? calc.losResult.partialCoverHex : undefined
-        });
+        };
+
+        // p32/p139: "a roll of 2 when determining hit location creates the
+        // chance for a critical hit in the torso location rolled, even if the
+        // armor remains intact". The armour still takes the normal damage.
+        if (hitLoc.critical && !absorbedByCover) {
+          hitLoc.throughArmorCritical = this.damageResolver.applyThroughArmorCritical(
+            target, hitLoc.location, diceRoller
+          );
+          if (hitLoc.throughArmorCritical) {
+            result.details += `\n        Through-armour critical on ${hitLoc.location}: ` +
+              `roll ${hitLoc.throughArmorCritical.roll}`;
+          }
+        }
+
+        result.hitLocations.push(hitLoc);
       }
     }
 
     return result;
+  }
+
+  /**
+   * p32/p96 Damage Value groupings. A cluster weapon's hits are grouped before
+   * hit locations are rolled; a non-cluster weapon is a single grouping.
+   *
+   * @param {object} weaponDef
+   * @param {number} clusterHits - missiles/projectiles that hit
+   * @returns {number[]} the damage of each grouping
+   */
+  buildDamageGroupings(weaponDef, clusterHits = 1) {
+    const projectileDamage = Math.max(1, weaponDef.damage || 1);
+    if (!weaponDef.cluster) return [projectileDamage];
+
+    const total = Math.max(0, clusterHits) * projectileDamage;
+    if (total <= 0) return [];
+
+    const groupSize = this.getDamageValueGrouping(weaponDef);
+    const groupings = [];
+    for (let remaining = total; remaining > 0; remaining -= groupSize) {
+      groupings.push(Math.min(groupSize, remaining));
+    }
+    return groupings;
+  }
+
+  /**
+   * p96 grouping size: "every 2 points of Damage Value dealt is a separate hit"
+   * for standard SRM launchers, and a grouping of 5 for ATM, LRM and MRM
+   * launchers regardless of launcher size or damage per projectile.
+   */
+  getDamageValueGrouping(weaponDef) {
+    const type = (weaponDef.type || '').toUpperCase();
+    if (type === 'SRM') return 2;
+    if (type === 'LRM' || type === 'MRM' || type === 'ATM') return 5;
+    return Math.max(1, weaponDef.damage || 1);
   }
 
   /**

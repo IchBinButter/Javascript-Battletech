@@ -1,4 +1,4 @@
-﻿/**
+/**
  * MTF (Mech Task Force) Exporter
  * Converts an internal mech definition (mechDef) back to MegaMek .mtf format text.
  *
@@ -210,8 +210,8 @@ const CRIT_SLOT_COUNTS = {
   centerTorso: 12,
   leftTorso: 12,
   rightTorso: 12,
-  leftArm: 10,
-  rightArm: 10,
+  leftArm: 12,
+  rightArm: 12,
   leftLeg: 6,
   rightLeg: 6
 };
