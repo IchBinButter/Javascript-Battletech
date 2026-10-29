@@ -55,7 +55,7 @@
     },
     "swamp": {
       "name": "Swamp",
-      "mpCost": 3,
+      "mpCost": 2,
       "color": "#556B2F",
       "blocksLOS": false,
       "height": 0

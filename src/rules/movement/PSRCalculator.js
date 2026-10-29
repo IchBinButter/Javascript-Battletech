@@ -262,6 +262,13 @@ export class PSRCalculator {
     const triggerList = triggers || this.getPSRTriggers(unit, movement, gameState);
     const { targetNumber, modifiers } = this.calculatePSRModifier(unit, triggerList);
 
+    // p54/p58: an unconscious warrior cannot make Piloting Skill Rolls, so the
+    // Mech fails automatically. Consciousness Rolls themselves are not PSRs
+    // and never come through here.
+    if (unit.pilot && unit.pilot.conscious === false) {
+      return { passed: false, roll: 0, targetNumber: 999, details: 'Auto-fail (pilot unconscious)' };
+    }
+
     if (targetNumber >= 999) {
       return { passed: false, roll: 0, targetNumber: 999, details: 'Auto-fail (Gyro destroyed)' };
     }

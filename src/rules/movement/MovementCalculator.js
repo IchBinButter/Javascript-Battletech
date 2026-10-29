@@ -28,9 +28,9 @@ const TERRAIN_MP_COSTS = {
   heavy_woods: 3,
   rough: 2,
   rubble: 2,
-  // Swamp is a terrain type in this project; p17/p136 plus p61's missing body
-  // leave it at the existing 3 MP (see M-31, owned by the data fix).
-  swamp: 3,
+  // p61 "SWAMP (SIMPLIFIED): MP Modifier: A swamp hex adds a +1 MP cost per
+  // hex", i.e. 2 MP over clear ground; p136 lists the same +1.
+  swamp: 2,
   // Paved/Bridge are +0 terrain; a road hex therefore costs the base 1 MP and
   // level changes are still charged (p20 Road Movement).
   pavement: 1,

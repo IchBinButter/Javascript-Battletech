@@ -417,6 +417,8 @@ export class DamageResolver {
           return { effect: 'no further effect (engine already destroyed)', soaked: true };
         }
         unit.engine.hits = (unit.engine.hits || 0) + 1;
+        // p47: the third engine critical destroys the Mech.
+        if (unit.engine.hits >= 3) unit.destroyed = true;
         return {
           effect: unit.engine.hits >= 3
             ? 'Engine destroyed - unit disabled!'
@@ -428,6 +430,8 @@ export class DamageResolver {
           return { effect: 'no further effect (gyro already destroyed)', soaked: true };
         }
         unit.gyro.hits = (unit.gyro.hits || 0) + 1;
+        // p48: a destroyed gyro puts the Mech on the ground.
+        if (unit.gyro.hits >= 2) unit.prone = true;
         return {
           effect: unit.gyro.hits >= 2
             ? 'Gyro destroyed - auto-fall!'

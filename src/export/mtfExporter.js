@@ -311,8 +311,9 @@ function buildHeader(mechDef) {
   const gyroType = GYRO_TYPE_MTF[mechDef.gyro.type] || "Standard Gyro";
   const hsType = mechDef.heatSinks.type === "double" ? "Double" : "Single";
 
-  const critHS = countCritHeatSinks(mechDef.criticalSlots);
-  const headerHS = Math.max(10, mechDef.heatSinks.count - critHS);
+  // The MTF header records the total number of heat sinks; the ones that take
+  // critical slots are already listed in the critical sections below (p50).
+  const headerHS = mechDef.heatSinks.count;
 
   const lines = [
     "Version:1.0",

@@ -1978,3 +1978,17 @@ No finding now attributes a rule quote to an absent page. Where the source text 
 2. The green suite includes tests rewritten in phase D; every audited value was re-derived from the KB text, but the dead-but-present PSR triggers (M-23/M-24/M-25) remain a gap a future test could mask.
 3. H-01 (movement heat) is a top-tier blocker still absent from play and is the main rules-visible gap left by this run.
 4. Jump-fall damage levels: **resolved** by the PDF gap-fill. p56 reads "Unless stated otherwise, 'Mech falls are 0-level falls; this includes 'Mechs that fall due to jumping", with levels counted only for a displacement of two or more levels (p55). The engine was charging the start-to-end level drop for every failed movement PSR, including jumps. Fixed: `GameEngine._handleMove` now always resolves a failed movement PSR as a 0-level fall, and `applyFall` defaults to 0 levels; the one-level test was corrected to the p56 value (100 t = 10 damage), and the 0-level jump case is covered by the same rule.
+
+### Residual fixes after the PDF gap-fill
+
+The recovered pages settled several findings that had been marked unverifiable or deferred, and those are now fixed with regression tests in `tests/rules/residuals.test.js` unless noted.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| M-31 swamp | **fixed** | p61 "SWAMP (SIMPLIFIED): A swamp hex adds a +1 MP cost per hex" and p136. `MovementCalculator` now costs swamp at 2 MP over clear ground (was 3); the +1 PSR was already correct. |
+| H-19 invented heat-29 row | **fixed** | `heatScale.json` had a heat-29 step duplicating step 26's shutdown-avoid 10. Removed; 28 and 30 remain. |
+| H-18 unconscious PSR | **fixed** | p54/p58: an unconscious warrior cannot make PSRs. `PSRCalculator.makePSR` now auto-fails (target 999) when `pilot.conscious` is false; Consciousness Rolls are unaffected. |
+| C-17 remainder | **fixed** | p47: the third engine critical now sets `unit.destroyed`; p48: the second gyro critical now sets `unit.prone` instead of only returning an effect string. |
+| D-06 MTF heat sinks | **fixed** | p50: the exporter header now writes the total sink count (`Heat Sinks:20 Single` for the Atlas) instead of count minus critical sinks; the round-trip no longer halves dissipation. |
+
+Still open after this pass: H-01 and every other Phase A dead-wiring item (movement heat, skidding, MASC activation, 20+ PSR), C-09 weapon validation, BLD-02 building levels, D-05 ammo-bin split, M-10/M-11 jump movement, H-02/H-08/H-09 engine/heat/water crit effects, H-11/H-12 initiative and unequal forces, the dead M-23/M-24/M-25 PSR triggers, and the remaining sweep sections outside phases B-C.
