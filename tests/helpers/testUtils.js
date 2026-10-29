@@ -86,7 +86,12 @@ export function createTestGameState(config = {}) {
 
 export function createTestEngine(config = {}) {
   const state = createTestGameState(config);
-  const engine = new GameEngine(state);
+  // Most fixtures fire weapons that are not on the chassis (a PPC from an
+  // Atlas) to exercise a rule in isolation, so declaration checks default off
+  // here. Tests for the checks themselves pass enforceWeaponDeclarations: true.
+  const engine = new GameEngine(state, {
+    enforceWeaponDeclarations: config.enforceWeaponDeclarations === true
+  });
   engine.initCombat(hitTables);
   return engine;
 }

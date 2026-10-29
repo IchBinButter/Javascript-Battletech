@@ -75,6 +75,11 @@ export class GameEngine {
     this.gameId = config.gameId || `game-${++GameEngine._gameSequence}`;
     this.diceRoller = config.diceRoller || createSeededDice(this.gameId, gameState.turn);
 
+    // p24/p31/p46 declaration checks (mounted, once per turn, not destroyed,
+    // ammo available). Enabled by default; test fixtures that fire synthetic
+    // weapons not on the chassis opt out explicitly.
+    this.enforceWeaponDeclarations = config.enforceWeaponDeclarations !== false;
+
     // Weapon data lookup (populated after init from JSON)
     this._weaponsData = null;
 
@@ -591,6 +596,76 @@ export class GameEngine {
     return results;
   }
 
+  /**
+   * Validate a weapon declaration before any heat, ammo or dice are spent
+   * (p24 "a 'Mech can fire each weapon only once per turn", p31 ammunition,
+   * p46 destroyed weapons).
+   *
+   * @returns {{ok: boolean, error?: string, weaponLocation?: string,
+   *   ammoBin?: string|null, key?: string}}
+   */
+  _validateWeaponDeclaration(attacker, action, state) {
+    const weaponDef = action.weapon;
+    if (!weaponDef || !weaponDef.id) return { ok: false, error: 'No weapon declared' };
+
+    const mounted = (attacker.equipment && attacker.equipment.weapons) || [];
+    const matches = mounted.filter(w => w.type === weaponDef.id || w.type === weaponDef.type);
+    if (matches.length === 0) return { ok: false, error: `Weapon ${weaponDef.id} is not mounted` };
+
+    const entry = action.weaponLocation
+      ? matches.find(w => w.location === action.weaponLocation)
+      : matches[0];
+    if (!entry) {
+      return { ok: false, error: `Weapon ${weaponDef.id} is not mounted in ${action.weaponLocation}` };
+    }
+
+    // p24: one attack per weapon per turn.
+    if (!(attacker.firedWeaponsThisTurn instanceof Set) || attacker.firedWeaponsTurn !== state.turn) {
+      attacker.firedWeaponsThisTurn = new Set();
+      attacker.firedWeaponsTurn = state.turn;
+    }
+    const key = `${weaponDef.id}@${entry.location}`;
+    if (attacker.firedWeaponsThisTurn.has(key)) {
+      return { ok: false, error: `Weapon ${weaponDef.id} has already fired this turn` };
+    }
+
+    // p46: a weapon whose critical slots are all destroyed cannot fire.
+    const slots = (attacker.criticalSlots && attacker.criticalSlots[entry.location]) || [];
+    const weaponSlots = slots.filter(s => s.item === weaponDef.id);
+    if (weaponSlots.length > 0 && weaponSlots.every(s => s.status === 'destroyed')) {
+      return { ok: false, error: `Weapon ${weaponDef.id} has been destroyed` };
+    }
+
+    // p31: ammunition comes from a real bin with enough shots.
+    let ammoBin = action.ammoBin || null;
+    const usesAmmo = typeof weaponDef.usesAmmo === 'function' ? weaponDef.usesAmmo() : Boolean(weaponDef.ammoPerShot);
+    if (usesAmmo) {
+      const ammo = (attacker.equipment && attacker.equipment.ammo) || {};
+      const needed = weaponDef.ammoPerShot || 1;
+
+      if (ammoBin) {
+        const bin = ammo[ammoBin];
+        if (!bin) return { ok: false, error: `No ammunition bin named ${ammoBin}` };
+        if (bin.type && bin.type !== weaponDef.id) {
+          return { ok: false, error: `Ammunition bin ${ammoBin} does not feed ${weaponDef.id}` };
+        }
+        if ((bin.shots || 0) < needed) return { ok: false, error: `Ammunition bin ${ammoBin} is empty` };
+      } else {
+        // p31: the automatic pick must be a bin for this weapon, not just any bin.
+        ammoBin = Object.keys(ammo).find(name => {
+          const bin = ammo[name];
+          const feeds = !bin.type || bin.type === weaponDef.id;
+          return feeds && (bin.shots || 0) >= needed;
+        }) || null;
+        if (!ammoBin) return { ok: false, error: `No ammunition remaining for ${weaponDef.id}` };
+      }
+    } else {
+      ammoBin = null;
+    }
+
+    return { ok: true, weaponLocation: entry.location, ammoBin, key };
+  }
+
   _handleFire(playerId, action) {
     if (!this.attackResolver) {
       return { success: false, error: 'Combat resolver not initialized' };
@@ -624,6 +699,16 @@ export class GameEngine {
     }
 
     const weaponDef = action.weapon;
+
+    // p24/p31/p46: the declaration must name a weapon the unit actually mounts,
+    // that has not already fired this turn, is not destroyed, and has ammo.
+    let declaration = null;
+    if (this.enforceWeaponDeclarations) {
+      declaration = this._validateWeaponDeclaration(attacker, action, state);
+      if (!declaration.ok) return { success: false, error: declaration.error };
+      if (!action.weaponLocation) action.weaponLocation = declaration.weaponLocation;
+      if (declaration.ammoBin) action.ammoBin = declaration.ammoBin;
+    }
 
     // Indirect fire (p30) needs a friendly spotter with line of sight, and the
     // attacker must not have a line of sight of its own.
@@ -713,6 +798,9 @@ export class GameEngine {
         if (!(attacker.firedThisTurn instanceof Set)) attacker.firedThisTurn = new Set();
         attacker.firedThisTurn.add(action.weaponLocation);
       }
+
+      // p24: the weapon itself has now fired this turn.
+      if (declaration && declaration.key) attacker.firedWeaponsThisTurn.add(declaration.key);
 
       // Hidden units (p82): firing reveals the attacker, hit or miss.  Run
       // before the damage/attack emits so projections already see the reveal.
