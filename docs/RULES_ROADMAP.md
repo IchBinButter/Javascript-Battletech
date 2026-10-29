@@ -3,26 +3,49 @@
 Plan derived from the BattleMech Manual (7th printing) in the knowledge base and an
 audit of the current engine. Page references are BMM pages.
 
+Conventions and scope live in `docs/DESIGN_PRINCIPLES.md`; current defects with evidence
+live in `docs/RULES_COMPLIANCE_SWEEP.md`.
+
+## Roster scope and the chassis/variant restructure
+
+- **Scope:** 3025-era **Inner Sphere** BattleMechs. **Canon only** — no custom variants
+  (notable pilots, Solaris one-offs) and no apocryphal variants (video-game or novel-only
+  designs). A variant is eligible when an official tabletop publication defines it; reference
+  wikis are for orientation, record sheets are authoritative.
+- **Roster freeze:** no new 'Mechs are added until the data model is restructured. The
+  next bulk import waits for it.
+- **Target model:** a chassis layer (tonnage, internal structure, quirks, tech base) and a
+  variant layer (engine, gyro, armour, heat sinks, critical slots, equipment), compiled to
+  the flat `src/data/mechs.json` the engine already consumes. The Atlas family alone has
+  23 canonical variants, so a flat hand-authored file does not scale; the runtime contract
+  stays flat so the importer, exporter and engine are untouched.
+- **Cheap precursors to do in the data-hygiene pass:** add `chassisId` to every entry;
+  derive `internalStructure` from tonnage (p44) and `walk`/`run` from engine rating (p48)
+  instead of storing them.
+
 ## Where the engine actually stands
 
 | Area | State | Evidence |
 |---|---|---|
 | Heat scale (MP / TN / avoid targets) | ✅ complete | `src/data/heatScale.json`, `src/rules/heat/HeatScale.js` |
-| Heat *consequences* | ❌ partial | ammo explosion drains every bin; should be one slot (p52) |
-| MP / TSM / MASC | ✅ complete | `src/rules/movement/maxMP.js` |
+| Heat *consequences* | ✅ complete | one bin explodes per ammo slot (p52); engine-crit heat +5/+10 before dissipation (p47/p50); water cooling per sink type, capped +6 (p51) |
+| MP / TSM / MASC | ✅ formulas, activation dead | `src/rules/movement/maxMP.js`; MASC activation is not wired (Phase A) |
 | GATOR movement + range + heat + woods | ✅ matches p28 | `AttackResolver.calculateTargetNumber` |
 | Cluster hits, hit location, kick/punch tables | ✅ matches p33/137 | `src/data/hitTables.json` |
+| Ammunition model | ✅ one bin per critical slot | `mechs.json` + importer; a single-bin explosion (p44/p52) |
 | **Firing arcs** | ✅ 1.1 done | `src/rules/combat/ArcRules.js`, enforced in `AttackResolver` and `GameEngine` |
 | **LOS height / partial cover** | ✅ 1.2/1.3 done | `Unit.getLOSLevel`, `LineOfSight` rewritten against p22/p26 |
-| **Partial cover hit rule** | ✅ 1.3 done | leg hits strike the cover and do no damage (p26/p32) |
+| **Partial cover hit rule** | ✅ 1.3 done | leg hits strike the cover and do no damage (p26/p32); cover-from-building damage still open (C-10) |
 | **Prone target modifier** | ✅ p28 | −2 adjacent / +1 otherwise |
 | **Pilot damage** | ✅ p58 | head hits, falls, ammo explosions, life support heat; 3/5/7/10/11/dead |
 | **Actuator / hip / shoulder crits** | ✅ p47-49 | weapon and physical modifiers, hip MP, sensors +2, engine heat |
 | **Physical attack TN table** | ✅ p137 | punch 0, kick −2, push −1, charge/DFA comparative, actuator damage p29 |
-| **PSR modifiers** | ✅ mostly p54 | 20+ damage +1, water −1/0/+1, woods +1/+2, charged/DFA +2; terrain and skid tables pending |
-| Indirect fire / spotting / TAG | ❌ absent | p30–31 |
-| Buildings / urban | ❌ stub | `Hex.building` exists, nothing damages it |
-| Weather, fire, hidden, mines, quirks | ✅ Phase 6 shipped (6.4 open items listed) | `src/rules/weather/`, `terrain/FireRules.js`, `battlefield/`, `quirks/` |
+| **PSR modifiers and triggers** | ✅ real triggers only | p54/p60: 20+ damage, physicals, hip/gyro/leg, water depth, terrain; woods no PSR, jungle +1/+2, sand +1; fabricated causes removed |
+| **Initiative / unequal forces** | ✅ p10/p12 | loser declares first (house rule removed); 2:1 and 3:1 declaration blocks replay the printed tables |
+| **Jump movement** | ✅ p18 | facing ignored, overflight, height limit Jump MP + start level, landing facing through the engine (UI picker still absent) |
+| **Indirect fire / spotting** | ✅ core done, extensions open | `_validateIndirectFire` (p30-31); open: spotter declaration restriction, TAG/Narc/Artemis (era-gated) |
+| **Buildings / urban** | ⚠️ shipped, elevation gap | levels, roofs, interiors, basements, collapse (p66-74); no floor model, so roofs are unreachable in play |
+| Weather, fire, hidden, mines, quirks | ✅ Phase 6 shipped, quirks thin | quirks: 9 negative only, no positive quirks and no chassis-level inheritance |
 
 The pattern: **tables and dice are faithful; geometry and consequences are not.**
 Any weapon can shoot in any direction, a 'Mech's arm can be shot off with no effect on
@@ -31,7 +54,7 @@ between a dice calculator and a game.
 
 ---
 
-## Phase 1 — Combat geometry (BMM p22–30)  ← recommended next
+## Phase 1 — Combat geometry (BMM p22–30)  ✅ shipped
 
 Nothing else matters until attacks care about direction. Every later feature
 (rear-mounted weapons, AMS arcs, physical attacks, indirect fire) depends on this.
@@ -173,9 +196,25 @@ yet, so the rules are tested but unreachable in play).
 - aimed shots (p30): immobile targets only, no cluster weapons, never with indirect fire;
   a 6–8 on the follow-up roll lands the shot on the designated location
 
-Still open: TAG designation and Narc spotting (no equipment data for either), the Artemis
-bonus suppression (no Artemis in the data), and the rule that a spotter may not have
-charged or launched a DFA that turn (needs declaration tracking).
+**Open now (era-neutral):**
+
+- A spotter may not have charged or launched a DFA that turn (p30); needs a per-turn
+  declaration record on the spotter.
+- Aimed shots against partial cover: the follow-up roll and the cover interaction are only
+  partly covered (sweep C-11/C-12); p30 now has a body in the KB.
+- Hidden 'Mechs may spot (p82): the visibility layer exists, the spotting hook does not.
+
+**Era-gated — do not implement while the roster is 3025 Inner Sphere:**
+
+TAG, Narc and Artemis IV are 3040s–3050s technology. The manual has the rules (TAG
+designation p58, ECM interaction p112), and the importer already maps the names
+(`tag`, `narc`, `artemis_iv` in `unitConverter`/`mtfExporter`), but `equipment.json` has no
+gameplay entries and there is no pod/beacon model. Adding them now would create unreachable
+equipment — the defect class this project is actively removing. Sketch for when the era
+opens: equipment rows (tonnage/crits/heat, p121), a TAG designation mark on the target,
+a Narc pod attachment with its cluster bonus, Artemis IV cluster-roll bonus, and the p112
+ECM suppression of all three. The cluster roll currently has no modifier pipeline, so that
+is the first slice.
 
 ---
 
@@ -198,22 +237,36 @@ neither.
 hexes brings the rest down. Collapse from attack damage resolves at the end of the Weapon
 Attack Phase.
 5.4 ✅ **Combat within buildings** — +1 TN for a target inside a building, +1 per
-intervening building hex (capped at +3), line of sight blocked beyond two, and each hit
-reduced by `ceil(currentCF/10)` with the absorbed damage charged to the hex.
+intervening building hex/level (capped at +3), line of sight blocked beyond two, and each
+hit reduced by `ceil(currentCF/10)` with the absorbed damage charged to the hex. Wave 2
+added the missing half: the LOS count now includes **levels** (a Level-1 Warhammer is
+TN 10, a Level-2 Locust TN 8, exactly as p72's example), a **roof occupant is not
+"inside"** (no +1, no CF absorption, full damage), building-interior LOS takes precedence
+over the generic height check, and — critically — the +1/+2 modifier is now **forwarded
+into the attack roll** instead of being computed and discarded.
 5.5 ✅ **Basements** — the 2D6 Basements Table is rolled once per hex per scenario on
 first Level-0 entry; a basement drops the 'Mech 1–2 levels for `tonnage/10 x (levels + 1)`
 falling damage, prones it, and the building hex takes `tonnage/10` (double for a two-level
 basement). A 'Mech heavier than the hex's CF at the start of the phase falls through even
 when the roll says no basement.
 
-**Known simplifications:** units have no elevation, so "inside at Level 0" is assumed and
-roof movement is deferred; collapse damage uses the standard front hit table rather than
-the Punch table (p73); the adjacent-attacker exception for missed shots is not implemented;
-building CF damage is applied immediately even though collapse waits for the phase end;
-the Facing After Fall Table is not rolled for a basement fall.
+**Still open in this phase:**
 
-**Size:** M–L. **Multiplayer:** building CF is public state, so it rides in the patch — but
-the damage-routing events must be JSON-safe (see R4).
+- **Unit elevation / floor model (the large one).** Units have no movement floor: nothing
+  writes `position.level`, so every 'Mech defaults to "inside at Level 0" and roofs or upper
+  floors only exist when a scenario sets the level by hand. This is what keeps the building
+  rules from being playable as written (see Phase 8a).
+- **C-10** — partial cover from a building must **damage the building** when a leg hit
+  strikes it (p26/p32); today the hit is discarded.
+- Collapse damage uses the standard front hit table rather than the Punch table (p73).
+- The adjacent-attacker exception for missed shots is not implemented.
+- Building CF damage is applied immediately even though collapse waits for the phase end.
+- The Facing After Fall Table is not rolled for a basement fall.
+- MapRenderer has no floor/roof distinction and no jungle/sand colours (cosmetic).
+
+**Size:** M-L for what shipped; the elevation model alone is an L. **Multiplayer:** building
+CF is public state, so it rides in the patch — but the damage-routing events must be
+JSON-safe (see R4).
 
 ---
 
@@ -269,9 +322,10 @@ damage in the Heat Phase to units standing in fire. *M*
 **Known gaps in Phase 6 so far:** illumination (searchlights) is not modelled, so night
 modifiers always apply; the moonless-night physical attack bonus is implemented as a helper
 but not wired into the physical resolver; extinguish-on-40-AE-damage is not wired because no
-AE weapon exists in the data; smoke does not yet block line of sight. The exact "Effects of
-Fire" procedure is not in the KB chunk set, so the 1D6-per-unit heat-phase damage is the
-simplified reading flagged here rather than a verified page citation.
+AE weapon exists in the data; smoke does not yet block line of sight. The "Effects of Fire"
+procedure is now in the KB (p63, imported in the gap-fill) and the implemented reading —
++5 heat in the Heat Phase, +2 per burning hex entered, capped with weather and plasma —
+follows that page.
 6.4 ⚠️ **Hidden units** (p82) — per-player projection on the read path plus the p82 trigger
 list: *fires* (hit or miss), *starts its own move*, an enemy *ends its move next to it* (this
 reveals the hidden 'Mech, not the mover), an enemy *is ordered into its hex* (ground movement
@@ -295,12 +349,18 @@ End Phase of its turn; scheduled strikes are filtered out of the opponent's proj
 Known simplification: the p79 minefield hit location is assumed (the KB has no p79 minefield
 body), and defensive air cover, pre-plotted artillery hexes and strafing's five-hex line are
 out of scope.
-6.6 ✅ **Design quirks** (p82–95) — `src/data/quirks.json` carries nine quirks (Poor Targeting
-short/medium/long, Sensor Ghosts, Inaccurate Weapon, Cramped Cockpit, Hard to Pilot, Unbalanced,
-Poor Cooling Jacket) and `src/rules/quirks/Quirks.js` resolves them as pure accessors wired into
-target numbers (`AttackResolver`), piloting skill rolls (`PSRCalculator`) and heat
-(`GameEngine`); per-Mech quirks live on `unit.quirks`. The remaining positive/negative quirk
-tables are not transcribed yet.
+6.6 ✅ **Design quirks** (p82–95) — `src/data/quirks.json` carries nine negative quirks (Poor
+Targeting short/medium/long, Sensor Ghosts, Inaccurate Weapon, Cramped Cockpit, Hard to Pilot,
+Unbalanced, Poor Cooling Jacket) and `src/rules/quirks/Quirks.js` resolves them as pure
+accessors wired into target numbers (`AttackResolver`), piloting skill rolls (`PSRCalculator`)
+and heat (`GameEngine`); per-Mech quirks live on `unit.quirks`, and weapon-scoped quirks are
+inert unless the fired weapon matches. **Coverage is thin:** only three units carry any quirk,
+no **positive** quirk is implemented (the Atlas's canonical Battlefists, Command 'Mech,
+Distracting and Improved Communications are all absent, and several need hooks the engine does
+not have — initiative, enemy TN, physical attacks), the remaining negative table is not
+transcribed, and quirks are per-unit rather than per-chassis. Quirk breadth should be planned
+together with the chassis/variant restructure, which is what makes chassis-level quirks
+inheritable.
 
 **Size:** S–M each, independent, gated on 5.5 for the visibility-dependent ones.
 
@@ -323,8 +383,59 @@ dirty-rect rendering, mobile layout.
 
 ---
 
+## Phase 8 — Elevation and the remaining urban work  ← next after the data restructure
+
+The building rules are written but not fully playable: `position.level` exists and combat
+honours it, yet **no movement path writes a floor**, so every 'Mech defaults to "inside at
+level 0" and roofs exist only when a test or scenario edits the state directly. This phase
+makes roofs and upper floors part of play.
+
+8.1 **Floor model** — `position.level` is the building floor (0 = ground floor inside,
+1..levels-1 = upper floor, `levels` = roof), matching the model `Buildings.js` already uses.
+Movement sets it: entering a building hex at ground level, climbing one floor per level
+change (MP and PSR per p17/p54), landing on a roof only when a jump ends there, and the
+existing basement path dropping to a lower floor.
+8.2 **Elevation in combat** — LOS and the p72 modifiers use the floor levels that are
+already implemented; a ground-floor occupant and a roof occupant interact exactly as p72
+allows; CF absorption stays inside-only (already done).
+8.3 **Rendering and UI** — floor/roof affordances in the movement preview and renderer so a
+player can see and choose the floor being entered.
+8.4 **C-10** — when partial cover is a building and the hit location is a leg, the attack
+must damage the building (p26/p32), not simply be discarded.
+
+Acceptance: through `processAction` alone, a 'Mech can walk into a building, climb to its
+roof, be shot at on the roof with the p72 modifiers, and drop through a basement — with no
+direct state editing.
+
+**Size:** L (8.1-8.2), S (8.3-8.4).
+
+## Phase 8b — Indirect fire polish (era-neutral)
+
+- **Spotter declaration restriction** — a spotter that charged or launched a DFA may not
+  spot (p30); needs per-turn declaration state that the engine does not track yet.
+- **Aimed shots against partial cover** — the interaction of an aimed shot with cover is
+  only partly implemented (sweep C-11/C-12); p30 has a body in the KB now.
+- **Hidden 'Mech spotting hook** — hidden units may spot (p82); the visibility layer exists,
+  the hook does not.
+- **TAG / Narc / Artemis IV** stay **era-gated** (3040s-3050s technology) until the roster
+  moves past 3025; the sketch is in Phase 4.
+
+**Size:** S-M each.
+
+---
+
 ## Recommended next slice
 
-1.1–1.4 are in. **1.5–1.7 are next** (target state modifiers, attacker damage modifiers,
-multiple targets), then 1.8–1.9 with the twist/flip declaration UI last — `torsoTwist`
-and `armsReversed` already drive the arc rules once something sets them.
+Order of work from here:
+
+1. **Close the residual wave** — commit it behind the review verdict and write the closure
+   matrix (fixed / partial / deferred for all 162 sweep findings).
+2. **Chassis/variant restructure** — the roster is frozen until it lands; it unblocks bulk
+   import and chassis-level quirks.
+3. **Phase 8a elevation** — retires the last structural gap in the building rules.
+4. **Phase 8b indirect polish + C-10** — small and era-neutral.
+5. **Data hygiene** — `chassisId`, derived structure/MP, slot-format compression.
+6. **Phase 7 features** — scenarios, save/load, AI, multiplayer, CI.
+
+Phase A dead wiring (movement heat, skidding, MASC activation, 20+ damage PSR) is still
+accepted debt; it moves up if the priority shifts from breadth to play-depth.
