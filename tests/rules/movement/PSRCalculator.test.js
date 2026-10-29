@@ -206,9 +206,8 @@ describe('PSRCalculator', () => {
 
     // ── Water Depth ──────────────────────────────────────────────
     // p54: "Entered Depth 1 water hex -1, Entered Depth 2 water hex 0,
-    // Entered Depth 3+ water hex +1". Entering Depth 0 water is not a PSR at
-    // all (p60: "WATER (DEPTH 0) ... PSR Modifier: No PSR"), so no test pins
-    // the 0-modifier trigger the code still raises for depth 0.
+    // Entered Depth 3+ water hex +1". p60: "WATER (DEPTH 0) ... PSR Modifier:
+    // No PSR", so shallow water never forces a roll (M-24).
     it('entered water depth 1 = -1 modifier', () => {
       const unit = makeUnit();
       const movement = { enteredWater: true, waterDepth: 1 };
@@ -238,6 +237,21 @@ describe('PSRCalculator', () => {
       const movement = { enteredWater: true, waterDepth: 5 };
       const triggers = calc.getPSRTriggers(unit, movement, null);
       expect(triggers.find(t => t.trigger === 'Entered Water').baseModifier).toBe(1);
+    });
+
+    // p60: "WATER (DEPTH 0) ... PSR Modifier: No PSR". Depth 0 water is a
+    // level-0 hex, not a hex that forces a PSR, so no trigger may be raised
+    // (M-24): the old code pushed a bogus "Entered Water: 0" cause.
+    it('entered Depth 0 water is not a PSR at all (p60)', () => {
+      const unit = makeUnit();
+      const movement = { enteredWater: true, waterDepth: 0 };
+      expect(calc.getPSRTriggers(unit, movement, null)).toEqual([]);
+    });
+
+    it('entered water with no recorded depth does not push a 0-modifier cause', () => {
+      const unit = makeUnit();
+      const movement = { enteredWater: true };
+      expect(calc.getPSRTriggers(unit, movement, null)).toEqual([]);
     });
 
     it('entered water not set = no trigger', () => {
@@ -320,6 +334,57 @@ describe('PSRCalculator', () => {
       expect(rubble.baseModifier).toBe(0);
     });
 
+    // ── Terrain types: woods, jungle, sand (p60/p142) ────────────
+    // p60: "WOODS, LIGHT ... PSR Modifier: No PSR", "WOODS, HEAVY ... PSR
+    // Modifier: No PSR"; only the jungle rows carry a modifier. Woods are
+    // therefore not a PSR cause, and woods flags must not be read at all
+    // (M-23: the old code applied the jungle +1/+2 to woods).
+    it('entering light woods is not a PSR (p60)', () => {
+      const unit = makeUnit();
+      expect(calc.getPSRTriggers(unit, { enteredLightWoods: true }, null)).toEqual([]);
+    });
+
+    it('entering heavy woods is not a PSR (p60)', () => {
+      const unit = makeUnit();
+      expect(calc.getPSRTriggers(unit, { enteredHeavyWoods: true }, null)).toEqual([]);
+    });
+
+    // p60: "JUNGLE, LIGHT ... PSR Modifier: +1", "JUNGLE, HEAVY ... +2";
+    // p142: "Entered light jungle hex +1", "Entered heavy jungle hex +2".
+    it('entering light jungle = +1 (p60/p142)', () => {
+      const unit = makeUnit();
+      const triggers = calc.getPSRTriggers(unit, { enteredLightJungle: true }, null);
+      const jungle = triggers.find(t => t.trigger === 'Light Jungle');
+      expect(jungle).toBeDefined();
+      expect(jungle.baseModifier).toBe(1);
+      expect(triggers).toHaveLength(1);
+    });
+
+    it('entering heavy jungle = +2 (p60/p142)', () => {
+      const unit = makeUnit();
+      const triggers = calc.getPSRTriggers(unit, { enteredHeavyJungle: true }, null);
+      const jungle = triggers.find(t => t.trigger === 'Heavy Jungle');
+      expect(jungle).toBeDefined();
+      expect(jungle.baseModifier).toBe(2);
+    });
+
+    // p60: "SAND ... PSR Modifier: +1"; p142: "Entered sand hex +1" (M-24).
+    it('entering sand = +1 (p60/p142)', () => {
+      const unit = makeUnit();
+      const triggers = calc.getPSRTriggers(unit, { enteredSand: true }, null);
+      const sand = triggers.find(t => t.trigger === 'Sand');
+      expect(sand).toBeDefined();
+      expect(sand.baseModifier).toBe(1);
+      expect(triggers).toHaveLength(1);
+    });
+
+    it('sand does not modify a PSR caused by something else', () => {
+      const unit = makeUnit(50, 5, { _damageThisPhase: 20 });
+      const triggers = calc.getPSRTriggers(unit, { type: 'walk' }, null);
+      expect(triggers.find(t => t.trigger === 'Sand')).toBeUndefined();
+      expect(triggers.find(t => t.trigger === '20+ Damage Received').baseModifier).toBe(1);
+    });
+
     // ── Skidding ─────────────────────────────────────────────────
     // p54/p142: "Running after facing change while on pavement - see Skidding,
     // p.68". The Skid Modifiers Table is not modelled yet (M-18), so only the
@@ -331,10 +396,26 @@ describe('PSRCalculator', () => {
       expect(triggers.find(t => t.trigger === 'Skidding')).toBeDefined();
     });
 
+    // ── Fabricated causes are gone (M-25) ────────────────────────
     // "Large Level Drop", "Rapid Turn (Running)" and "Jumped Into Woods" are
-    // not PSR causes in the p54/p142 table and their tests were removed (D).
-    // p60 also gives woods no PSR at all (only jungle is +1/+2), so the
-    // "Heavy Woods +2" trigger is not asserted as manual either.
+    // not PSR causes: a 2+ level drop is an accidental fall (p56/p70), the
+    // manual has no rapid-turn roll, and p132 states "No PSR is required for a
+    // 'Mech to jump into a woods hex". Their flags must stay inert.
+    it('never raises the removed level-drop, rapid-turn or jump-into-woods causes', () => {
+      const unit = makeUnit();
+      const movement = {
+        type: 'jump',
+        largeLevelDrop: true,
+        rapidTurnWhileRunning: true,
+        jumpedIntoWoods: true
+      };
+      const triggerNames = calc.getPSRTriggers(unit, movement, null).map(t => t.trigger);
+      expect(triggerNames).not.toContain('Large Level Drop');
+      expect(triggerNames).not.toContain('Rapid Turn (Running)');
+      expect(triggerNames).not.toContain('Jumped Into Woods');
+      // No flag may add a cause for a healthy 'Mech, even while jumping.
+      expect(triggerNames).toEqual([]);
+    });
 
     // ── Multiple simultaneous triggers ───────────────────────────
     it('combines causes but keeps preexisting damage out of the trigger list', () => {
@@ -344,7 +425,14 @@ describe('PSRCalculator', () => {
         _physicalAttackReceived: true,
         isLocationDestroyed: (loc) => loc === 'leftLeg'
       });
-      const movement = { type: 'run', enteredWater: true, waterDepth: 2, enteredRubble: true };
+      const movement = {
+        type: 'run',
+        enteredWater: true,
+        waterDepth: 2,
+        enteredRubble: true,
+        enteredLightJungle: true,
+        enteredSand: true
+      };
       const triggers = calc.getPSRTriggers(unit, movement, null);
       const triggerNames = triggers.map(t => t.trigger);
       expect(triggerNames).toContain('20+ Damage Received');
@@ -352,9 +440,11 @@ describe('PSRCalculator', () => {
       expect(triggerNames).toContain('Ran with damaged hip or gyro');
       expect(triggerNames).toContain('Entered Water');
       expect(triggerNames).toContain('Rubble');
+      expect(triggerNames).toContain('Light Jungle');
+      expect(triggerNames).toContain('Sand');
       expect(triggerNames).not.toContain('Gyro Damage');
       expect(triggerNames).not.toContain('Missing Leg');
-      expect(triggers).toHaveLength(5);
+      expect(triggers).toHaveLength(7);
     });
   });
 

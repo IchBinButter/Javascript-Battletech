@@ -3,8 +3,9 @@
  * actually applying them when a shot, a PSR or a heat bill is resolved.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Unit } from '../../src/models/Unit.js';
+import { Hex } from '../../src/models/Hex.js';
 import { PSRCalculator } from '../../src/rules/movement/PSRCalculator.js';
 import { getQuirkDefinition } from '../../src/rules/quirks/Quirks.js';
 import {
@@ -207,12 +208,15 @@ describe('quirks in the engine', () => {
     expect(wolverinePsr.modifiers).not.toContain('Unbalanced: +1');
 
     const banshee = createTestUnit('banshee-bnc3e-refit', 0, 'banshee');
-    const woodsPsr = psr.calculatePSRModifier(
+    // A real hex-entry PSR: p142 "Entered rubble hex 0". Woods no longer force
+    // a PSR at all (p60 "PSR Modifier: No PSR"), so the old enteredHeavyWoods
+    // fixture would produce an empty trigger list and never reach Unbalanced.
+    const rubblePsr = psr.calculatePSRModifier(
       banshee,
-      psr.getPSRTriggers(banshee, { type: 'walk', enteredHeavyWoods: true }, null)
+      psr.getPSRTriggers(banshee, { type: 'walk', enteredRubble: true }, null)
     );
-    expect(woodsPsr.modifiers).toContain('Hard to Pilot: +1');
-    expect(woodsPsr.modifiers).toContain('Unbalanced: +1');
+    expect(rubblePsr.modifiers).toContain('Hard to Pilot: +1');
+    expect(rubblePsr.modifiers).toContain('Unbalanced: +1');
   });
 
   it('firing the refit AC/20 through GameEngine gains 7 weapon heat + 1 jacket heat', () => {
@@ -262,5 +266,97 @@ describe('quirks in the engine', () => {
     expect(result.modifiers).toContain('Sensor Ghosts: +1');
     expect(result.modifiers).not.toContain('Inaccurate Weapon (lrm20): +1');
     expect(attacker.heat).toBe(3); // med laser heat only; no Poor Cooling Jacket
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Terrain-entry PSRs through the engine (p54/p60/p142)
+// ---------------------------------------------------------------------------
+
+/**
+ * Walk one hex from '4,5' into a '5,5' hex of the given terrain and report the
+ * causes the engine actually handed to PSRCalculator.makePSR ([] when the hex
+ * forces no roll at all).
+ */
+function moveInto(terrainType, { diceRoll = 5, mech = 'locust-lct1v', unitId = 'mover' } = {}) {
+  const mover = createTestUnit(mech, 0, unitId);
+  mover.position = { hexKey: '4,5', facing: 2 };
+
+  const engine = createTestEngine({ units: { [unitId]: mover } });
+  const state = engine.stateManager.getState();
+  state.map.hexes.set('5,5', new Hex('5,5', { terrainType }));
+  engine.diceRoller = makeDiceRoller(diceRoll);
+
+  const makePSR = vi.spyOn(engine.psrCalc, 'makePSR');
+
+  engine.phaseManager.enterPhase('movement');
+  engine.phaseManager.clearQueue();
+  state.currentPlayer = 0;
+
+  const result = engine.processAction(0, {
+    type: 'move', unitId, path: ['4,5', '5,5'], movementType: 'walk'
+  });
+  expect(result.success).toBe(true);
+
+  const triggers = makePSR.mock.calls.length ? makePSR.mock.calls[0][2] : [];
+  return { engine, mover, result, triggers };
+}
+
+describe('terrain-entry PSRs in the engine (p60/p142)', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('entering light jungle forces a +1 PSR (p60/p142)', () => {
+    expect(moveInto('light_jungle').triggers)
+      .toEqual([{ trigger: 'Light Jungle', baseModifier: 1 }]);
+  });
+
+  it('entering heavy jungle forces a +2 PSR (p60/p142)', () => {
+    expect(moveInto('heavy_jungle').triggers)
+      .toEqual([{ trigger: 'Heavy Jungle', baseModifier: 2 }]);
+  });
+
+  it('entering sand forces a +1 PSR (p60/p142)', () => {
+    expect(moveInto('sand').triggers)
+      .toEqual([{ trigger: 'Sand', baseModifier: 1 }]);
+  });
+
+  it('entering Depth 1 water forces the -1 PSR (p142)', () => {
+    expect(moveInto('water_depth1').triggers)
+      .toEqual([{ trigger: 'Entered Water', baseModifier: -1 }]);
+  });
+
+  it('entering Depth 2 water forces the 0 PSR (p142)', () => {
+    expect(moveInto('water_depth2').triggers)
+      .toEqual([{ trigger: 'Entered Water', baseModifier: 0 }]);
+  });
+
+  it('entering Depth 3+ water forces the +1 PSR (p60)', () => {
+    expect(moveInto('water_depth3').triggers)
+      .toEqual([{ trigger: 'Entered Water', baseModifier: 1 }]);
+  });
+
+  it('entering a woods hex forces no PSR at all (p60 "No PSR")', () => {
+    expect(moveInto('light_woods').triggers).toEqual([]);
+    expect(moveInto('heavy_woods').triggers).toEqual([]);
+  });
+
+  it('a failed jungle PSR puts the Mech on the ground; a woods hex does not', () => {
+    // The Locust pilots at 5 and the dice roller rolls 5: light jungle (+1)
+    // misses the 6 it needs, while woods never rolls.
+    expect(moveInto('light_jungle').mover.prone).toBe(true);
+    expect(moveInto('light_woods').mover.prone).toBe(false);
+  });
+
+  it('the Unbalanced quirk raises a jungle entry PSR by +1 (p89)', () => {
+    // The Banshee walks 3 MP, so it can afford the 3 MP light jungle hex; a
+    // heavy jungle hex costs 4 MP (p136) and would need running.
+    const { engine, mover, triggers } = moveInto('light_jungle', {
+      diceRoll: 12, mech: 'banshee-bnc3e-refit'
+    });
+    expect(triggers).toEqual([{ trigger: 'Light Jungle', baseModifier: 1 }]);
+
+    const { modifiers } = engine.psrCalc.calculatePSRModifier(mover, triggers);
+    expect(modifiers).toContain('Hard to Pilot: +1');
+    expect(modifiers).toContain('Unbalanced: +1');
   });
 });

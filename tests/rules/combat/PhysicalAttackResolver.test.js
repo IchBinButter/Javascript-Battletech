@@ -29,6 +29,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { PhysicalAttackResolver } from '../../../src/rules/combat/PhysicalAttackResolver.js';
+import { createTestEngine, createTestUnit } from '../../helpers/testUtils.js';
 import hitTables from '../../../src/data/hitTables.json' with { type: 'json' };
 
 const PUNCH = hitTables.hitLocation.punch;
@@ -372,6 +373,125 @@ describe('PhysicalAttackResolver - DFA', () => {
     expect(result.hitLocations.length).toBe(1);
     const validPunchLocations = Object.values(PUNCH.front).map(e => e.location);
     expect(validPunchLocations).toContain(result.hitLocations[0].location);
+  });
+});
+
+// =============================================================================
+// DFA jump availability (p19): jump jets cannot fire while submerged
+// =============================================================================
+
+describe('PhysicalAttackResolver - DFA jump availability (p19)', () => {
+  const resolver = new PhysicalAttackResolver();
+  const dice = makeDice();
+
+  const jumper = (jump = 4) => makeUnit({ movement: { jump } });
+
+  it('rejects a DFA from Depth 2 water with the submerged-jets reason', () => {
+    const result = resolver.resolveDFA(jumper(), makeUnit(), dice, { waterDepth: 2 });
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe(
+      'Cannot make a death from above attack from Depth 2 water: jump jets cannot be fired while submerged (p19)'
+    );
+  });
+
+  it('rejects a DFA from Depth 3 water and names the depth', () => {
+    const result = resolver.resolveDFA(jumper(), makeUnit(), dice, { waterDepth: 3 });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('Depth 3 water');
+    expect(result.reason).toContain('p19');
+  });
+
+  it('behaves as before when the water option is omitted or 0 (dry land)', () => {
+    expect(resolver.resolveDFA(jumper(), makeUnit(), dice).success).toBe(true);
+    expect(resolver.resolveDFA(jumper(), makeUnit(), dice, { waterDepth: 0 }).success).toBe(true);
+  });
+
+  it('Depth 1 water still allows a DFA when torso-mounted jets stay dry', () => {
+    // The fixture has no per-location jets, so the design rating is the
+    // available count - none of them are leg-mounted.
+    const result = resolver.resolveDFA(jumper(), makeUnit(), dice, { waterDepth: 1 });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects when every jump jet is destroyed (0 available jets, p14)', () => {
+    const attacker = makeUnit({
+      movement: { jump: 4 },
+      criticalSlots: {
+        centerTorso: [
+          { item: 'jump_jet', status: 'destroyed' },
+          { item: 'jump_jet', status: 'destroyed' }
+        ],
+        leftArm: [],
+        rightArm: [],
+        leftLeg: [],
+        rightLeg: []
+      }
+    });
+    const result = resolver.resolveDFA(attacker, makeUnit(), dice);
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe('No jump jets');
+  });
+
+  it('rejects when Depth 1 water submerges every jet (all leg-mounted)', () => {
+    const attacker = makeUnit({
+      movement: { jump: 2 },
+      criticalSlots: {
+        centerTorso: [],
+        leftArm: [],
+        rightArm: [],
+        leftLeg: [{ item: 'jump_jet', status: 'ok' }],
+        rightLeg: [{ item: 'jump_jet', status: 'ok' }]
+      }
+    });
+    const result = resolver.resolveDFA(attacker, makeUnit(), dice, { waterDepth: 1 });
+    expect(result.success).toBe(false);
+    expect(result.reason).toContain('submerged in Depth 1 water (p19)');
+  });
+});
+
+// =============================================================================
+// DFA through the engine: the engine supplies the attacker's standing depth
+// =============================================================================
+
+describe('DFA through the engine - submerged jump jets (p19)', () => {
+  function dfaEngine(attackerHexTerrain = 'clear') {
+    const attacker = createTestUnit('jenner-jr7d', 0, 'jumper');
+    const target = createTestUnit('atlas-as7d', 1, 'target');
+    attacker.position = { hexKey: '5,7', facing: 0 };
+    target.position = { hexKey: '5,8', facing: 3 };
+
+    const engine = createTestEngine({ units: { jumper: attacker, target } });
+    const state = engine.stateManager.getState();
+    if (attackerHexTerrain !== 'clear') {
+      state.map.hexes.get('5,7').terrainType = attackerHexTerrain;
+    }
+    engine.diceRoller = makeDice({ hit: 12, location: 1 });
+    engine.phaseManager.enterPhase('physical_attack');
+    engine.phaseManager.clearQueue();
+    state.currentPlayer = 0;
+    return engine;
+  }
+
+  it('rejects a DFA declared from a Depth 2 water hex', () => {
+    const engine = dfaEngine('water_depth2');
+    const result = engine.processAction(0, {
+      type: 'physicalAttack', attackerId: 'jumper', targetId: 'target', attackType: 'dfa'
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.reason).toBe(
+      'Cannot make a death from above attack from Depth 2 water: jump jets cannot be fired while submerged (p19)'
+    );
+  });
+
+  it('still resolves a DFA from a dry hex', () => {
+    const engine = dfaEngine();
+    const result = engine.processAction(0, {
+      type: 'physicalAttack', attackerId: 'jumper', targetId: 'target', attackType: 'dfa'
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.hit).toBe(true);
   });
 });
 

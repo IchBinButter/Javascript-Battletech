@@ -3,8 +3,15 @@
  *
  * Phase sequence: initiative → movement → weapon_attack → physical_attack → heat → end
  *
- * Movement, weapon_attack, and physical_attack phases use per-unit alternation.
- * The phaseUnitQueue alternates units between players; phaseUnitIndex advances on each action.
+ * Movement, weapon_attack, and physical_attack phases declare in per-unit
+ * alternation: the initiative loser declares first (p10) and the queue repeats
+ * those steps for the Physical Attack Phase (p12). When the forces are unequal,
+ * p12's Unequal Numbers of 'Mechs ratio is evaluated before each pair of
+ * declarations (2:1 -> the larger side declares two, 3:1 -> three, and so on),
+ * and it is re-evaluated against the 'Mechs still left to declare for, so a
+ * 'Mech destroyed mid-phase changes the block sizes of the remaining pairs.
+ * The phaseUnitQueue holds one entry per 'Mech; phaseUnitIndex advances on each
+ * action.
  *
  * Timing rules owned here (BMM p10, p12, p52, p58):
  * - Consciousness Rolls happen when damage is taken (GameEngine calls
@@ -43,6 +50,37 @@ export function consciousnessNumber(hits) {
   return damage === 0 ? 0 : CONSCIOUSNESS_TARGETS[damage];
 }
 
+/**
+ * p12 "Unequal Numbers of 'Mechs": how many 'Mechs each side declares for in
+ * the next pair, given how many each side still has left to declare for.
+ *
+ * "If, prior to any pair of movement or attack declarations, one team has at
+ * least twice as many 'Mechs left to declare for as the other team, the team
+ * with twice as many 'Mechs declares for two 'Mechs each time, rather than one.
+ * If one team has at least three times as many 'Mechs, it declares for three
+ * each time, and so on."
+ *
+ * The printed examples confirm the larger side declares
+ * `floor(larger / smaller)` 'Mechs: 10 vs 18 stays 1:1 until 8 vs 16 (then the
+ * 18-side declares 2), while 5 vs 14 starts at 2 because 14 / 5 = 2.8 -> two
+ * (not three; three would need a 3:1 ratio). The smaller side always declares
+ * one, and a side with nothing left to declare for hands the rest of the pair
+ * to the other side.
+ *
+ * @param {number} firstLeft - 'Mechs the first-declaring side still has to declare
+ * @param {number} secondLeft - 'Mechs the second-declaring side still has to declare
+ * @returns {{first: number, second: number}} 'Mechs each side declares this pair
+ */
+export function declarationBlockSizes(firstLeft, secondLeft) {
+  const first = Math.max(0, Math.floor(Number.isFinite(firstLeft) ? firstLeft : 0));
+  const second = Math.max(0, Math.floor(Number.isFinite(secondLeft) ? secondLeft : 0));
+
+  if (first === 0 || second === 0) return { first, second };
+  if (first >= second * 2) return { first: Math.floor(first / second), second: 1 };
+  if (second >= first * 2) return { first: 1, second: Math.floor(second / first) };
+  return { first: 1, second: 1 };
+}
+
 export class PhaseManager {
   constructor() {
     this.engine = null;
@@ -50,22 +88,16 @@ export class PhaseManager {
     this.phaseCallbacks = {};
     this.phaseUnitQueue = [];
     this.phaseUnitIndex = 0;
-    this.initiativeWinnerGoesFirst = false;
+    // p12 declaration bookkeeping: the two sides, where each pair of
+    // declarations begins in phaseUnitQueue, and which pair starts have had
+    // their block sizes settled already (see _maybeReevaluateDeclarationPair).
+    this._declarationSides = null;
+    this._pairStarts = [];
+    this._evaluatedPairStarts = new Set();
   }
 
   setEngine(gameEngine) {
     this.engine = gameEngine;
-  }
-
-  /**
-   * Initiative winner chooses whether to move first. The choice is this
-   * engine's optional rule (p10 gives the winner no choice: the loser acts
-   * first); it flips the declaration order of every acting phase, including
-   * the Physical Attack Phase, which repeats the Weapon Attack Phase (p12).
-   */
-  chooseInitiative(goFirst) {
-    this.initiativeWinnerGoesFirst = !!goFirst;
-    this.engine.eventBus.emit('initiativeChoice', { goFirst: this.initiativeWinnerGoesFirst });
   }
 
   /**
@@ -92,7 +124,63 @@ export class PhaseManager {
   }
 
   /**
-   * Build alternating player/unit queue for per-unit action ordering.
+   * Plan declaration entries for two sides from the 'Mechs each still has to
+   * declare for.
+   *
+   * p10: "The side that lost Initiative must act first", then the winner, and
+   * the declarations alternate. p12 "Unequal Numbers of 'Mechs" changes the
+   * sizes of those alternating pairs: before each pair, a side with at least
+   * twice as many 'Mechs left to declare for declares two, three at 3:1, and
+   * so on (see `declarationBlockSizes`).
+   *
+   * `unavailableUnitIds` holds the 'Mechs that have already declared earlier in
+   * the phase; the queue for the remaining pairs is rebuilt from this when the
+   * ratio has to be re-evaluated mid-phase.
+   *
+   * @param {object} firstPlayer - side that declares first (the initiative loser)
+   * @param {object} secondPlayer - side that declares second
+   * @param {Set<string>|null} [unavailableUnitIds] - already-declared 'Mech ids
+   * @returns {{entries: Array<{playerId:number, unitId:string}>, pairStarts: number[]}}
+   *   entries in declaration order, plus the index in `entries` where each p12
+   *   pair of declarations begins
+   */
+  _planDeclarationEntries(firstPlayer, secondPlayer, unavailableUnitIds = null) {
+    const state = this.engine.stateManager.getState();
+    const isAvailable = unit => !this.isDestroyedUnit(unit)
+      && !(unavailableUnitIds && unavailableUnitIds.has(unit.id));
+
+    const firstUnits = state.getPlayerUnits(firstPlayer.id).filter(isAvailable);
+    const secondUnits = state.getPlayerUnits(secondPlayer.id).filter(isAvailable);
+
+    const entries = [];
+    const pairStarts = [];
+    let firstIndex = 0;
+    let secondIndex = 0;
+
+    // p12 re-checks the ratio "prior to any pair of ... declarations", so a
+    // pair is planned from the counts left when that pair starts.
+    while (firstIndex < firstUnits.length || secondIndex < secondUnits.length) {
+      pairStarts.push(entries.length);
+      const blocks = declarationBlockSizes(
+        firstUnits.length - firstIndex,
+        secondUnits.length - secondIndex
+      );
+
+      for (let n = 0; n < blocks.first && firstIndex < firstUnits.length; n++) {
+        const unit = firstUnits[firstIndex++];
+        entries.push({ playerId: unit.player, unitId: unit.id });
+      }
+      for (let n = 0; n < blocks.second && secondIndex < secondUnits.length; n++) {
+        const unit = secondUnits[secondIndex++];
+        entries.push({ playerId: unit.player, unitId: unit.id });
+      }
+    }
+
+    return { entries, pairStarts };
+  }
+
+  /**
+   * Build the declaration queue for an acting phase, one entry per 'Mech.
    *
    * p10/p131: destroyed 'Mechs are out of the game and get no declaration slot.
    * An immobile 'Mech (shutdown or unconscious pilot) still receives a slot -
@@ -100,28 +188,77 @@ export class PhaseManager {
    * refuses any action that would make it move or fight.
    */
   buildUnitQueue(firstPlayer, secondPlayer) {
-    const state = this.engine.stateManager.getState();
-    const firstUnits = state.getPlayerUnits(firstPlayer.id).filter(unit => !this.isDestroyedUnit(unit));
-    const secondUnits = state.getPlayerUnits(secondPlayer.id).filter(unit => !this.isDestroyedUnit(unit));
+    return this._planDeclarationEntries(firstPlayer, secondPlayer).entries;
+  }
 
-    const queue = [];
-    const maxLen = Math.max(firstUnits.length, secondUnits.length);
+  /**
+   * Install the declaration plan for an acting phase and remember the sides so
+   * that a pair can be re-evaluated after a mid-phase destruction.
+   *
+   * The plan installed here is only the phase-entry estimate; every pair,
+   * including the first, is (re)planned when the queue reaches it, because p12
+   * evaluates the ratio "prior to any pair of movement or attack declarations".
+   */
+  _enterDeclarationPhase(firstPlayer, secondPlayer) {
+    const { entries, pairStarts } = this._planDeclarationEntries(firstPlayer, secondPlayer);
 
-    for (let i = 0; i < maxLen; i++) {
-      if (i < firstUnits.length) {
-        queue.push({ playerId: firstUnits[i].player, unitId: firstUnits[i].id });
-      }
-      if (i < secondUnits.length) {
-        queue.push({ playerId: secondUnits[i].player, unitId: secondUnits[i].id });
-      }
-    }
+    this.phaseUnitQueue = entries;
+    this.phaseUnitIndex = 0;
+    this._declarationSides = { firstId: firstPlayer.id, secondId: secondPlayer.id };
+    this._pairStarts = pairStarts;
+    this._evaluatedPairStarts = new Set();
+  }
 
-    return queue;
+  /**
+   * Re-plan the pair that is about to start from the 'Mechs still left to
+   * declare for.
+   *
+   * p12 evaluates the block sizes "prior to any pair of movement or attack
+   * declarations", so a 'Mech destroyed after the phase began must change the
+   * sizes from the next pair on. The pair that is already under way is never
+   * changed - only a pair the queue has just reached. (A 4-vs-8 force that
+   * loses two 'Mechs on the larger side, for example, re-plans its remaining
+   * 1:2 pairs as 1:3 pairs once 2 vs 6 Mechs are left to declare.)
+   *
+   * @returns {boolean} whether a pair was re-planned
+   */
+  _maybeReevaluateDeclarationPair() {
+    const index = this.phaseUnitIndex;
+    if (!this._declarationSides) return false;
+    if (!this._pairStarts.includes(index)) return false;
+    if (this._evaluatedPairStarts.has(index)) return false;
+
+    this._evaluatedPairStarts.add(index);
+
+    const declaredUnitIds = new Set(
+      this.phaseUnitQueue.slice(0, index).map(entry => entry.unitId)
+    );
+    const players = this.engine.stateManager.getState().players || [];
+    const firstPlayer = players.find(p => p.id === this._declarationSides.firstId) || players[0];
+    const secondPlayer = players.find(p => p.id === this._declarationSides.secondId) || firstPlayer;
+
+    const { entries, pairStarts } = this._planDeclarationEntries(
+      firstPlayer,
+      secondPlayer,
+      declaredUnitIds
+    );
+
+    this.phaseUnitQueue = this.phaseUnitQueue.slice(0, index).concat(entries);
+    this._pairStarts = this._pairStarts
+      .filter(start => start < index)
+      .concat(pairStarts.map(start => start + index));
+
+    return true;
   }
 
   /**
    * Step over queue entries whose 'Mech was destroyed earlier in the same
    * phase (p131: no further slots). Keeps `currentPlayer` in step.
+   *
+   * Also the point where p12's "prior to any pair" re-evaluation happens: when
+   * the queue reaches a pair that has not been planned against the current
+   * counts yet, the remaining pairs are rebuilt first (see
+   * `_maybeReevaluateDeclarationPair`).
    */
   _skipDestroyedEntries() {
     if (!this.engine) return;
@@ -129,6 +266,8 @@ export class PhaseManager {
 
     let skipped = false;
     while (this.phaseUnitIndex < this.phaseUnitQueue.length) {
+      this._maybeReevaluateDeclarationPair();
+
       const entry = this.phaseUnitQueue[this.phaseUnitIndex];
       const unit = state.getUnit(entry.unitId);
       if (unit && !this.isDestroyedUnit(unit)) break;
@@ -176,10 +315,13 @@ export class PhaseManager {
     return false;
   }
 
-  /** Clear the current unit queue. */
+  /** Clear the current unit queue, including the p12 pair bookkeeping. */
   clearQueue() {
     this.phaseUnitQueue = [];
     this.phaseUnitIndex = 0;
+    this._declarationSides = null;
+    this._pairStarts = [];
+    this._evaluatedPairStarts = new Set();
   }
 
   /**
@@ -394,8 +536,6 @@ export class PhaseManager {
     const state = this.engine.stateManager.getState();
     state.phase = 'initiative';
 
-    this.initiativeWinnerGoesFirst = false;
-
     const result = this.engine.initiativeManager.rollInitiative(
       state.players,
       this.engine.diceRoller
@@ -405,21 +545,39 @@ export class PhaseManager {
     this.engine.eventBus.emit('initiativeRolled', result);
   }
 
+  /**
+   * The two sides in declaration order for an acting phase (p10/p12).
+   *
+   * p10 Movement Phase: "The side that lost Initiative must act first." The
+   * Weapon Attack Phase repeats that, and p12's Physical Attack Phase repeats
+   * the Weapon Attack Phase, so the loser declares first in all three. The
+   * winner's only choice on p10 is which side of the playing area to deploy
+   * on, which is not a phase-order choice; the engine's old
+   * winner-goes-first flag was a house rule (H-11) and has been removed.
+   *
+   * @returns {[object, object]} [first side, second side]
+   */
+  _getDeclarationSides() {
+    const state = this.engine.stateManager.getState();
+    const players = state.players || [];
+    const [firstId, secondId] = this.engine.initiativeManager.getInitiativeOrder(
+      state.initiativeWinner,
+      players
+    );
+
+    const first = players.find(p => p.id === firstId) || players[0];
+    const second = players.find(p => p.id === secondId) || first;
+    return [first, second];
+  }
+
   _enterMovement() {
     const state = this.engine.stateManager.getState();
     state.phase = 'movement';
 
-    const winner = state.initiativeWinner;
-    const players = state.players;
-    const loser = players.find(p => p.id !== winner) || players[0];
-    const winnerPlayer = players.find(p => p.id === winner) || players[0];
+    // p10: "The side that lost Initiative must act first."
+    const [first, second] = this._getDeclarationSides();
 
-    // Build alternating queue: loser first unless winner chose to go first
-    const first = this.initiativeWinnerGoesFirst ? winnerPlayer : loser;
-    const second = this.initiativeWinnerGoesFirst ? loser : winnerPlayer;
-
-    this.phaseUnitQueue = this.buildUnitQueue(first, second);
-    this.phaseUnitIndex = 0;
+    this._enterDeclarationPhase(first, second);
 
     // MP is derived (getMaxMP); only the mode it is based on needs resetting
     for (const unit of Object.values(state.units)) {
@@ -458,16 +616,10 @@ export class PhaseManager {
       }
     }
 
-    const winner = state.initiativeWinner;
-    const players = state.players;
-    const loser = players.find(p => p.id !== winner) || players[0];
-    const winnerPlayer = players.find(p => p.id === winner) || players[0];
+    // p10 Weapon Attack Phase: "The side that lost Initiative must act first."
+    const [first, second] = this._getDeclarationSides();
 
-    const first = this.initiativeWinnerGoesFirst ? winnerPlayer : loser;
-    const second = this.initiativeWinnerGoesFirst ? loser : winnerPlayer;
-
-    this.phaseUnitQueue = this.buildUnitQueue(first, second);
-    this.phaseUnitIndex = 0;
+    this._enterDeclarationPhase(first, second);
 
     const entry = this.phaseUnitQueue[0];
     if (entry) {
@@ -489,19 +641,12 @@ export class PhaseManager {
       this._clearBuildingSnapshots();
     }
 
-    const winner = state.initiativeWinner;
-    const players = state.players;
-    const loser = players.find(p => p.id !== winner) || players[0];
-    const winnerPlayer = players.find(p => p.id === winner) || players[0];
-
     // p12: "Players repeat the steps given for the Weapon Attack Phase, except
     // for torso twisting" - so the initiative loser declares physical attacks
     // first, exactly as in the Weapon Attack Phase (p10).
-    const first = this.initiativeWinnerGoesFirst ? winnerPlayer : loser;
-    const second = this.initiativeWinnerGoesFirst ? loser : winnerPlayer;
+    const [first, second] = this._getDeclarationSides();
 
-    this.phaseUnitQueue = this.buildUnitQueue(first, second);
-    this.phaseUnitIndex = 0;
+    this._enterDeclarationPhase(first, second);
 
     const entry = this.phaseUnitQueue[0];
     if (entry) {

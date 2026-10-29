@@ -69,31 +69,106 @@ export function collapseDamage(cfAtPhaseStart, levelsAbove) {
 }
 
 /**
+ * The building level a unit occupies (p72).
+ *
+ * `position.level` is the building floor, NOT the elevation of the underlying
+ * hex: 0 is the ground floor inside the hex, 1..levels-1 are the upper floors,
+ * and `building.levels` is the roof (p66 treats a building's levels as a hill,
+ * so its top surface sits at that level). The engine has no elevation model,
+ * so a unit with no finite `position.level` is taken to be inside on the
+ * ground floor, which is the common case for the existing maps and scenarios.
+ * A caller that places a unit on an upper floor or the roof sets it explicitly.
+ */
+function buildingLevelOf(unit) {
+  const raw = unit && unit.position ? unit.position.level : undefined;
+  return Number.isFinite(raw) ? raw : 0;
+}
+
+/** Is the unit standing on the roof rather than inside the building? */
+function onRoof(level, building) {
+  return Boolean(building) && Number.isFinite(building.levels) && level >= building.levels;
+}
+
+/** Do the two hexes belong to the same building (or are they the same hex)? */
+function sameBuilding(attackerHexKey, targetHexKey, attackerBuilding, targetBuilding) {
+  if (!attackerBuilding || !targetBuilding) return false;
+  if (attackerHexKey === targetHexKey) return true;
+  return attackerBuilding.id != null && attackerBuilding.id === targetBuilding.id;
+}
+
+/**
  * Combat within a building (p72).
  *
  * A target inside a building costs +1, and each intervening building hex or
  * level costs another +1 (capped at +3 by the attack modifiers table). More
  * than two intervening building hexes/levels blocks line of sight entirely.
+ *
+ * A 'Mech on a roof is NOT inside (p72 Rooftops): it never receives the
+ * automatic +1, but an inside 'Mech and the roof occupant of the same
+ * building still count building levels between them.
+ *
+ * Level counting follows the p72 worked example. Between different hexes of a
+ * building the target's hex is what the automatic +1 stands for, so only the
+ * building levels strictly between the two positions interpose (BattleMaster
+ * at Level 0 vs the Locust at Level 2 in another hex: one intervening level).
+ * In the same hex the target's own floor is counted, which is why the
+ * BattleMaster at Level 0 vs the Warhammer at Level 1 gets "the intervening
+ * level" even though no whole level lies between them; a roof target is not a
+ * building level, so only the levels below the roof interpose (three levels
+ * from Level 0 to a Level 4 roof, blocking line of sight).
  */
 export function buildingCombat(attacker, target, state) {
   const hexes = (state && state.map && state.map.hexes) || new Map();
-  const attackerHex = hexes.get(attacker.position.hexKey);
-  const targetHex = hexes.get(target.position.hexKey);
+  const attackerKey = attacker.position.hexKey;
+  const targetKey = target.position.hexKey;
+  const attackerHex = hexes.get(attackerKey);
+  const targetHex = hexes.get(targetKey);
 
-  const targetInside = Boolean(targetHex && targetHex.building);
+  const attackerBuilding = attackerHex && attackerHex.building ? attackerHex.building : null;
+  const targetBuilding = targetHex && targetHex.building ? targetHex.building : null;
+  const attackerLevel = buildingLevelOf(attacker);
+  const targetLevel = buildingLevelOf(target);
+  const targetOnRoof = onRoof(targetLevel, targetBuilding);
+  const targetInside = Boolean(targetBuilding) && !targetOnRoof;
+  const sharedBuilding = sameBuilding(attackerKey, targetKey, attackerBuilding, targetBuilding);
+  const sameHex = attackerKey === targetKey;
 
-  let intervening = 0;
-  if (attackerHex && targetHex && attacker.position.hexKey !== target.position.hexKey) {
-    const line = hexLine(attacker.position.hexKey, target.position.hexKey);
+  // Building hexes on the line of sight, excluding the attacker's and target's
+  // own hexes (their own hex is the target's +1, not intervening terrain).
+  let interveningHexes = 0;
+  if (attackerHex && targetHex && !sameHex) {
+    const line = hexLine(attackerKey, targetKey);
     for (const key of line.slice(1, -1)) {
       const hex = hexes.get(key);
-      if (hex && hex.building) intervening++;
+      if (hex && hex.building) interveningHexes++;
     }
   }
 
+  // Building levels between the two positions. Levels are only comparable
+  // inside one building; across buildings the level difference says nothing
+  // about intervening structure.
+  let interveningLevels = 0;
+  if (sharedBuilding) {
+    const gap = Math.abs(targetLevel - attackerLevel);
+    interveningLevels = Math.max(0, gap - 1);
+    if (sameHex && targetInside && targetLevel > attackerLevel) {
+      // p72 example: in the same hex the target's own floor counts.
+      interveningLevels = targetLevel - attackerLevel;
+    }
+  }
+
+  const intervening = interveningHexes + interveningLevels;
   const modifier = (targetInside ? 1 : 0) + Math.min(intervening, 3);
+
   return {
+    // Positions used for the level model (exposed for callers and tests).
+    attackerLevel,
+    targetLevel,
+    targetOnRoof,
     targetInside,
+    sameBuilding: sharedBuilding,
+    interveningHexes,
+    interveningLevels,
     intervening,
     modifier,
     losBlocked: intervening > 2

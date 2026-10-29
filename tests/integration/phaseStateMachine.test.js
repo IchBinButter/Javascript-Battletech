@@ -21,6 +21,22 @@ function twoMechEngine(rolls = [8, 5]) {
   return { engine, atlas, jenner };
 }
 
+/** Two Mechs for player 0 and one for player 1, for the p12 2-vs-1 table. */
+function threeMechEngine(rolls = [8, 5]) {
+  const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+  const wolverine = createTestUnit('wolverine-wvr6r', 0, 'wolverine-0');
+  const jenner = createTestUnit('jenner-jr7d', 1, 'jenner-1');
+  atlas.position = { hexKey: '5,7', facing: 0 };
+  wolverine.position = { hexKey: '6,7', facing: 0 };
+  jenner.position = { hexKey: '10,7', facing: 3 };
+
+  const engine = createTestEngine({
+    units: { 'atlas-0': atlas, 'wolverine-0': wolverine, 'jenner-1': jenner }
+  });
+  engine.diceRoller = makeSequencedDiceRoller(rolls);
+  return { engine, atlas, wolverine, jenner };
+}
+
 // =============================================================================
 // Phase sequence
 // =============================================================================
@@ -99,62 +115,123 @@ describe('Initiative', () => {
     expect(engine.stateManager.getState().initiativeWinner).toBe(0);
   });
 
-  it('initiative winner chooses to go first and it affects movement order', () => {
+  it('the loser declares first in movement (p10)', () => {
     const { engine } = twoMechEngine([8, 5]);
     engine.phaseManager.enterPhase('initiative');
     const state = engine.stateManager.getState();
     expect(state.initiativeWinner).toBe(0);
 
-    engine.phaseManager.chooseInitiative(true);
-    engine.phaseManager.enterPhase('movement');
-
-    expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(0);
-    expect(engine.phaseManager.phaseUnitQueue[1].playerId).toBe(1);
-  });
-
-  it('loser goes first in movement when initiativeWinnerGoesFirst is false (default)', () => {
-    const { engine } = twoMechEngine([10, 4]);
-    engine.phaseManager.enterPhase('initiative');
-    expect(engine.stateManager.getState().initiativeWinner).toBe(0);
-
-    engine.phaseManager.chooseInitiative(false);
     engine.phaseManager.enterPhase('movement');
 
     expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(1);
+    expect(engine.phaseManager.phaseUnitQueue[0].unitId).toBe('jenner-1');
     expect(engine.phaseManager.phaseUnitQueue[1].playerId).toBe(0);
   });
 
-  it('initiative choice affects weapon_attack phase ordering', () => {
+  it('the loser declares first in the weapon attack phase (p10)', () => {
     const { engine } = twoMechEngine([8, 5]);
     engine.phaseManager.enterPhase('initiative');
 
-    engine.phaseManager.chooseInitiative(true);
     engine.phaseManager.enterPhase('weapon_attack');
 
-    expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(0);
-    expect(engine.phaseManager.phaseUnitQueue[1].playerId).toBe(1);
+    expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(1);
+    expect(engine.phaseManager.phaseUnitQueue[1].playerId).toBe(0);
   });
 
   it('physical_attack repeats the weapon attack order: loser declares first (p12)', () => {
     const { engine } = twoMechEngine([8, 5]);
     engine.phaseManager.enterPhase('initiative');
 
-    engine.phaseManager.chooseInitiative(false);
     engine.phaseManager.enterPhase('physical_attack');
 
     expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(1);
     expect(engine.phaseManager.phaseUnitQueue[1].playerId).toBe(0);
   });
 
-  it('physical_attack honours the initiative choice like the weapon attack phase', () => {
+  it('the initiative winner gets no phase-order choice (H-11)', () => {
     const { engine } = twoMechEngine([8, 5]);
     engine.phaseManager.enterPhase('initiative');
+    expect(engine.stateManager.getState().initiativeWinner).toBe(0);
 
-    engine.phaseManager.chooseInitiative(true);
-    engine.phaseManager.enterPhase('physical_attack');
+    // p10: "The side that lost Initiative must act first." There is no
+    // winner-goes-first API, not even an unused house-rule flag.
+    expect(engine.phaseManager.chooseInitiative).toBeUndefined();
+    expect('initiativeWinnerGoesFirst' in engine.phaseManager).toBe(false);
 
-    expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(0);
-    expect(engine.phaseManager.phaseUnitQueue[1].playerId).toBe(1);
+    engine.phaseManager.enterPhase('movement');
+    expect(engine.phaseManager.phaseUnitQueue[0].playerId).toBe(1);
+  });
+
+  it('unequal forces: twice as many declares two per pair (2 vs 1, p12)', () => {
+    const { engine } = threeMechEngine([5, 8]);
+    engine.phaseManager.enterPhase('initiative');
+    expect(engine.stateManager.getState().initiativeWinner).toBe(1);
+
+    engine.phaseManager.enterPhase('movement');
+
+    // Player 1 won, so player 0 (the loser) declares first. Player 0 has two
+    // Mechs against player 1's one, so it declares both before the Jenner:
+    // p12, "the team with twice as many 'Mechs declares for two 'Mechs each
+    // time, rather than one."
+    expect(engine.phaseManager.phaseUnitQueue.map(entry => entry.unitId)).toEqual([
+      'atlas-0', 'wolverine-0', 'jenner-1'
+    ]);
+    expect(engine.stateManager.getState().currentPlayer).toBe(0);
+  });
+});
+
+// =============================================================================
+// Unequal forces: mid-phase re-evaluation of the p12 declaration blocks
+// =============================================================================
+
+describe('Unequal forces: mid-phase declaration re-evaluation (p12)', () => {
+  /** 4 Mechs (player 0) vs 8 Mechs (player 1), named for declaration-order probes. */
+  function fourVsEightEngine() {
+    const units = {};
+    for (const unitId of ['a1', 'a2', 'a3', 'a4']) {
+      units[unitId] = createTestUnit('atlas-as7d', 0, unitId);
+    }
+    for (const unitId of ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8']) {
+      units[unitId] = createTestUnit('atlas-as7d', 1, unitId);
+    }
+
+    const engine = createTestEngine({ units });
+    engine.diceRoller = makeSequencedDiceRoller([5, 8]); // P1 wins; P0 declares first
+    engine.phaseManager.enterPhase('initiative');
+    return engine;
+  }
+
+  it('re-plans the remaining pairs through the action path after a mid-phase destruction', () => {
+    const engine = fourVsEightEngine();
+    engine.phaseManager.enterPhase('weapon_attack');
+
+    // The phase-entry plan sees 4 vs 8, so the larger side declares two per
+    // pair. a1, a2, b1 and b2 are then destroyed before their slots are used.
+    for (const unitId of ['a1', 'a2', 'b1', 'b2']) {
+      engine.stateManager.getState().getUnit(unitId).internalStructure.centerTorso = 0;
+    }
+
+    // Drive the phase one declaration at a time (pass spends the slot), the
+    // way GameEngine.processAction does after every action.
+    const turnOrder = [];
+    while (engine.phaseManager.currentPhase === 'weapon_attack') {
+      const entry = engine.phaseManager.getCurrentQueueEntry();
+      if (!entry) break;
+
+      const result = engine.processAction(entry.playerId, {
+        type: 'pass', unitId: entry.unitId
+      });
+      expect(result.success).toBe(true);
+      turnOrder.push(entry.unitId);
+    }
+
+    // "prior to any pair": 2 A Mechs vs 6 B Mechs left to declare for is 3:1,
+    // so B declares three for every A Mech instead of the stale two.
+    expect(turnOrder).toEqual([
+      'a3', 'b3', 'b4', 'b5',
+      'a4', 'b6', 'b7', 'b8'
+    ]);
+    expect(engine.phaseManager.currentPhase).toBe('physical_attack');
   });
 });
 
@@ -726,17 +803,6 @@ describe('Events', () => {
     expect(events).toHaveLength(1);
     expect(events[0].winner).toBeDefined();
     expect(events[0].rolls).toHaveLength(2);
-  });
-
-  it('emit initiativeChoice when chooseInitiative is called', () => {
-    const { engine } = twoMechEngine([8, 5]);
-    engine.phaseManager.enterPhase('initiative');
-    const events = [];
-    engine.eventBus.on('initiativeChoice', d => events.push(d));
-
-    engine.phaseManager.chooseInitiative(true);
-    expect(events).toHaveLength(1);
-    expect(events[0].goFirst).toBe(true);
   });
 
   it('emit movementPhase with queue on movement entry', () => {

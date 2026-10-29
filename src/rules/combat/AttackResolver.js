@@ -12,6 +12,18 @@ import { quirkTargetModifier } from '../quirks/Quirks.js';
 import { getHeatEffects } from '../heat/HeatScale.js';
 import { attackModifier } from '../weather/WeatherRules.js';
 
+/**
+ * Target-hex terrain modifier (p26): a target in light woods/jungle is +1, in
+ * heavy woods/jungle +2. Intervening woods/jungle is a separate "O" modifier
+ * derived from the LOS woods count (p22/p28).
+ */
+const TARGET_TERRAIN_MODIFIER = {
+  light_woods: { modifier: 1, label: 'light woods' },
+  light_jungle: { modifier: 1, label: 'light jungle' },
+  heavy_woods: { modifier: 2, label: 'heavy woods' },
+  heavy_jungle: { modifier: 2, label: 'heavy jungle' }
+};
+
 export class AttackResolver {
   constructor(hitTables, damageResolver = null) {
     this.hitTables = hitTables;
@@ -64,16 +76,12 @@ export class AttackResolver {
     tn += targetMod;
     if (targetMod > 0) mods.push(`Target moved: +${targetMod}`);
 
-    // T - Target terrain modifier (woods occupied)
+    // T - Target terrain modifier (woods or jungle occupied, p26)
     const targetHex = gameState.map.hexes.get(target.position.hexKey);
-    if (targetHex) {
-      if (targetHex.terrainType === 'light_woods') {
-        tn += 1;
-        mods.push(`Target in light woods: +1`);
-      } else if (targetHex.terrainType === 'heavy_woods') {
-        tn += 2;
-        mods.push(`Target in heavy woods: +2`);
-      }
+    const targetTerrain = targetHex ? TARGET_TERRAIN_MODIFIER[targetHex.terrainType] : null;
+    if (targetTerrain) {
+      tn += targetTerrain.modifier;
+      mods.push(`Target in ${targetTerrain.label}: +${targetTerrain.modifier}`);
     }
 
     // Compute distance early for prone and range modifiers
@@ -217,11 +225,14 @@ export class AttackResolver {
       mods.push(`Partial cover: +1`);
     }
 
-    // O - Minimum range
-    if (distance <= weaponDef.minRange) {
-      const minRangeMod = weaponDef.minRange - distance + 1;
-      tn += minRangeMod;
-      mods.push(`Min range: +${minRangeMod}`);
+    // O - Minimum range (p28): only a weapon that actually HAS a minimum range
+    // can impose the penalty. A Min Range 0 weapon never has a target closer
+    // than its minimum, including a same-hex (distance 0) shot.
+    let minimumRangeMod = 0;
+    if (weaponDef.minRange > 0 && distance <= weaponDef.minRange) {
+      minimumRangeMod = weaponDef.minRange - distance + 1;
+      tn += minimumRangeMod;
+      mods.push(`Min range: +${minimumRangeMod}`);
     }
 
     // R - Range modifier
@@ -263,7 +274,7 @@ export class AttackResolver {
       quirkModifier: quirkMod.modifier,
       distance,
       losResult,
-      minimumRangeMod: distance <= weaponDef.minRange ? weaponDef.minRange - distance + 1 : 0
+      minimumRangeMod
     };
   }
 
@@ -310,7 +321,11 @@ export class AttackResolver {
       indirect: isIndirect,
       spotter: options.spotter,
       spotterAttacked: options.spotterAttacked,
-      multipleTargetModifier: options.multipleTargetModifier
+      multipleTargetModifier: options.multipleTargetModifier,
+      // p72 combat within buildings: the +1 inside / +1 per intervening
+      // building hex-or-level modifier is computed by GameEngine._handleFire
+      // and must reach the attack roll, not just the fire attempt.
+      buildingModifier: options.buildingModifier
     });
 
     if (!calc.canFire) {

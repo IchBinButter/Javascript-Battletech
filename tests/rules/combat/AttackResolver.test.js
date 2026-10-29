@@ -310,6 +310,28 @@ describe('AttackResolver', () => {
       expect(result.modifiers).toContain('Target in heavy woods: +2');
     });
 
+    // p26: "Light Woods/Jungle: +1 if the target is in a light woods or light
+    // jungle hex"; heavy woods/jungle is +2. p60 gives jungle the same scale.
+    it('T: target in light jungle adds +1 (p26)', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({ '4,4': {}, '4,6': { terrainType: 'light_jungle' } });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(5);
+      expect(result.modifiers).toContain('Target in light jungle: +1');
+    });
+
+    it('T: target in heavy jungle adds +2 (p26)', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({ '4,4': {}, '4,6': { terrainType: 'heavy_jungle' } });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(6);
+      expect(result.modifiers).toContain('Target in heavy jungle: +2');
+    });
+
     // --- Target prone ------------------------------------------------------
 
     it('T: a prone target is -2 when attacked from an adjacent hex', () => {
@@ -433,6 +455,34 @@ describe('AttackResolver', () => {
       });
       const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
       expect(result.targetNumber).toBe(6); // 4 + 2 heavy woods
+      expect(result.modifiers).toContain('Woods between: +2');
+    });
+
+    it('O: intervening light jungle counts like light woods (p60)', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({
+        '4,4': { level: 0 },
+        '4,5': { terrainType: 'light_jungle', level: 0 },
+        '4,6': { level: 0 }
+      });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(5); // 4 + 1 light jungle
+      expect(result.modifiers).toContain('Woods between: +1');
+    });
+
+    it('O: intervening heavy jungle counts like heavy woods (p60)', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef();
+      const gs = makeGameState({
+        '4,4': { level: 0 },
+        '4,5': { terrainType: 'heavy_jungle', level: 0 },
+        '4,6': { level: 0 }
+      });
+      const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+      expect(result.targetNumber).toBe(6); // 4 + 2 heavy jungle
       expect(result.modifiers).toContain('Woods between: +2');
     });
 
@@ -606,6 +656,33 @@ describe('AttackResolver', () => {
         const gs = makeGameState({ '4,4': {}, '4,5': {} });
         const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
         expect(result.minimumRangeMod).toBe(0);
+      });
+
+      it('O: zero minRange imposes no penalty on a same-hex (distance 0) shot', () => {
+        // A Min Range 0 weapon has no minimum range (p28), so even a shot at
+        // distance 0 must not receive the [Minimum] - [Range] + 1 penalty.
+        const attacker = makeUnit('4,4', 0, 4);
+        const target = makeUnit('4,4', 0, 4);
+        const weapon = makeWeaponDef({ minRange: 0 });
+        const gs = makeGameState({ '4,4': {} });
+        const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+        expect(result.distance).toBe(0);
+        expect(result.minimumRangeMod).toBe(0);
+        expect(result.modifiers.some(m => m.startsWith('Min range'))).toBe(false);
+        expect(result.targetNumber).toBe(4); // 4 Gunnery; range 0 is short range
+      });
+
+      it('O: a real minimum range still charges the penalty at 1 hex', () => {
+        // p28: [Minimum] - [Target Range] + 1; a PPC (Min Range 3) at range 1
+        // still pays 3 - 1 + 1 = 3.
+        const attacker = makeUnit('4,4', 0, 4);
+        const target = makeUnit('4,5', 0, 4);
+        const weapon = makeWeaponDef({ id: 'ppc', minRange: 3 });
+        const gs = makeGameState({ '4,4': {}, '4,5': {} });
+        const result = resolver.calculateTargetNumber(attacker, weapon, target, gs);
+        expect(result.minimumRangeMod).toBe(3);
+        expect(result.modifiers).toContain('Min range: +3');
+        expect(result.targetNumber).toBe(7); // 4 Gunnery + 3, short range +0
       });
     });
 
@@ -897,6 +974,33 @@ describe('AttackResolver', () => {
       const result = resolver.resolveWeaponAttack(attacker, weapon, {}, target, gs, dice);
       expect(result.hit).toBe(false);
       expect(result.roll).toBe(2);
+    });
+
+    it('applies an options.buildingModifier to the attack roll (p72)', () => {
+      const attacker = makeUnit('4,4', 0, 4);
+      const target = makeUnit('4,6', 0, 4);
+      const weapon = makeWeaponDef({ shortRange: 3 }); // distance 2: short range
+      const gs = makeGameState({ '4,4': {}, '4,6': {} });
+      // Roll 5 beats the base TN 4 but loses to the +2 building TN.
+      const dice = makeDiceRoller(5);
+
+      const result = resolver.resolveWeaponAttack(
+        attacker, weapon, {}, target, gs, dice, { buildingModifier: 2 }
+      );
+
+      // p72: +1 for the target inside plus +1 for the intervening building
+      // hex/level. The modifier must reach the roll, not just be reported.
+      expect(result.targetNumber).toBe(6);
+      expect(result.modifiers).toContain('Combat within buildings: +2');
+      expect(result.roll).toBe(5);
+      expect(result.hit).toBe(false);
+
+      // Contrast: without the option the same roll would have hit at TN 4.
+      const withoutBuilding = resolver.resolveWeaponAttack(
+        attacker, weapon, {}, target, gs, makeDiceRoller(5)
+      );
+      expect(withoutBuilding.targetNumber).toBe(4);
+      expect(withoutBuilding.hit).toBe(true);
     });
 
     it('cannot fire when out of range', () => {

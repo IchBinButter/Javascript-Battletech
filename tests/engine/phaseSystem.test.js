@@ -7,7 +7,12 @@ import {
   makeSequencedDiceRoller
 } from '../helpers/testUtils.js';
 import { PHASES } from '../../src/models/GameState.js';
-import { consciousnessNumber, CONSCIOUSNESS_TARGETS, FATAL_PILOT_DAMAGE } from '../../src/engine/PhaseManager.js';
+import {
+  consciousnessNumber,
+  CONSCIOUSNESS_TARGETS,
+  FATAL_PILOT_DAMAGE,
+  declarationBlockSizes
+} from '../../src/engine/PhaseManager.js';
 
 function createTwoMechEngine(opts = {}) {
   const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
@@ -20,6 +25,34 @@ function createTwoMechEngine(opts = {}) {
   });
 
   return { engine, atlas, jenner };
+}
+
+/**
+ * Engine with `counts[playerId]` Mechs on each side, for the p12 Unequal
+ * Numbers of 'Mechs tables. Units are added in declaration order, so
+ * `unit-<player>-0` is that side's first choice.
+ */
+function createForceEngine(counts) {
+  const units = {};
+  counts.forEach((count, playerId) => {
+    for (let i = 0; i < count; i++) {
+      const unitId = `unit-${playerId}-${i}`;
+      units[unitId] = createTestUnit('atlas-as7d', playerId, unitId);
+    }
+  });
+  return createTestEngine({ units });
+}
+
+/** Engine with explicitly named Mechs, for directed declaration-order probes. */
+function createNamedForceEngine(firstUnitIds, secondUnitIds) {
+  const units = {};
+  for (const unitId of firstUnitIds) {
+    units[unitId] = createTestUnit('atlas-as7d', 0, unitId);
+  }
+  for (const unitId of secondUnitIds) {
+    units[unitId] = createTestUnit('atlas-as7d', 1, unitId);
+  }
+  return createTestEngine({ units });
 }
 
 function createThreeMechEngine() {
@@ -80,7 +113,7 @@ describe('PhaseManager: Per-Unit Alternation Queue', () => {
       expect(queue[1]).toEqual({ playerId: 0, unitId: 'atlas-0' });
     });
 
-    it('alternates with uneven unit counts', () => {
+    it('the side with twice as many Mechs declares two per pair (2 vs 1, p12)', () => {
       const { engine } = createThreeMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
@@ -90,8 +123,74 @@ describe('PhaseManager: Per-Unit Alternation Queue', () => {
 
       expect(queue).toHaveLength(3);
       expect(queue[0]).toEqual({ playerId: 1, unitId: 'jenner-1' });
+      // p12: "if ... one team has at least twice as many 'Mechs left to
+      // declare for as the other team, the team with twice as many 'Mechs
+      // declares for two 'Mechs each time, rather than one."
       expect(queue[1]).toEqual({ playerId: 0, unitId: 'atlas-0' });
       expect(queue[2]).toEqual({ playerId: 0, unitId: 'wolverine-0' });
+    });
+
+    it('declares two per pair for a 4 vs 2 force (p12)', () => {
+      const engine = createForceEngine([4, 2]);
+      const players = engine.stateManager.getState().players;
+
+      // First side has twice as many: it declares two, the other one, twice.
+      const queue = engine.phaseManager.buildUnitQueue(players[0], players[1]);
+
+      expect(queue.map(entry => entry.unitId)).toEqual([
+        'unit-0-0', 'unit-0-1', 'unit-1-0',
+        'unit-0-2', 'unit-0-3', 'unit-1-1'
+      ]);
+    });
+
+    it('the larger side declares two even when it declares second (2 vs 4, p12)', () => {
+      const engine = createForceEngine([2, 4]);
+      const players = engine.stateManager.getState().players;
+
+      const queue = engine.phaseManager.buildUnitQueue(players[0], players[1]);
+
+      expect(queue.map(entry => entry.unitId)).toEqual([
+        'unit-0-0', 'unit-1-0', 'unit-1-1',
+        'unit-0-1', 'unit-1-2', 'unit-1-3'
+      ]);
+    });
+
+    it('declares three per pair for a 3 vs 1 force (p12)', () => {
+      const engine = createForceEngine([3, 1]);
+      const players = engine.stateManager.getState().players;
+
+      // "If one team has at least three times as many 'Mechs, it declares for
+      // three each time, and so on."
+      const queue = engine.phaseManager.buildUnitQueue(players[0], players[1]);
+
+      expect(queue.map(entry => entry.unitId)).toEqual([
+        'unit-0-0', 'unit-0-1', 'unit-0-2', 'unit-1-0'
+      ]);
+    });
+
+    it('the larger side declares three even when it declares second (1 vs 3, p12)', () => {
+      const engine = createForceEngine([1, 3]);
+      const players = engine.stateManager.getState().players;
+
+      const queue = engine.phaseManager.buildUnitQueue(players[0], players[1]);
+
+      expect(queue.map(entry => entry.unitId)).toEqual([
+        'unit-0-0', 'unit-1-0', 'unit-1-1', 'unit-1-2'
+      ]);
+    });
+
+    it('re-checks the ratio before every pair (3 vs 2, p12)', () => {
+      const engine = createForceEngine([3, 2]);
+      const players = engine.stateManager.getState().players;
+
+      // 3 vs 2 is not 2:1, so the first pair is 1:1; that leaves 2 vs 1, which
+      // is 2:1, so the next pair has the first side declare its last two.
+      const queue = engine.phaseManager.buildUnitQueue(players[0], players[1]);
+
+      expect(queue.map(entry => entry.unitId)).toEqual([
+        'unit-0-0', 'unit-1-0',
+        'unit-0-1', 'unit-0-2', 'unit-1-1'
+      ]);
     });
 
     it('returns empty queue when both players have no units', () => {
@@ -116,7 +215,7 @@ describe('PhaseManager: Per-Unit Alternation Queue', () => {
   });
 
   describe('phase entry queue building', () => {
-    it('_enterMovement builds queue with loser first by default', () => {
+    it('_enterMovement puts the initiative loser first (p10)', () => {
       const { engine } = createTwoMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
@@ -128,44 +227,60 @@ describe('PhaseManager: Per-Unit Alternation Queue', () => {
       expect(queue[1].playerId).toBe(0);
     });
 
-    it('_enterMovement builds queue with winner first when chosen', () => {
+    it('the winner of the initiative roll does not get to declare first (H-11)', () => {
       const { engine } = createTwoMechEngine();
-      engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+      engine.diceRoller = makeSequencedDiceRoller([5, 8]);
       engine.phaseManager.enterPhase('initiative');
-      engine.phaseManager.chooseInitiative(true);
+      expect(engine.stateManager.getState().initiativeWinner).toBe(1);
+
       engine.phaseManager.enterPhase('movement');
 
+      // p10: "The side that lost Initiative must act first." - here the loser
+      // is player 0, whatever the winner might prefer.
       const queue = engine.phaseManager.phaseUnitQueue;
-      expect(queue).toHaveLength(2);
-      expect(queue[0].playerId).toBe(0);
-      expect(queue[1].playerId).toBe(1);
+      expect(queue.map(entry => entry.playerId)).toEqual([0, 1]);
     });
 
-    it('_enterWeaponAttack builds queue respecting initiative choice', () => {
+    it('_enterWeaponAttack puts the initiative loser first (p10)', () => {
       const { engine } = createTwoMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
-      engine.phaseManager.chooseInitiative(true);
       engine.phaseManager.enterPhase('weapon_attack');
 
       const queue = engine.phaseManager.phaseUnitQueue;
-      expect(queue[0].playerId).toBe(0);
-      expect(queue[1].playerId).toBe(1);
+      expect(queue[0].playerId).toBe(1);
+      expect(queue[0].unitId).toBe('jenner-1');
+      expect(queue[1].playerId).toBe(0);
     });
 
     it('_enterPhysicalAttack repeats the weapon attack order: loser first (p12)', () => {
       const { engine } = createTwoMechEngine();
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
-      engine.phaseManager.chooseInitiative(true);
       engine.phaseManager.enterPhase('physical_attack');
 
       // p12: "Players repeat the steps given for the Weapon Attack Phase,
-      // except for torso twisting" - so the initiative choice applies here too
-      // and the loser is not forced to wait.
+      // except for torso twisting" - so the initiative loser declares first.
       const queue = engine.phaseManager.phaseUnitQueue;
-      expect(queue[0].playerId).toBe(0);
-      expect(queue[1].playerId).toBe(1);
+      expect(queue[0].playerId).toBe(1);
+      expect(queue[1].playerId).toBe(0);
+    });
+
+    it('_enterMovement declares in p12 blocks when the loser has fewer Mechs', () => {
+      const engine = createForceEngine([4, 2]);
+      engine.diceRoller = makeSequencedDiceRoller([8, 5]);
+      engine.phaseManager.enterPhase('initiative');
+      expect(engine.stateManager.getState().initiativeWinner).toBe(0);
+
+      engine.phaseManager.enterPhase('movement');
+
+      // Player 0 won, so player 1 (2 Mechs) declares first; player 0 has
+      // twice as many and declares two per pair (p12).
+      expect(engine.phaseManager.phaseUnitQueue.map(entry => entry.unitId)).toEqual([
+        'unit-1-0', 'unit-0-0', 'unit-0-1',
+        'unit-1-1', 'unit-0-2', 'unit-0-3'
+      ]);
+      expect(engine.stateManager.getState().currentPlayer).toBe(1);
     });
 
     it('_enterPhysicalAttack defaults to the initiative loser first', () => {
@@ -432,59 +547,48 @@ describe('PhaseManager: Per-Unit Alternation Queue', () => {
 });
 
 // =============================================================================
-// Initiative Winner Choice
+// Initiative order and Unequal Numbers of 'Mechs (p10/p12)
 // =============================================================================
 
-describe('PhaseManager: Initiative Winner Choice', () => {
-  it('chooseInitiative sets the flag and emits event', () => {
+describe('PhaseManager: Initiative order (p10/p12)', () => {
+  it('does not expose the removed winner-goes-first house rule (H-11)', () => {
     const { engine } = createTwoMechEngine();
-    const events = [];
-    engine.eventBus.on('initiativeChoice', (data) => events.push(data));
 
-    engine.phaseManager.chooseInitiative(true);
-
-    expect(engine.phaseManager.initiativeWinnerGoesFirst).toBe(true);
-    expect(events).toHaveLength(1);
-    expect(events[0].goFirst).toBe(true);
+    // p10: "The side that lost Initiative must act first." The manual gives the
+    // winner no phase-order choice (its only winner choice is the pre-game
+    // deployment side), so the house rule is deleted rather than hidden.
+    expect(engine.phaseManager.chooseInitiative).toBeUndefined();
+    expect('initiativeWinnerGoesFirst' in engine.phaseManager).toBe(false);
   });
 
-  it('chooseInitiative(false) sets flag to false', () => {
+  it('InitiativeManager.getInitiativeOrder returns the loser first', () => {
     const { engine } = createTwoMechEngine();
-    engine.phaseManager.initiativeWinnerGoesFirst = true;
-    engine.phaseManager.chooseInitiative(false);
-    expect(engine.phaseManager.initiativeWinnerGoesFirst).toBe(false);
+    const players = engine.stateManager.getState().players;
+
+    expect(engine.initiativeManager.getInitiativeOrder(0, players)).toEqual([1, 0]);
+    expect(engine.initiativeManager.getInitiativeOrder(1, players)).toEqual([0, 1]);
   });
 
-  it('_enterInitiative resets choice to false at start of each turn', () => {
-    const { engine } = createTwoMechEngine();
-    engine.diceRoller = makeSequencedDiceRoller([8, 5]);
-
-    engine.phaseManager.chooseInitiative(true);
-    expect(engine.phaseManager.initiativeWinnerGoesFirst).toBe(true);
-
-    engine.phaseManager.enterPhase('initiative');
-    expect(engine.phaseManager.initiativeWinnerGoesFirst).toBe(false);
-  });
-
-  it('default (no choice) means loser goes first in movement', () => {
+  it('the loser declares first in all three acting phases (p10/p12)', () => {
     const { engine } = createTwoMechEngine();
     engine.diceRoller = makeSequencedDiceRoller([8, 5]);
     engine.phaseManager.enterPhase('initiative');
+    expect(engine.stateManager.getState().initiativeWinner).toBe(0);
+
+    for (const phase of ['movement', 'weapon_attack', 'physical_attack']) {
+      engine.phaseManager.enterPhase(phase);
+      expect(engine.phaseManager.phaseUnitQueue.map(entry => entry.playerId)).toEqual([1, 0]);
+    }
+  });
+
+  it('the order follows the die roll, not a choice', () => {
+    const { engine } = createTwoMechEngine();
+    engine.diceRoller = makeSequencedDiceRoller([5, 8]);
+    engine.phaseManager.enterPhase('initiative');
+    expect(engine.stateManager.getState().initiativeWinner).toBe(1);
+
     engine.phaseManager.enterPhase('movement');
-
-    const queue = engine.phaseManager.phaseUnitQueue;
-    expect(queue[0].playerId).toBe(1);
-  });
-
-  it('when winner goes first, winner is first in queue', () => {
-    const { engine } = createTwoMechEngine();
-    engine.diceRoller = makeSequencedDiceRoller([8, 5]);
-    engine.phaseManager.enterPhase('initiative');
-    engine.phaseManager.chooseInitiative(true);
-    engine.phaseManager.enterPhase('movement');
-
-    const queue = engine.phaseManager.phaseUnitQueue;
-    expect(queue[0].playerId).toBe(0);
+    expect(engine.phaseManager.phaseUnitQueue.map(entry => entry.playerId)).toEqual([0, 1]);
   });
 
   it('initiative winner is set on state after roll', () => {
@@ -507,6 +611,205 @@ describe('PhaseManager: Initiative Winner Choice', () => {
     expect(events).toHaveLength(1);
     expect(events[0].winner).toBe(0);
     expect(events[0].rolls).toHaveLength(2);
+  });
+});
+
+describe('PhaseManager: Unequal Numbers of Mechs (p12)', () => {
+  /** Replays the p12 pair algorithm, recording the counts before each pair. */
+  function declarationPairs(firstCount, secondCount) {
+    const pairs = [];
+    let first = firstCount;
+    let second = secondCount;
+
+    while (first > 0 || second > 0) {
+      const blocks = declarationBlockSizes(first, second);
+      pairs.push({
+        firstLeft: first,
+        secondLeft: second,
+        first: blocks.first,
+        second: blocks.second
+      });
+      first -= blocks.first;
+      second -= blocks.second;
+    }
+
+    return pairs;
+  }
+
+  // p12 prints two worked tables: "Side B Units Left to Move / Side A Units
+  // Left to Move / Side B Moves / Side A Moves". Side B is the smaller force.
+  it('replays the printed 10-vs-18 table', () => {
+    expect(declarationPairs(10, 18)).toEqual([
+      { firstLeft: 10, secondLeft: 18, first: 1, second: 1 },
+      { firstLeft: 9, secondLeft: 17, first: 1, second: 1 },
+      { firstLeft: 8, secondLeft: 16, first: 1, second: 2 },
+      { firstLeft: 7, secondLeft: 14, first: 1, second: 2 },
+      { firstLeft: 6, secondLeft: 12, first: 1, second: 2 },
+      { firstLeft: 5, secondLeft: 10, first: 1, second: 2 },
+      { firstLeft: 4, secondLeft: 8, first: 1, second: 2 },
+      { firstLeft: 3, secondLeft: 6, first: 1, second: 2 },
+      { firstLeft: 2, secondLeft: 4, first: 1, second: 2 },
+      { firstLeft: 1, secondLeft: 2, first: 1, second: 2 }
+    ]);
+  });
+
+  it('replays the printed 5-vs-14 table', () => {
+    expect(declarationPairs(5, 14)).toEqual([
+      { firstLeft: 5, secondLeft: 14, first: 1, second: 2 },
+      { firstLeft: 4, secondLeft: 12, first: 1, second: 3 },
+      { firstLeft: 3, secondLeft: 9, first: 1, second: 3 },
+      { firstLeft: 2, secondLeft: 6, first: 1, second: 3 },
+      { firstLeft: 1, secondLeft: 3, first: 1, second: 3 }
+    ]);
+  });
+
+  it('the smaller side always declares one, whatever the ratio', () => {
+    for (const [first, second] of [[1, 2], [2, 5], [3, 6], [7, 13], [4, 40]]) {
+      const blocks = declarationBlockSizes(first, second);
+      expect(blocks.first).toBe(1);
+    }
+    for (const [first, second] of [[2, 1], [5, 2], [6, 3], [13, 7], [40, 4]]) {
+      const blocks = declarationBlockSizes(first, second);
+      expect(blocks.second).toBe(1);
+    }
+  });
+
+  it('a side with nothing left to declare hands the rest to the other side', () => {
+    expect(declarationBlockSizes(0, 3)).toEqual({ first: 0, second: 3 });
+    expect(declarationBlockSizes(3, 0)).toEqual({ first: 3, second: 0 });
+    expect(declarationBlockSizes(0, 0)).toEqual({ first: 0, second: 0 });
+  });
+
+  it('builds the printed tables into the full declaration queue exactly', () => {
+    const playerRuns = queue => {
+      const runs = [];
+      for (const entry of queue) {
+        const last = runs[runs.length - 1];
+        if (last && last.playerId === entry.playerId) last.count++;
+        else runs.push({ playerId: entry.playerId, count: 1 });
+      }
+      return runs.map(run => run.count);
+    };
+
+    // Table 1: Side B 10 (first) vs Side A 18. 1:1 for two pairs, then the
+    // larger side declares two every pair.
+    const table1 = createForceEngine([10, 18]);
+    const players1 = table1.stateManager.getState().players;
+    const queue1 = table1.phaseManager.buildUnitQueue(players1[0], players1[1]);
+    expect(queue1).toHaveLength(28);
+    expect(playerRuns(queue1)).toEqual([
+      1, 1, 1, 1, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2
+    ]);
+
+    // Table 2: Side B 5 (first) vs Side A 14. The larger side declares two on
+    // the first pair, then three every pair.
+    const table2 = createForceEngine([5, 14]);
+    const players2 = table2.stateManager.getState().players;
+    const queue2 = table2.phaseManager.buildUnitQueue(players2[0], players2[1]);
+    expect(queue2).toHaveLength(19);
+    expect(playerRuns(queue2)).toEqual([1, 2, 1, 3, 1, 3, 1, 3, 1, 3]);
+  });
+});
+
+// =============================================================================
+// Mid-phase re-evaluation of the p12 declaration blocks
+// =============================================================================
+
+describe('PhaseManager: mid-phase declaration re-evaluation (p12)', () => {
+  /** Walk the live queue and return the declaration order it produces. */
+  function drainQueue(engine) {
+    const order = [];
+    let entry = engine.phaseManager.getCurrentQueueEntry();
+
+    while (entry) {
+      order.push(entry.unitId);
+      engine.phaseManager.advanceQueue();
+      entry = engine.phaseManager.getCurrentQueueEntry();
+    }
+
+    return order;
+  }
+
+  /** p131: destruction removes a 'Mech from the declaration order. */
+  function destroy(engine, unitIds) {
+    for (const unitId of unitIds) {
+      const unit = engine.stateManager.getState().getUnit(unitId);
+      unit.internalStructure.centerTorso = 0;
+      expect(engine.phaseManager.isDestroyedUnit(unit)).toBe(true);
+    }
+  }
+
+  /** 4 Mechs (P0, the initiative loser) vs 8 Mechs (P1, the winner). */
+  function fourVsEightEngine() {
+    const engine = createNamedForceEngine(
+      ['a1', 'a2', 'a3', 'a4'],
+      ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8']
+    );
+    engine.diceRoller = makeSequencedDiceRoller([5, 8]); // P1 wins; P0 declares first
+    engine.phaseManager.enterPhase('initiative');
+    engine.phaseManager.enterPhase('movement');
+    return engine;
+  }
+
+  it('re-plans the remaining pairs after the larger side loses Mechs mid-phase (4 vs 8)', () => {
+    const engine = fourVsEightEngine();
+
+    // The phase-entry plan sees 4 vs 8: the larger side declares two per pair.
+    expect(engine.phaseManager.phaseUnitQueue.map(entry => entry.unitId)).toEqual([
+      'a1', 'b1', 'b2',
+      'a2', 'b3', 'b4',
+      'a3', 'b5', 'b6',
+      'a4', 'b7', 'b8'
+    ]);
+
+    // Mid-phase: a1, a2, b1 and b2 are destroyed before the queue reaches their
+    // slots. A stale phase-entry plan would resume at b3, b4, a3, ...
+    destroy(engine, ['a1', 'a2', 'b1', 'b2']);
+
+    // Re-evaluated "prior to any pair", 2 A Mechs vs 6 B Mechs left to declare
+    // for is 3:1, so B declares three for every A Mech from the next pair on.
+    expect(drainQueue(engine)).toEqual([
+      'a3', 'b3', 'b4', 'b5',
+      'a4', 'b6', 'b7', 'b8'
+    ]);
+  });
+
+  it('re-evaluates the first pair too when the larger side is reduced before it declares', () => {
+    const engine = fourVsEightEngine();
+
+    // b1 and b2 die before the queue is first read. With 4 A Mechs vs 6 B Mechs
+    // left to declare for there is no 2:1 ratio any more, so the first pair is
+    // 1:1 rather than the phase-entry A1/B2.
+    destroy(engine, ['b1', 'b2']);
+
+    expect(drainQueue(engine)).toEqual([
+      'a1', 'b3',
+      'a2', 'b4',
+      'a3', 'b5', 'b6',
+      'a4', 'b7', 'b8'
+    ]);
+  });
+
+  it('does not resize a pair that is already under way (p12 "prior to any pair")', () => {
+    const engine = fourVsEightEngine();
+
+    // Pair 1 has started: A's a1 declares.
+    expect(engine.phaseManager.getCurrentQueueEntry().unitId).toBe('a1');
+    engine.phaseManager.advanceQueue();
+
+    // b3 and b4 were planned for pair 2; they are destroyed while pair 1's b1
+    // and b2 are still to declare.
+    destroy(engine, ['b3', 'b4']);
+
+    // Pair 1 keeps its planned size and finishes as b1, b2. The pair about to
+    // start is then re-planned from 3 A Mechs vs 4 B Mechs left to declare for,
+    // i.e. 1:1 rather than the stale 1:2.
+    expect(drainQueue(engine)).toEqual([
+      'b1', 'b2',
+      'a2', 'b5',
+      'a3', 'b6',
+      'a4', 'b7', 'b8'
+    ]);
   });
 });
 

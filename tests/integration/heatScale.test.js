@@ -374,7 +374,10 @@ describe('Water sinks integration (leg heat sink dissipation bonus)', () => {
     return { engine, mech };
   }
 
-  it('water_depth1 doubles leg sink dissipation: 10 base + 3 leg = 13 total', () => {
+  // p51 DISSIPATING HEAT: "A 'Mech standing in Depth 1 water has its
+  // leg-mounted heat sinks submerged." p50 Heat Point Table: "+1 additional per
+  // operational single heat sink under water (maximum 6 points)".
+  it('water_depth1 submerges only leg sinks: 10 base + 3 singles = 13 total', () => {
     const { engine, mech } = setupWaterMech(30, 'water_depth1', {
       leftLeg: ['ok', 'ok'],
       rightLeg: ['ok']
@@ -385,7 +388,10 @@ describe('Water sinks integration (leg heat sink dissipation bonus)', () => {
     expect(mech.heat).toBe(17);
   });
 
-  it('water_depth2 doubles leg sink dissipation: 10 base + 3 leg = 13 total', () => {
+  // p51: "A 'Mech standing in Depth 2 or deeper water ... has all of its heat
+  // sinks submerged (even those in the engine). No more than 6 additional heat
+  // points per turn can be dissipated due to water."
+  it('water_depth2 submerges every sink, capped at 6 extra: 10 base + 6 = 16', () => {
     const { engine, mech } = setupWaterMech(30, 'water_depth2', {
       leftLeg: ['ok', 'ok'],
       rightLeg: ['ok']
@@ -393,7 +399,20 @@ describe('Water sinks integration (leg heat sink dissipation bonus)', () => {
 
     enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
 
-    expect(mech.heat).toBe(17);
+    expect(mech.heat).toBe(14); // 30 - (10 + 6)
+  });
+
+  it('prone in Depth 1 water submerges every sink (p51)', () => {
+    const { engine, mech } = setupWaterMech(30, 'water_depth1', {
+      leftLeg: ['ok'],
+      rightLeg: []
+    });
+    mech.prone = true;
+
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+
+    // 10 operational single sinks would add +10, capped at 6.
+    expect(mech.heat).toBe(14);
   });
 
   it('no water bonus on clear terrain', () => {
@@ -449,16 +468,43 @@ describe('Water sinks integration (leg heat sink dissipation bonus)', () => {
     expect(mech.heat).toBe(20);
   });
 
-  it('water bonus stacks with double heat sinks correctly', () => {
+  // p50 Heat Point Table: "+2 additional per operational double heat sink
+  // underwater (maximum 6 points)". p46: a double heat sink fills three
+  // critical slots, so three leg slots are one double sink.
+  it('one submerged double heat sink in Depth 1 adds +2', () => {
     const { engine, mech } = setupWaterMech(40, 'water_depth1', {
-      leftLeg: ['ok', 'ok'],
-      rightLeg: ['ok']
+      leftLeg: ['ok', 'ok', 'ok'],
+      rightLeg: []
     });
     mech.heatSinks = { count: 10, damaged: 0, type: 'double' };
 
     enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
 
-    expect(mech.heat).toBe(17);
+    expect(mech.heat).toBe(18); // 40 - (20 base + 2)
+  });
+
+  it('three submerged double heat sinks hit the 6-point cap', () => {
+    const { engine, mech } = setupWaterMech(40, 'water_depth1', {
+      leftLeg: ['ok', 'ok', 'ok'],
+      rightLeg: ['ok', 'ok', 'ok', 'ok', 'ok', 'ok']
+    });
+    mech.heatSinks = { count: 10, damaged: 0, type: 'double' };
+
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+
+    // Three double sinks would add +6: exactly the p50/p51 cap. 40 - (20 + 6).
+    expect(mech.heat).toBe(14);
+  });
+
+  it('water extra is capped at 6 points even with eight leg single sinks', () => {
+    const { engine, mech } = setupWaterMech(30, 'water_depth1', {
+      leftLeg: ['ok', 'ok', 'ok', 'ok'],
+      rightLeg: ['ok', 'ok', 'ok', 'ok']
+    });
+
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+
+    expect(mech.heat).toBe(14); // 30 - (10 + 6), not 30 - (10 + 8)
   });
 
   it('Jenner in water: 10 base + leg sinks doubled', () => {
@@ -482,6 +528,197 @@ describe('Water sinks integration (leg heat sink dissipation bonus)', () => {
     enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
 
     expect(mech.heat).toBe(20);
+  });
+});
+
+// =========================================================================
+// ENGINE CRITICAL HITS (p47/p50/p52)
+// =========================================================================
+
+describe('Engine-critical heat in the Heat Phase', () => {
+  function setupEngineMech(hits, { shutdown = false, sinks = 0 } = {}) {
+    const mech = createTestUnit('atlas-as7d', 0, 'engine-mech');
+    mech.heat = 0;
+    mech.position = { hexKey: '7,7', facing: 0 };
+    mech.heatSinks = { count: sinks, damaged: 0, type: 'single' };
+    mech.engine = { type: 'standard', rating: 300, hits };
+    mech.shutdown = shutdown;
+
+    const engine = createTestEngine({
+      units: { 'engine-mech': mech }
+    });
+
+    return { engine, mech };
+  }
+
+  // p50 Other Heat: "The first engine hit to a 'Mech generates 5 points of heat
+  // per turn." p47 ENGINE repeats it.
+  it('first engine hit adds 5 heat during the Heat Phase', () => {
+    const { engine, mech } = setupEngineMech(1);
+
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+
+    expect(mech.heat).toBe(5);
+  });
+
+  it('second engine hit adds 10 (total) heat per turn', () => {
+    const { engine, mech } = setupEngineMech(2);
+
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+
+    expect(mech.heat).toBe(10);
+  });
+
+  it('an undamaged engine adds no heat', () => {
+    const { engine, mech } = setupEngineMech(0);
+
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+
+    expect(mech.heat).toBe(0);
+  });
+
+  // p52: "Engine critical hits do not generate heat while a 'Mech is shut down."
+  it('engine hits generate no heat while the Mech is shut down', () => {
+    const { engine, mech } = setupEngineMech(2, { shutdown: true });
+
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+
+    expect(mech.heat).toBe(0);
+  });
+
+  // p51 RECORDING HEAT BUILD-UP: heat generated this turn is added, then the
+  // sinks subtract; the engine's +5 is not applied after dissipation.
+  it('engine heat is generated before dissipation', () => {
+    const { engine, mech } = setupEngineMech(1, { sinks: 3 });
+
+    enterHeatPhaseAndResolve(engine, makeDiceRoller(7));
+
+    expect(mech.heat).toBe(2); // 5 generated - 3 dissipated
+  });
+});
+
+// =========================================================================
+// HEAT-INDUCED AMMO EXPLOSION DAMAGE (H-08, p52/p44)
+// =========================================================================
+
+describe('Heat-induced ammo explosion applies real damage (p52/p44)', () => {
+  function setupExplosionMech(heatLevel) {
+    const mech = createTestUnit('atlas-as7d', 0, 'boom-mech');
+    mech.heat = heatLevel;
+    mech.position = { hexKey: '7,7', facing: 0 };
+    mech.heatSinks = { count: 0, damaged: 0, type: 'single' };
+
+    const engine = createTestEngine({
+      units: { 'boom-mech': mech }
+    });
+
+    return { engine, mech };
+  }
+
+  function resolveHeatOnly(engine) {
+    return engine.heatManager.resolveHeatPhase(
+      engine.stateManager.getState(), engine.diceRoller
+    );
+  }
+
+  function emptyAllBins(mech) {
+    for (const bin of Object.values(mech.equipment.ammo)) bin.shots = 0;
+  }
+
+  // p52: "All of the appropriate ammo type in a single critical slot explodes.
+  // Resolve the explosion following the rules in Critical Hit Effects" - the
+  // blast bypasses armour (p44) and is shots x the bin's per-shot Damage Value.
+  it('one LRM-20 shot explodes for 20 damage straight to internal structure', () => {
+    const { engine, mech } = setupExplosionMech(19);
+    emptyAllBins(mech);
+    const binKey = Object.keys(mech.equipment.ammo).find(k => k.startsWith('lrm20_ammo'));
+    expect(binKey).toBeDefined();
+    mech.equipment.ammo[binKey].shots = 1;
+
+    // The Atlas carries its LRM-20 ammo in the left torso (mechs.json).
+    const binLocation = Object.keys(mech.criticalSlots).find(loc =>
+      mech.criticalSlots[loc].some(slot =>
+        slot.item === binKey || slot.item === 'lrm20_ammo'
+      )
+    );
+    expect(binLocation).toBe('leftTorso');
+    const armorBefore = mech.getArmor(binLocation);
+    const internalBefore = mech.getInternal(binLocation);
+
+    engine.diceRoller = makeDiceRoller(2); // avoid target at heat 19 is 4+
+    const results = resolveHeatOnly(engine);
+
+    expect(results[0].effects.some(e => e.includes('AMMO EXPLOSION'))).toBe(true);
+    expect(mech.equipment.ammo[binKey].shots).toBe(0);
+    // p44: explosions bypass armour, so only internal structure is lost.
+    expect(mech.getArmor(binLocation)).toBe(armorBefore);
+    expect(mech.getInternal(binLocation)).toBe(internalBefore - 20);
+    // p58/p52: an ammunition explosion automatically injures the MechWarrior
+    // for 2 points - once, not twice.
+    expect(mech.pilot.hits).toBe(2);
+  });
+
+  // p52: "All of the appropriate ammo type in a single critical slot explodes"
+  // and p102: a missile bin explodes for launcher size x shots left. Two LRM-20
+  // shots are therefore 40 points, not 20.
+  it('a bin with two shots explodes for shots x per-shot damage and transfers inward', () => {
+    const { engine, mech } = setupExplosionMech(19);
+    emptyAllBins(mech);
+    const binKey = Object.keys(mech.equipment.ammo).find(k => k.startsWith('lrm20_ammo'));
+    mech.equipment.ammo[binKey].shots = 2;
+    const ltArmorBefore = mech.getArmor('leftTorso');
+    const ctArmorBefore = mech.getArmor('centerTorso');
+
+    engine.diceRoller = makeDiceRoller(2);
+    resolveHeatOnly(engine);
+
+    expect(mech.equipment.ammo[binKey].shots).toBe(0);
+    // 2 x 20 = 40 points to the left torso (21 internal) and 19 inward to the
+    // centre torso (31 - 19 = 12), all of it bypassing armour (p44).
+    expect(mech.getInternal('leftTorso')).toBe(0);
+    expect(mech.getInternal('centerTorso')).toBe(12);
+    expect(mech.getArmor('leftTorso')).toBe(ltArmorBefore);
+    expect(mech.getArmor('centerTorso')).toBe(ctArmorBefore);
+  });
+
+  it('only the exploded bin loses its shots', () => {
+    const { engine, mech } = setupExplosionMech(19);
+    emptyAllBins(mech);
+    // Every LRM-20 bin holds one shot, so the p52 tie-break is the first bin;
+    // the SRM bins hold three shots each but their ammo is less destructive per
+    // shot (12 vs 20), so they must not be selected.
+    const lrmBins = Object.keys(mech.equipment.ammo).filter(k => k.startsWith('lrm20_ammo'));
+    const srmBins = Object.keys(mech.equipment.ammo).filter(k => k.startsWith('srm6_ammo'));
+    for (const k of lrmBins) mech.equipment.ammo[k].shots = 1;
+    for (const k of srmBins) mech.equipment.ammo[k].shots = 3;
+    expect(lrmBins.length).toBeGreaterThan(0);
+    const explodedBin = lrmBins[0];
+
+    engine.diceRoller = makeDiceRoller(2);
+    resolveHeatOnly(engine);
+
+    // p52: "All of the appropriate ammo type in a single critical slot
+    // explodes" - the other bins keep their ammunition.
+    expect(mech.equipment.ammo[explodedBin].shots).toBe(0);
+    for (const k of lrmBins.slice(1)) expect(mech.equipment.ammo[k].shots).toBe(1);
+    for (const k of srmBins) expect(mech.equipment.ammo[k].shots).toBe(3);
+  });
+
+  it('a survived explosion check leaves the bin and the Mech untouched', () => {
+    const { engine, mech } = setupExplosionMech(19);
+    emptyAllBins(mech);
+    const binKey = Object.keys(mech.equipment.ammo).find(k => k.startsWith('lrm20_ammo'));
+    mech.equipment.ammo[binKey].shots = 1;
+    const structureBefore = { ...mech.internalStructure };
+    const armorBefore = JSON.parse(JSON.stringify(mech.armor));
+
+    engine.diceRoller = makeDiceRoller(4); // 4+ avoids the heat 19 explosion
+    resolveHeatOnly(engine);
+
+    expect(mech.equipment.ammo[binKey].shots).toBe(1);
+    expect(mech.pilot.hits).toBe(0);
+    expect(mech.internalStructure).toEqual(structureBefore);
+    expect(mech.armor).toEqual(armorBefore);
   });
 });
 

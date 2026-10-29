@@ -18,8 +18,9 @@ import { hexLine } from '../../hex/HexMath.js';
 const STANDING_HEIGHT = 2;
 const PRONE_HEIGHT = 1;
 
-const LIGHT_WOODS = new Set(['light_woods', 'jungle_light']);
-const HEAVY_WOODS = new Set(['heavy_woods', 'jungle_heavy']);
+// p60 Terrain Types: light woods/jungle is worth 1 point, heavy is worth 2.
+const LIGHT_WOODS_JUNGLE = new Set(['light_woods', 'light_jungle']);
+const HEAVY_WOODS_JUNGLE = new Set(['heavy_woods', 'heavy_jungle']);
 
 export class LineOfSight {
   _heightOf(unit) {
@@ -106,8 +107,8 @@ export class LineOfSight {
       const ihex = gameState.map.hexes.get(ikey);
       if (!ihex) continue;
 
-      if (LIGHT_WOODS.has(ihex.terrainType)) lightWoodsHexes++;
-      else if (HEAVY_WOODS.has(ihex.terrainType)) heavyWoodsHexes++;
+      if (LIGHT_WOODS_JUNGLE.has(ihex.terrainType)) lightWoodsHexes++;
+      else if (HEAVY_WOODS_JUNGLE.has(ihex.terrainType)) heavyWoodsHexes++;
 
       // Hex height covers hills (level) and buildings (level + building levels)
       const hexHeight = typeof ihex.getHeight === 'function'

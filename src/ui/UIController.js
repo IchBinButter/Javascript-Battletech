@@ -366,8 +366,40 @@ export class UIController {
     this._updateMPDisplay(unit);
   }
 
+  /**
+   * Jumping MP the unit has available where it is standing (p19). The movement
+   * preview caps destinations with the same value, so the MP label and the
+   * highlighted hexes agree: Depth 1 water loses the submerged leg jets and
+   * Depth 2+ water reports 0 (no jump).
+   *
+   * @param {Unit|object} unit
+   * @returns {number}
+   */
+  _availableJumpMP(unit) {
+    if (!unit) return 0;
+    if (typeof unit.getJumpMP !== 'function') {
+      return (unit.movement && unit.movement.jump) || 0;
+    }
+
+    const state = this.gameEngine ? this.gameEngine.stateManager.getState() : null;
+    const hexes = state && state.map && state.map.hexes;
+    const hexKey = unit.position && unit.position.hexKey;
+    const hex = hexes && hexKey
+      ? (typeof hexes.get === 'function' ? hexes.get(hexKey) : hexes[hexKey])
+      : null;
+    const movementCalc = this.gameEngine && this.gameEngine.movementCalc;
+    const waterDepth = hex && movementCalc && typeof movementCalc.waterDepthOf === 'function'
+      ? movementCalc.waterDepthOf(hex)
+      : 0;
+
+    return unit.getJumpMP(waterDepth);
+  }
+
   _updateMPDisplay(unit) {
-    this.mpDisplay.textContent = `MP: ${unit.currentMP} / ${unit.movement.walk} (Run: ${unit.movement.run}, Jump: ${unit.movement.jump})`;
+    const jumpMP = this._availableJumpMP(unit);
+    // p19: with Jump selected, the current MP is the water-adjusted jump MP.
+    const currentMP = this.movementMode === 'jump' ? jumpMP : unit.currentMP;
+    this.mpDisplay.textContent = `MP: ${currentMP} / ${unit.movement.walk} (Run: ${unit.movement.run}, Jump: ${jumpMP})`;
   }
 
   log(msg, className = 'info') {

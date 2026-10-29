@@ -33,6 +33,8 @@ const QUIRK_TABLE = new Map(quirksData.quirks.map(quirk => [quirk.id, quirk]));
  */
 const HEX_ENTRY_TRIGGER = [
   /woods/i,
+  /jungle/i,
+  /sand/i,
   /rubble/i,
   /water/i,
   /level drop/i,
@@ -160,17 +162,20 @@ export function quirkTargetModifier(unit, context = {}) {
 }
 
 /**
- * Did this PSR come from entering a hex (woods, rubble, water, a building, a
- * terrain modification, a level drop)? Unbalanced only applies to those.
+ * Did this PSR come from entering a hex (jungle, sand, rubble, water, a
+ * building, a terrain modification)? Unbalanced only applies to those (p89).
+ * Woods are absent on purpose: p60 gives both woods rows "PSR Modifier: No
+ * PSR", so an ordinary move into woods never forces a roll to modify.
  */
 function entersHexRequiringPSR(context) {
   if (typeof context.enteringHex === 'boolean') return context.enteringHex;
 
   const movement = context.movement;
   if (movement) {
-    if (movement.enteredLightWoods || movement.enteredHeavyWoods ||
-        movement.enteredRubble || movement.largeLevelDrop ||
-        movement.enteredWater || movement.jumpedIntoWoods) {
+    // The terrain-entry causes PSRCalculator.getPSRTriggers reads (p60/p142).
+    if (movement.enteredLightJungle || movement.enteredHeavyJungle ||
+        movement.enteredSand || movement.enteredRubble ||
+        movement.enteredWater) {
       return true;
     }
     if (movement.terrainPSR && Array.isArray(movement.terrainPSR.reasons) &&

@@ -486,30 +486,48 @@
           },
           {
             "type": "srm6",
-            "location": "leftTorso",
-            "ammoBin": "srm6_ammo"
+            "location": "leftTorso"
           },
           {
             "type": "lrm20",
-            "location": "leftTorso",
-            "ammoBin": "lrm20_ammo"
+            "location": "leftTorso"
           }
         ],
         "ammo": {
           "ac20_ammo": {
             "type": "ac20",
             "shots": 5,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 12
           },
           "srm6_ammo": {
             "type": "srm6",
             "shots": 15,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 10
+          },
+          "srm6_ammo#2": {
+            "type": "srm6",
+            "shots": 15,
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 11
           },
           "lrm20_ammo": {
             "type": "lrm20",
             "shots": 6,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 6
+          },
+          "lrm20_ammo#2": {
+            "type": "lrm20",
+            "shots": 6,
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 7
           }
         },
         "other": {}
@@ -1018,7 +1036,9 @@
           "srm4_ammo": {
             "type": "srm4",
             "shots": 25,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 9
           }
         },
         "other": {}
@@ -1523,12 +1543,16 @@
           "ac5_ammo": {
             "type": "ac5",
             "shots": 20,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 5
           },
           "srm6_ammo": {
             "type": "srm6",
             "shots": 15,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 9
           }
         },
         "other": {}
@@ -2017,8 +2041,7 @@
           },
           {
             "type": "lrm15",
-            "location": "rightTorso",
-            "ammoBin": "lrm15_ammo"
+            "location": "rightTorso"
           },
           {
             "type": "srm2",
@@ -2052,17 +2075,30 @@
           "srm2_ammo": {
             "type": "srm2",
             "shots": 50,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 4
           },
           "lrm15_ammo": {
             "type": "lrm15",
             "shots": 8,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 5
+          },
+          "lrm15_ammo#2": {
+            "type": "lrm15",
+            "shots": 8,
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 6
           },
           "machinegun_ammo": {
             "type": "machinegun",
             "shots": 200,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 8
           }
         },
         "other": {}
@@ -2564,7 +2600,9 @@
           "machinegun_ammo": {
             "type": "machinegun",
             "shots": 200,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 9
           }
         },
         "other": {}
@@ -3071,17 +3109,23 @@
           "ac5_ammo": {
             "type": "ac5",
             "shots": 20,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 6
           },
           "srm2_ammo": {
             "type": "srm2",
             "shots": 50,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 9
           },
           "lrm5_ammo": {
             "type": "lrm5",
             "shots": 24,
-            "explosive": true
+            "explosive": true,
+            "location": "rightTorso",
+            "slot": 2
           }
         },
         "other": {}
@@ -3570,15 +3614,23 @@
           },
           {
             "type": "lrm10",
-            "location": "rightTorso",
-            "ammoBin": "lrm10_ammo"
+            "location": "rightTorso"
           }
         ],
         "ammo": {
           "lrm10_ammo": {
             "type": "lrm10",
             "shots": 12,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 9
+          },
+          "lrm10_ammo#2": {
+            "type": "lrm10",
+            "shots": 12,
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 10
           }
         },
         "other": {}
@@ -4095,7 +4147,9 @@
           "srm6_ammo": {
             "type": "srm6",
             "shots": 15,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 9
           }
         },
         "other": {}
@@ -5106,35 +5160,56 @@
           },
           {
             "type": "srm6",
-            "location": "leftTorso",
-            "ammoBin": "srm6_ammo"
+            "location": "leftTorso"
           },
           {
             "type": "srm6",
-            "location": "rightTorso",
-            "ammoBin": "srm6_ammo"
+            "location": "rightTorso"
           },
           {
             "type": "lrm10",
-            "location": "leftTorso",
-            "ammoBin": "lrm10_ammo"
+            "location": "leftTorso"
           },
           {
             "type": "lrm10",
-            "location": "rightTorso",
-            "ammoBin": "lrm10_ammo"
+            "location": "rightTorso"
           }
         ],
         "ammo": {
           "srm6_ammo": {
             "type": "srm6",
             "shots": 15,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 6
+          },
+          "srm6_ammo#2": {
+            "type": "srm6",
+            "shots": 15,
+            "explosive": true,
+            "location": "rightTorso",
+            "slot": 6
           },
           "lrm10_ammo": {
             "type": "lrm10",
             "shots": 12,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 7
+          },
+          "lrm10_ammo#2": {
+            "type": "lrm10",
+            "shots": 12,
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 8
+          },
+          "lrm10_ammo#3": {
+            "type": "lrm10",
+            "shots": 12,
+            "explosive": true,
+            "location": "rightTorso",
+            "slot": 7
           }
         },
         "other": {}
@@ -5635,7 +5710,9 @@
           "ac5_ammo": {
             "type": "ac5",
             "shots": 20,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 5
           }
         },
         "other": {}
@@ -6650,30 +6727,48 @@
           },
           {
             "type": "srm6",
-            "location": "leftTorso",
-            "ammoBin": "srm6_ammo"
+            "location": "leftTorso"
           },
           {
             "type": "lrm20",
-            "location": "leftTorso",
-            "ammoBin": "lrm20_ammo"
+            "location": "leftTorso"
           }
         ],
         "ammo": {
           "ac20_ammo": {
             "type": "ac20",
             "shots": 5,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 12
           },
           "srm6_ammo": {
             "type": "srm6",
             "shots": 15,
-            "explosive": true
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 10
+          },
+          "srm6_ammo#2": {
+            "type": "srm6",
+            "shots": 15,
+            "explosive": true,
+            "location": "centerTorso",
+            "slot": 11
           },
           "lrm20_ammo": {
             "type": "lrm20",
             "shots": 6,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 6
+          },
+          "lrm20_ammo#2": {
+            "type": "lrm20",
+            "shots": 6,
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 7
           }
         },
         "other": {
@@ -7184,7 +7279,9 @@
           "ac5_ammo": {
             "type": "ac5",
             "shots": 20,
-            "explosive": true
+            "explosive": true,
+            "location": "leftTorso",
+            "slot": 5
           }
         },
         "other": {

@@ -91,7 +91,7 @@ describe('Integration: Full Turn Simulation', () => {
     }
   });
 
-  it('respects initiative winner choice to go first', () => {
+  it('has no winner-goes-first choice: the initiative loser acts first (p10)', () => {
     const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
     const jenner = createTestUnit('jenner-jr7d', 1, 'jenner-1');
     atlas.position = { hexKey: '5,7', facing: 3 };
@@ -106,30 +106,22 @@ describe('Integration: Full Turn Simulation', () => {
     engine.phaseManager.enterPhase('initiative');
     expect(engine.stateManager.getState().initiativeWinner).toBe(0);
 
-    // Winner chooses to go FIRST instead of last
-    engine.phaseManager.chooseInitiative(true);
-    expect(engine.phaseManager.initiativeWinnerGoesFirst).toBe(true);
+    // H-11: p10 gives the winner no phase-order choice - "The side that lost
+    // Initiative must act first." - so the old house rule is gone.
+    expect(engine.phaseManager.chooseInitiative).toBeUndefined();
+    expect('initiativeWinnerGoesFirst' in engine.phaseManager).toBe(false);
 
     // End initiative -> movement
     engine.processAction(0, { type: 'endPhase' });
 
-    // With goFirst=true, winner (P0) moves first
+    // The loser (P1) declares first.
     const moveQueue = engine.phaseManager.phaseUnitQueue;
-    expect(moveQueue[0].playerId).toBe(0);
-    expect(moveQueue[0].unitId).toBe('atlas-0');
-    expect(moveQueue[1].playerId).toBe(1);
-    expect(moveQueue[1].unitId).toBe('jenner-1');
+    expect(moveQueue[0].playerId).toBe(1);
+    expect(moveQueue[0].unitId).toBe('jenner-1');
+    expect(moveQueue[1].playerId).toBe(0);
+    expect(moveQueue[1].unitId).toBe('atlas-0');
 
-    // Player 0 moves atlas first
-    const atlasMove = engine.processAction(0, {
-      type: 'move',
-      unitId: 'atlas-0',
-      path: ['5,7', '5,8'],
-      movementType: 'walk'
-    });
-    expect(atlasMove.success).toBe(true);
-
-    // Player 1 moves jenner second; advances to weapon_attack
+    // Player 1 moves jenner first
     const jennerMove = engine.processAction(1, {
       type: 'move',
       unitId: 'jenner-1',
@@ -137,12 +129,22 @@ describe('Integration: Full Turn Simulation', () => {
       movementType: 'walk'
     });
     expect(jennerMove.success).toBe(true);
+
+    // Player 0 moves atlas second; advances to weapon_attack
+    const atlasMove = engine.processAction(0, {
+      type: 'move',
+      unitId: 'atlas-0',
+      path: ['5,7', '5,8'],
+      movementType: 'walk'
+    });
+    expect(atlasMove.success).toBe(true);
     expect(engine.phaseManager.currentPhase).toBe('weapon_attack');
 
-    // Weapon attack phase also respects goFirst choice
+    // The Weapon Attack Phase repeats the loser-first order (p10).
     const weaponQueue = engine.phaseManager.phaseUnitQueue;
-    expect(weaponQueue[0].playerId).toBe(0);
-    expect(weaponQueue[0].unitId).toBe('atlas-0');
+    expect(weaponQueue[0].playerId).toBe(1);
+    expect(weaponQueue[0].unitId).toBe('jenner-1');
+    expect(weaponQueue[1].playerId).toBe(0);
   });
 
   it('auto-resolves heat during heat phase', () => {
@@ -489,5 +491,69 @@ describe('Integration: Full Turn Simulation', () => {
     expect(events).toContain('initiativeRolled');
     expect(events).toContain('movementPhase');
     expect(events).toContain('actionProcessed');
+  });
+
+  // ==========================================================
+  // Jump landing facing (p18) - engine wiring
+  // ==========================================================
+  describe('jump landing facing through the engine', () => {
+    function jumpEngine() {
+      const jumper = createTestUnit('jenner-jr7d', 0, 'jumper');
+      jumper.position = { hexKey: '5,5', facing: 0 };
+      const engine = createTestEngine({ units: { jumper } });
+      engine.phaseManager.enterPhase('movement');
+      engine.phaseManager.clearQueue();
+      engine.stateManager.getState().currentPlayer = 0;
+      return { engine, jumper };
+    }
+
+    function jump(engine, extra = {}) {
+      return engine.processAction(0, {
+        type: 'move',
+        unitId: 'jumper',
+        path: ['5,5', '5,6', '5,7'],
+        movementType: 'jump',
+        ...extra
+      });
+    }
+
+    it('lands facing the hexside chosen in the move action', () => {
+      const { engine, jumper } = jumpEngine();
+      // The last hop points S (3); p18 lets the player land facing SW (4).
+      const result = jump(engine, { landingFacing: 4 });
+
+      expect(result.success).toBe(true);
+      expect(result.facing).toBe(4);
+      expect(result.landingFacing).toBe(4);
+      expect(jumper.position).toEqual({ hexKey: '5,7', facing: 4 });
+      expect(jumper.hexesMoved).toBe(2);
+    });
+
+    it('defaults to the take-off facing when the action omits the choice', () => {
+      const { engine, jumper } = jumpEngine();
+      const result = jump(engine);
+
+      expect(result.success).toBe(true);
+      expect(result.facing).toBe(0); // take-off facing, not the last hop (3)
+      expect(result.landingFacing).toBe(0);
+      expect(jumper.position).toEqual({ hexKey: '5,7', facing: 0 });
+    });
+
+    it('keeps ground moves deriving facing from the last hex entered', () => {
+      const { engine, jumper } = jumpEngine();
+      // p18 only changes jumping; a walk still turns into the direction moved.
+      const result = engine.processAction(0, {
+        type: 'move',
+        unitId: 'jumper',
+        path: ['5,5', '5,6'],
+        movementType: 'walk',
+        landingFacing: 4 // ignored for ground movement
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.facing).toBe(3); // S
+      expect(result.landingFacing).toBeUndefined(); // jump-only field
+      expect(jumper.position).toEqual({ hexKey: '5,6', facing: 3 });
+    });
   });
 });

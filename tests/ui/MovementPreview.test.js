@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { UIController } from '../../src/ui/UIController.js';
 import { Hex } from '../../src/models/Hex.js';
 import { EventBus } from '../../src/engine/EventBus.js';
+import { createTestUnit } from '../helpers/testUtils.js';
 
 function makeHex(key, terrainType = 'clear', level = 0, overrides = {}) {
   return new Hex(key, { terrainType, level, ...overrides });
@@ -659,6 +660,73 @@ describe('MovementPreview', () => {
         movementType: ui.movementMode
       };
       expect(ui._pendingMove.movementType).toBe('run');
+    });
+  });
+
+  // ==========================================================
+  // MP LABEL USES AVAILABLE JUMP MP (BMM p19)
+  // ==========================================================
+  describe('MP label uses the available jump MP (p19)', () => {
+    /**
+     * A Jenner whose five torso-mounted jets are rearranged to three torso +
+     * two leg-mounted, so Depth 1 water submerges the leg pair (p18/p19).
+     */
+    function makeLegJetJumper(terrainType) {
+      const jumper = createTestUnit('jenner-jr7d', 0, 'test-unit-1');
+      jumper.position = { hexKey: '5,7', facing: 0 };
+
+      const jets = [];
+      for (const [location, slots] of Object.entries(jumper.criticalSlots)) {
+        slots.forEach((slot, index) => {
+          if (slot.item === 'jump_jet') jets.push({ location, index });
+        });
+      }
+      ['leftLeg', 'rightLeg'].forEach((leg, k) => {
+        jumper.criticalSlots[jets[k].location][jets[k].index].item = 'empty';
+        jumper.criticalSlots[leg].push({ item: 'jump_jet', status: 'ok' });
+      });
+
+      const hexes = buildHexMap('5,7', 3);
+      hexes['5,7'] = makeHex('5,7', terrainType);
+      gameState = makeGameState(hexes, { units: { 'test-unit-1': jumper } });
+      movementCalc.waterDepthOf = (hex) => {
+        const match = /^water_depth(\d+)$/.exec((hex && hex.terrainType) || '');
+        return match ? Number(match[1]) : 0;
+      };
+      return jumper;
+    }
+
+    it('shows the Depth 1 submerged-jets total in the movement label', () => {
+      const jumper = makeLegJetJumper('water_depth1');
+      ui.movementMode = 'jump';
+      ui.updateUnitPanel(jumper);
+
+      // 5 jets, two submerged -> 3; with Jump selected the current MP is 3.
+      expect(ui.mpDisplay.textContent).toBe('MP: 3 / 7 (Run: 11, Jump: 3)');
+    });
+
+    it('shows 0 jump MP in Depth 2 water', () => {
+      const jumper = makeLegJetJumper('water_depth2');
+      ui.movementMode = 'jump';
+      ui.updateUnitPanel(jumper);
+
+      expect(ui.mpDisplay.textContent).toBe('MP: 0 / 7 (Run: 11, Jump: 0)');
+    });
+
+    it('keeps the full jump rating on dry land', () => {
+      const jumper = makeLegJetJumper('clear');
+      ui.movementMode = 'jump';
+      ui.updateUnitPanel(jumper);
+
+      expect(ui.mpDisplay.textContent).toBe('MP: 5 / 7 (Run: 11, Jump: 5)');
+    });
+
+    it('leaves the walk-mode label untouched', () => {
+      const jumper = makeLegJetJumper('water_depth2');
+      ui.movementMode = 'walk';
+      ui.updateUnitPanel(jumper);
+
+      expect(ui.mpDisplay.textContent).toBe('MP: 7 / 7 (Run: 11, Jump: 0)');
     });
   });
 });

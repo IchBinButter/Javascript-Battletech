@@ -250,11 +250,37 @@ function convertCriticalSlots(rawSlots) {
   return result;
 }
 
+/**
+ * A unique key for one ammunition bin. The first bin of a type keeps the
+ * critical-slot item id (`lrm20_ammo`); further bins of the same type are
+ * ordinal-suffixed (`lrm20_ammo#2`, `lrm20_ammo#3`), so every critical slot
+ * that holds ammunition is its own bin (p52). The plain id also keeps the
+ * roster's single-bin `ammoBin` references resolving.
+ */
+function nextAmmoBinKey(ammo, ammoId) {
+  if (!ammo[ammoId]) return ammoId;
+  let index = 2;
+  while (ammo[`${ammoId}#${index}`]) index += 1;
+  return `${ammoId}#${index}`;
+}
+
+/**
+ * Build the weapon and ammunition lists from the critical slots.
+ *
+ * p52: every critical slot that holds ammunition is its own bin - "All of the
+ * appropriate ammo type in a single critical slot explodes. If more than one
+ * critical hit slot holds the appropriate ammo type, the one with the most
+ * shots remaining explodes." So each ammo slot becomes one entry holding a full
+ * ton (its per-ton shot count), with the location and slot it occupies. A
+ * critical hit or heat explosion then only ever destroys that one bin.
+ *
+ * An ammunition type with no known per-ton count keeps a 0-shot bin instead of
+ * vanishing, so the bin list still matches the critical slots.
+ */
 function buildEquipment(criticalSlots) {
   const weapons = [];
   const ammo = {};
   let heatSinkSlots = 0;
-  const weaponAmmoMap = {};
 
   for (const [location, slots] of Object.entries(criticalSlots)) {
     for (const slot of slots) {
@@ -263,28 +289,20 @@ function buildEquipment(criticalSlots) {
       if (itemId === 'empty') continue;
 
       if (isWeapon(itemId)) {
-        const entry = { type: itemId, location };
-        weapons.push(entry);
-        weaponAmmoMap[itemId] = (weaponAmmoMap[itemId] || 0) + 1;
+        weapons.push({ type: itemId, location });
       } else if (isAmmo(itemId)) {
-        if (!ammo[itemId]) {
-          const baseType = getAmmoBaseType(itemId);
-          ammo[itemId] = {
-            type: baseType,
-            shots: 0,
-            explosive: explosiveAmmo.has(baseType)
-          };
-        }
-        ammo[itemId].shots += ammoShotsPerTon[getAmmoBaseType(itemId)] || 0;
+        const baseType = getAmmoBaseType(itemId);
+        const key = nextAmmoBinKey(ammo, itemId);
+        ammo[key] = {
+          type: baseType,
+          shots: ammoShotsPerTon[baseType] || 0,
+          explosive: explosiveAmmo.has(baseType),
+          location,
+          slot: slot.slot
+        };
       } else if (itemId === 'heat_sink') {
         heatSinkSlots++;
       }
-    }
-  }
-
-  for (const [ammoId, ammoData] of Object.entries(ammo)) {
-    if (ammoData.shots === 0) {
-      delete ammo[ammoId];
     }
   }
 

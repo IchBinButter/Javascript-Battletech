@@ -354,7 +354,29 @@ export class GameEngine {
       state.hiddenUnits && state.hiddenUnits[unit.id] && state.hiddenUnits[unit.id].hidden
     );
 
-    const validation = this.movementCalc.validateMovement(unit, path, movementType, state);
+    // p18: "A jumping 'Mech also ignores facing ... when it lands it chooses
+    // any facing desired." The landing facing travels with the move action;
+    // the calculator applies it and reports it as the validation's finalFacing,
+    // which is written to unit.position.facing below. Without the choice the
+    // 'Mech keeps the facing it took off with. Ground movement still derives
+    // its facing from the path, so the option is jump-only.
+    const moveOptions = movementType === 'jump' && action.landingFacing !== undefined
+      ? { landingFacing: action.landingFacing }
+      : {};
+
+    // p19 MOVEMENT IN WATER: "Jump jets cannot be fired while submerged. As
+    // such, a 'Mech standing in Depth 1 water may not fire jump jets located in
+    // its legs, and a 'Mech standing in Depth 2 or deeper water cannot jump at
+    // all." Capture the jump MP the standing hex actually provides before the
+    // move, so the result reports the same pool the validation spent (the unit
+    // is standing in its landing hex by the time the result is built).
+    const availableJumpMP = movementType === 'jump'
+      ? this.movementCalc.getAvailableJumpMP(unit, state)
+      : null;
+
+    const validation = this.movementCalc.validateMovement(
+      unit, path, movementType, state, moveOptions
+    );
 
     if (!validation.valid) {
       return { success: false, error: `Invalid movement: ${validation.errors.join(', ')}` };
@@ -453,13 +475,22 @@ export class GameEngine {
         this._enterBuilding(state, unit, destination);
       }
 
+      // p54/p142 Piloting Skill Roll Table: the causes come from the hex the
+      // 'Mech entered at the end of its move. p60 gives both woods rows "PSR
+      // Modifier: No PSR", so woods are deliberately not read here; jungle
+      // (+1 light / +2 heavy), sand (+1) and rubble (0) are. Water carries its
+      // depth: Depth 1 -1, Depth 2 0, Depth 3+ +1, Depth 0 no PSR at all.
+      const terrainType = destination ? destination.terrainType : null;
+      const waterDepth = destination ? this.movementCalc.waterDepthOf(destination) : 0;
       const psrTriggers = this.psrCalc.getPSRTriggers(unit, {
-        enteredHeavyWoods: false,
-        enteredRubble: false,
-        largeLevelDrop: false,
         isSkidding: false,
-        rapidTurnWhileRunning: false,
         type: movementType,
+        enteredLightJungle: terrainType === 'light_jungle',
+        enteredHeavyJungle: terrainType === 'heavy_jungle',
+        enteredSand: terrainType === 'sand',
+        enteredRubble: terrainType === 'rubble',
+        enteredWater: waterDepth > 0,
+        waterDepth,
         terrainPSR: destination ? terrainPSRModifier(destination) : { modifier: 0, reasons: [] },
         weatherPSR: psrModifier(state.weather)
       }, state);
@@ -496,8 +527,15 @@ export class GameEngine {
       success: true,
       unitId: unit.id,
       finalHex: unit.position.hexKey,
-      remainingMP: Math.max(0, this.movementCalc.getMaxMP(unit, movementType) - effectiveValidation.totalCost),
+      // p19: a jump spends the Jumping MP available from the standing hex
+      // (submerged jets do not contribute), not the dry-land rating.
+      remainingMP: Math.max(0,
+        (availableJumpMP ?? this.movementCalc.getMaxMP(unit, movementType))
+        - effectiveValidation.totalCost),
       facing: unit.position.facing,
+      // p18: a jump reports the facing it actually landed with - the hexside
+      // chosen in the action, or the take-off facing when none was given.
+      ...(isJump ? { landingFacing: unit.position.facing } : {}),
       minefields,
       ...(blocker ? { stoppedShortOf: blocker.unitId } : {})
     };
@@ -710,13 +748,39 @@ export class GameEngine {
       if (declaration.ammoBin) action.ammoBin = declaration.ammoBin;
     }
 
+    // p72 "Combat Within Buildings" is scoped to 'Mechs in the SAME building:
+    // the same building hex on different levels, or different hexes of a
+    // multi-hex building. Only that pair gets the p72 LOS rule and the +1
+    // target modifier. buildingCombat reads the building level each unit
+    // occupies (position.level; units with no level are inside on the ground
+    // floor) and handles roof occupants, who are not "inside" and get no
+    // inside modifier.
+    const urban = buildingCombat(attacker, target, state);
+    const combatWithinBuilding = urban.sameBuilding;
+
     // Indirect fire (p30) needs a friendly spotter with line of sight, and the
     // attacker must not have a line of sight of its own.
     let indirect = null;
     if (action.indirect) {
       indirect = this._validateIndirectFire(attacker, target, weaponDef, action.spotterId, state);
       if (!indirect.valid) return { success: false, error: indirect.reason };
-    } else {
+    } else if (!combatWithinBuilding) {
+      // Everything else is NOT p72 combat within a building, so p72's
+      // modifications do not apply.
+      // - A shot from outside into a building (including a roof 'Mech firing
+      //   at a 'Mech inside another building) uses p71 "Attacking 'Mechs
+      //   Inside Buildings": the target's own building hex does not count, but
+      //   every intervening building hex blocks the line (whatever its
+      //   height), and there is no +1 target modifier. The building's CF
+      //   absorption still protects the inside target below.
+      // - Otherwise the generic p22 LOS applies unchanged.
+      if (urban.targetInside && urban.interveningHexes > 0) {
+        const count = urban.interveningHexes;
+        return {
+          success: false,
+          error: `LOS blocked by ${count} intervening building hex${count === 1 ? '' : 'es'}`
+        };
+      }
       const losResult = this.los.calculateLOS(
         attacker.position.hexKey, target.position.hexKey, state, { attacker, target }
       );
@@ -725,11 +789,13 @@ export class GameEngine {
       }
     }
 
-    // Combat within buildings (p72): more than two intervening building hexes
-    // or levels block the shot entirely.
-    const urban = buildingCombat(attacker, target, state);
-    if (urban.losBlocked) {
-      return { success: false, error: 'LOS blocked by intervening building hexes' };
+    // p72's own LOS rule, for a same-building pair only: more than two
+    // intervening building hexes/levels block the line.
+    if (combatWithinBuilding && urban.losBlocked) {
+      return {
+        success: false,
+        error: `LOS blocked by ${urban.intervening} intervening building hexes/levels`
+      };
     }
 
     // Firing arcs (p24): reject an out-of-arc shot before any ammo or heat is
@@ -776,7 +842,10 @@ export class GameEngine {
           spotterAttacked: Boolean(indirect && indirect.spotter.attackedThisPhase),
           aimedLocation: action.aimedLocation,
           multipleTargetModifier,
-          buildingModifier: urban.modifier
+          // p72's +1 inside / +1 per intervening building hex-or-level is
+          // scoped to 'Mechs in the same building; p71 outside-into-inside
+          // attacks carry no such target modifier.
+          buildingModifier: combatWithinBuilding ? urban.modifier : 0
         }
       );
 
@@ -823,7 +892,11 @@ export class GameEngine {
           // takes that damage itself; the remainder reaches the target. The
           // protection uses the CF at the start of the phase, and the hex's CF
           // is only charged once the phase ends (see applyPendingBuildingDamage).
-          if (targetHex && targetHex.building) {
+          // Only a 'Mech INSIDE the building is protected: a roof occupant is
+          // not inside it, so it takes the full hit and the hex's CF is not
+          // reduced (buildingCombat locates the target with the position.level
+          // model: position.level >= building.levels means the roof).
+          if (urban.targetInside) {
             const reduction = damageReduction(targetHex);
             const absorbed = Math.min(hitLoc.damage, reduction);
             if (absorbed > 0) {
@@ -936,10 +1009,17 @@ export class GameEngine {
     // Attacking across levels changes what is legal and which hit table
     // applies (Different Levels table, p140).
     const levelDifference = this._levelDifference(attacker, target, state);
+    const attackerHex = state.map && state.map.hexes
+      ? state.map.hexes.get(attacker.position.hexKey)
+      : null;
     const options = {
       arm: action.arm,
       levelDifference,
-      usePunchTable: Boolean(action.usePunchTable)
+      usePunchTable: Boolean(action.usePunchTable),
+      // p19: jump jets cannot fire while submerged, so a 'Mech standing in
+      // Depth 2+ water cannot jump and cannot make a death from above attack.
+      // The resolver has no map, so hand it the attacker's standing depth.
+      waterDepth: this.movementCalc.waterDepthOf(attackerHex)
     };
 
     let result;

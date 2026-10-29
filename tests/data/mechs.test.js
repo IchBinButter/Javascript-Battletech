@@ -46,6 +46,27 @@ const EXPECTED_FIXED_SLOTS = {
   rightLeg: 6,
 };
 
+// One critical slot of ammunition is one ton (p96 "a critical hit to its
+// ammunition bin deals the weapon's damage times the number of shots left in
+// that bin"). These are the per-ton shot counts the MTF importer uses for the
+// weapons the roster carries.
+const SHOTS_PER_TON = {
+  ac20: 5,
+  ac5: 20,
+  srm6: 15,
+  srm4: 25,
+  srm2: 50,
+  lrm20: 6,
+  lrm15: 8,
+  lrm10: 12,
+  lrm5: 24,
+  machinegun: 200,
+};
+
+const AMMO_WEAPON_IDS = new Set(
+  weaponsData.weapons.filter((weapon) => weapon.ammoPerShot > 0).map((weapon) => weapon.id),
+);
+
 describe('Mech Roster Data', () => {
   // Curated roster size, not a rules cap. The roster is 12 canon designs plus 2
   // non-canon refits that exist so the optional equipment and design-quirk rules
@@ -165,16 +186,31 @@ describe('Mech Roster Data', () => {
       expect(typeof mech.equipment.ammo).toBe('object');
     });
 
-    it('has all ammo references point to existing ammo bins', () => {
-      const ammoKeys = Object.keys(mech.equipment.ammo);
-      for (const weapon of mech.equipment.weapons) {
-        if (weapon.ammoBin) {
-          expect(ammoKeys).toContain(weapon.ammoBin);
-          const bin = mech.equipment.ammo[weapon.ammoBin];
-          expect(bin).toHaveProperty('type');
-          expect(bin).toHaveProperty('shots');
-          expect(bin.shots).toBeGreaterThan(0);
+    it('stores one ammunition bin per critical slot (p52)', () => {
+      const bins = Object.entries(mech.equipment.ammo);
+      const ammoSlots = [];
+      for (const loc of LOCATIONS) {
+        for (const slot of mech.criticalSlots[loc]) {
+          if (/_ammo$/.test(slot.item)) ammoSlots.push({ location: loc, ...slot });
         }
+      }
+
+      expect(bins).toHaveLength(ammoSlots.length);
+
+      for (const slot of ammoSlots) {
+        const matches = bins.filter(
+          ([, bin]) => bin.location === slot.location && bin.slot === slot.slot,
+        );
+        expect(
+          matches,
+          `${mech.id} ${slot.location} slot ${slot.slot} should be exactly one bin`,
+        ).toHaveLength(1);
+        const [, bin] = matches[0];
+        // One critical slot holds one ton of ammunition: the roster stores the
+        // per-ton shot count in every bin.
+        expect(bin.type).toBe(slot.item.replace(/_ammo$/, ''));
+        expect(bin.shots, `${mech.id} ${slot.item}`).toBe(SHOTS_PER_TON[bin.type]);
+        expect(bin.explosive).toBe(true);
       }
     });
 
@@ -220,6 +256,78 @@ describe('Mech Roster Data', () => {
     for (const mech of mechs) {
       const expectedRun = Math.ceil(mech.movement.walk * 1.5);
       expect(mech.movement.run).toBe(expectedRun);
+    }
+  });
+});
+
+// =============================================================================
+// Ammunition bins: one bin per critical slot (D-05, p52)
+// =============================================================================
+
+describe('ammunition bins', () => {
+  it('gives every bin exactly one critical slot and no slot two bins (p52)', () => {
+    for (const mech of mechs) {
+      const occupied = new Set();
+      for (const [key, bin] of Object.entries(mech.equipment.ammo)) {
+        expect(bin.location, `${mech.id} ${key} location`).toBeTruthy();
+        expect(bin.slot, `${mech.id} ${key} slot`).toBeGreaterThan(0);
+
+        const identity = `${bin.location}:${bin.slot}`;
+        expect(occupied.has(identity), `${mech.id} ${key} duplicates ${identity}`).toBe(false);
+        occupied.add(identity);
+
+        const slot = mech.criticalSlots[bin.location].find((s) => s.slot === bin.slot);
+        expect(slot, `${mech.id} ${key} has no critical slot`).toBeDefined();
+        expect(slot.item).toBe(`${bin.type}_ammo`);
+      }
+    }
+  });
+
+  // D-05: the Atlas carries two LRM-20 bins; the old per-type entry made one
+  // explosion write off both. Each bin now holds 6 shots (one ton, p96).
+  it('splits repeated ammunition types into one full bin per slot', () => {
+    const atlas = mechs.find((m) => m.id === 'atlas-as7d');
+    const lrm20Bins = Object.entries(atlas.equipment.ammo)
+      .filter(([, bin]) => bin.type === 'lrm20');
+    expect(lrm20Bins.map(([, bin]) => bin.shots)).toEqual([6, 6]);
+    expect(lrm20Bins.map(([, bin]) => bin.location)).toEqual(['leftTorso', 'leftTorso']);
+
+    const srm6Bins = Object.entries(atlas.equipment.ammo)
+      .filter(([, bin]) => bin.type === 'srm6');
+    expect(srm6Bins.map(([, bin]) => bin.shots)).toEqual([15, 15]);
+  });
+
+  it('keeps the per-ton shot count in every bin of every roster Mech', () => {
+    for (const mech of mechs) {
+      for (const [key, bin] of Object.entries(mech.equipment.ammo)) {
+        expect(bin.shots, `${mech.id} ${key} shots`).toBe(SHOTS_PER_TON[bin.type]);
+      }
+    }
+  });
+
+  it('does not pin a weapon to one of several bins of its ammunition type', () => {
+    for (const mech of mechs) {
+      for (const weapon of mech.equipment.weapons) {
+        if (!weapon.ammoBin) continue;
+        const bin = mech.equipment.ammo[weapon.ammoBin];
+        expect(bin, `${mech.id} ${weapon.type} ammoBin ${weapon.ammoBin}`).toBeDefined();
+        const sameType = Object.values(mech.equipment.ammo)
+          .filter((candidate) => candidate.type === bin.type);
+        expect(
+          sameType,
+          `${mech.id} ${weapon.type} is pinned to one of ${sameType.length} ${bin.type} bins`,
+        ).toHaveLength(1);
+      }
+    }
+  });
+
+  it('gives every ammunition-using weapon at least one bin of its type', () => {
+    for (const mech of mechs) {
+      const ammoTypes = new Set(Object.values(mech.equipment.ammo).map((bin) => bin.type));
+      for (const weapon of mech.equipment.weapons) {
+        if (!AMMO_WEAPON_IDS.has(weapon.type)) continue;
+        expect(ammoTypes.has(weapon.type), `${mech.id} ${weapon.type} has no ammunition`).toBe(true);
+      }
     }
   });
 });

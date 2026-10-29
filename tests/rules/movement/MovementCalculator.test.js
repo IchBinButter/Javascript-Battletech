@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { MovementCalculator } from '../../../src/rules/movement/MovementCalculator.js';
 import { Hex } from '../../../src/models/Hex.js';
 import { hexNeighbors, directionBetween } from '../../../src/hex/HexMath.js';
-import { createTestUnit } from '../../helpers/testUtils.js';
+import { createTestUnit, createTestEngine } from '../../helpers/testUtils.js';
+import terrainData from '../../../src/data/terrain.json' with { type: 'json' };
 
 // =============================================================================
 // Helpers
@@ -89,8 +90,9 @@ describe('MovementCalculator', () => {
   // ==========================================================
   describe('terrain costs (calculateMPCost)', () => {
     // p136 Movement Costs Table: 1 MP to enter any hex, plus the terrain cost
-    // (Clear +0, Light Woods +1, Heavy Woods +2, Rough +1, Rubble +1,
-    // Paved/Bridge +0). p60 repeats the woods/clear values.
+    // (Clear +0, Light Woods +1, Heavy Woods +2, Light Jungle +2, Heavy Jungle
+    // +3, Rough +1, Rubble +1, Sand +0, Paved/Bridge +0). p60 repeats the
+    // woods/jungle/clear/sand values.
     it('clear costs 1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'clear', 0);
@@ -107,6 +109,20 @@ describe('MovementCalculator', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'heavy_woods', 0);
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
+    // p136: "Light jungle +2", "Heavy jungle +3" on top of the 1 MP to enter
+    // any hex; terrain.json stores those totals (3 and 4).
+    it('light_jungle costs 3 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'light_jungle', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(3);
+    });
+
+    it('heavy_jungle costs 4 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'heavy_jungle', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(4);
     });
 
     // p128 worked example: "entering Depth 1 water from a Level 0 hex costs
@@ -159,9 +175,21 @@ describe('MovementCalculator', () => {
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
     });
 
+    // p60/p136: "SAND ... MP Modifier: 0" — only the 1 MP to enter any hex.
+    it('sand costs 1 MP', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'sand', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+    });
+
     // p136 lists Swamp as a *terrain modification* (+1 MP and +1 PSR), i.e. 2
-    // MP over clear; the code still carries a 3 MP swamp terrain entry and the
-    // data file agrees with it (M-31, open). No test asserts that wrong value.
+    // MP over clear ground; terrain.json stores 2 and the rules table derives
+    // from it (M-31).
+    it('swamp costs 2 MP (p61/p136)', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      const to = makeHex('4,5', 'swamp', 0);
+      expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(2);
+    });
 
     it('pavement costs 1 MP', () => {
       const from = makeHex('4,4', 'clear', 0);
@@ -181,6 +209,18 @@ describe('MovementCalculator', () => {
       const from = makeHex('4,4', 'clear', 0);
       const to = makeHex('4,5', 'magma_field', 0);
       expect(calc.calculateMPCost(from, to, makeUnit(), 'walk')).toBe(1);
+    });
+
+    // The rules table is built from terrain.json's mpCost, so a data edit and
+    // the movement rules cannot drift apart again (t12). Water is skipped: its
+    // depth is a level offset priced by calculateMPCost, not a flat row.
+    it('every dry terrain cost equals its terrain.json mpCost', () => {
+      const from = makeHex('4,4', 'clear', 0);
+      for (const [type, def] of Object.entries(terrainData.terrain)) {
+        if (type.startsWith('water')) continue;
+        const to = makeHex('4,5', type, 0);
+        expect(calc.calculateMPCost(from, to, makeUnit(), 'walk'), type).toBe(def.mpCost);
+      }
     });
   });
 
@@ -873,7 +913,7 @@ describe('MovementCalculator', () => {
   });
 
   // ==========================================================
-  // JUMP MOVEMENT
+  // JUMP MOVEMENT (BMM p18)
   // ==========================================================
   describe('jump movement', () => {
     it('calculateMPCost: always 1 regardless of terrain', () => {
@@ -899,6 +939,7 @@ describe('MovementCalculator', () => {
       const gs = makeGameState(hexes);
       const moves = calc.getValidMoves(unit, gs, 'jump');
       expect(moves.has('4,4')).toBe(true);
+      // The start hex is the "no move" entry; it is not entered, so it is free.
       expect(moves.get('4,4').cost).toBe(0);
       expect(moves.size).toBeGreaterThan(1);
     });
@@ -911,6 +952,458 @@ describe('MovementCalculator', () => {
       for (const [, data] of moves) {
         expect(data.cost).toBeLessThanOrEqual(3);
       }
+    });
+
+    // ----------------------------------------------------------
+    // p18: "A jumping 'Mech also ignores facing: it can jump in any
+    // direction for the same MP cost, regardless of its initial facing,
+    // and when it lands it chooses any facing desired."
+    // ----------------------------------------------------------
+    it('does not charge a facing change when jumping', () => {
+      const hexes = buildSimpleHexMap('4,4', 2);
+      const gs = makeGameState(hexes);
+      // 3,4 (SW, dir 4) is two hexsides from facing 0, so a walk would pay
+      // 2 facing MP on top of the terrain cost.
+      const unit = makeUnit(1, 2, 1, 0);
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('3,4')).toBe(true);
+      expect(moves.get('3,4').cost).toBe(1);
+      expect(moves.get('3,4').path).toEqual(['4,4', '3,4']);
+    });
+
+    it('jump reach and cost do not depend on the starting facing', () => {
+      const gs = makeGameState(buildSimpleHexMap('4,4', 2));
+      for (const facing of [0, 1, 2, 3, 4, 5]) {
+        const moves = calc.getValidMoves(makeUnit(4, 6, 2, facing), gs, 'jump');
+        expect(moves.has('3,4')).toBe(true);
+        expect(moves.get('3,4').cost).toBe(1);
+      }
+    });
+
+    it('lets the player choose the landing facing, not the last hop direction', () => {
+      const unit = makeUnit(4, 6, 3, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '5,4': makeHex('5,4', 'clear', 0) // SE = dir 2, one hex away
+      });
+
+      // No choice given: the 'Mech keeps the facing it took off with (a legal
+      // "any facing desired" choice), and pays no facing MP.
+      const defaultFacing = calc.validateMovement(unit, ['4,4', '5,4'], 'jump', gs);
+      expect(defaultFacing.valid).toBe(true);
+      expect(defaultFacing.totalCost).toBe(1);
+      expect(defaultFacing.finalFacing).toBe(0);
+
+      const chosen = calc.validateMovement(unit, ['4,4', '5,4'], 'jump', gs, { landingFacing: 4 });
+      expect(chosen.valid).toBe(true);
+      expect(chosen.totalCost).toBe(1);
+      expect(chosen.finalFacing).toBe(4);
+    });
+
+    it('reports the chosen landing facing in the move preview', () => {
+      const gs = makeGameState(buildSimpleHexMap('4,4', 2));
+      const moves = calc.getValidMoves(makeUnit(4, 6, 2, 3), gs, 'jump', { landingFacing: 5 });
+      expect(moves.get('4,3').facing).toBe(5);
+    });
+
+    // ----------------------------------------------------------
+    // p18: "Terrain does not affect this MP cost: if a hex is legal to
+    // enter, it costs 1 MP to move over or into it, period." The start
+    // hex is not entered, so it costs nothing.
+    // ----------------------------------------------------------
+    it('charges 1 MP per hex entered and nothing for the start hex', () => {
+      const unit = makeUnit(4, 6, 3, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 0),
+        '4,2': makeHex('4,2', 'clear', 0)
+      });
+      const result = calc.validateMovement(unit, ['4,4', '4,3', '4,2'], 'jump', gs);
+      expect(result.valid).toBe(true);
+      expect(result.totalCost).toBe(2);
+    });
+
+    it('charges 1 MP for the landing hex of a one-hex jump', () => {
+      const unit = makeUnit(4, 6, 1, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 0)
+      });
+      const result = calc.validateMovement(unit, ['4,4', '4,3'], 'jump', gs);
+      expect(result.valid).toBe(true);
+      expect(result.totalCost).toBe(1); // the landing hex, not the start hex
+    });
+
+    it('charges 1 MP for a jump that stays in the starting hex (p18)', () => {
+      // p18: "A 'Mech may jump into the same hex it began the turn in, for 1 MP."
+      const unit = makeUnit(4, 6, 2, 0);
+      const gs = makeGameState({ '4,4': makeHex('4,4', 'clear', 0) });
+      const result = calc.validateMovement(unit, ['4,4', '4,4'], 'jump', gs);
+      expect(result.valid).toBe(true);
+      expect(result.totalCost).toBe(1);
+    });
+
+    it('charges 1 MP to land on a higher level instead of the level-change cost', () => {
+      const unit = makeUnit(4, 6, 2, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 2)
+      });
+      const from = gs.map.hexes.get('4,4');
+      const to = gs.map.hexes.get('4,3');
+      expect(calc.calculateMPCost(from, to, unit, 'walk')).toBe(3); // 1 + 2 levels
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.get('4,3').cost).toBe(1);
+    });
+
+    it('ignores terrain costs when jumping over or into terrain', () => {
+      const unit = makeUnit(4, 6, 2, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'heavy_woods', 1, { ice: true }),
+        '4,2': makeHex('4,2', 'water_depth1', 0)
+      });
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.get('4,3').cost).toBe(1);
+      expect(moves.get('4,2').cost).toBe(2);
+    });
+
+    // ----------------------------------------------------------
+    // p18: "A jumping 'Mech ignores terrain (and other 'Mechs) in hexes
+    // it jumps over." It "cannot land in an occupied hex" (stacking, p18).
+    // ----------------------------------------------------------
+    it('flies over occupied hexes but cannot land in one', () => {
+      const unit = makeUnit(4, 6, 2, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 0, { occupiedBy: 'enemyUnit' }),
+        '4,2': makeHex('4,2', 'clear', 0)
+      });
+
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('4,3')).toBe(false); // occupied: no landing
+      expect(moves.has('4,2')).toBe(true); // overflight allowed
+      expect(moves.get('4,2').cost).toBe(2);
+      expect(moves.get('4,2').path).toEqual(['4,4', '4,3', '4,2']);
+
+      const overflight = calc.validateMovement(unit, ['4,4', '4,3', '4,2'], 'jump', gs);
+      expect(overflight.valid).toBe(true);
+
+      const landing = calc.validateMovement(unit, ['4,4', '4,3'], 'jump', gs);
+      expect(landing.valid).toBe(false);
+      expect(landing.errors.join(' ')).toContain('Cannot land in an occupied hex');
+    });
+
+    // ----------------------------------------------------------
+    // p18: "a 'Mech cannot enter a hex with a level higher than the sum
+    // of its current Jumping MP plus the level of the hex its jump began in."
+    // ----------------------------------------------------------
+    it('rejects a landing hex higher than Jumping MP + start level', () => {
+      const unit = makeUnit(4, 6, 2, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 3),
+        '4,2': makeHex('4,2', 'clear', 0)
+      });
+
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('4,3')).toBe(false);
+      // The level-3 hex also blocks the only shortest path to 4,2.
+      expect(moves.has('4,2')).toBe(false);
+
+      const result = calc.validateMovement(unit, ['4,4', '4,3'], 'jump', gs);
+      expect(result.valid).toBe(false);
+      expect(result.errors.join(' ')).toContain('Jump height exceeded');
+    });
+
+    it('allows a landing hex exactly at the height limit', () => {
+      const unit = makeUnit(4, 6, 2, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 2) // Jumping MP 2 + start level 0
+      });
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('4,3')).toBe(true);
+      expect(moves.get('4,3').cost).toBe(1);
+    });
+
+    it('adds the starting hex level to the clearable height', () => {
+      const unit = makeUnit(4, 6, 3, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 2), // starting level 2
+        '4,3': makeHex('4,3', 'clear', 4), // 4 <= 3 + 2
+        '4,2': makeHex('4,2', 'clear', 6) // 6 > 5
+      });
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('4,3')).toBe(true);
+      expect(moves.has('4,2')).toBe(false);
+    });
+
+    it('uses the starting water depth as a negative level (p18 worked example)', () => {
+      const unit = makeUnit(4, 6, 4, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'water_depth1', 0), // starting level -1
+        '4,3': makeHex('4,3', 'clear', 3), // 3 <= 4 + (-1)
+        '4,2': makeHex('4,2', 'clear', 4) // 4 > 3
+      });
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('4,3')).toBe(true);
+      expect(moves.has('4,2')).toBe(false);
+    });
+
+    it('uses another shortest path when one is blocked by height', () => {
+      const unit = makeUnit(4, 6, 2, 0);
+      const gs = makeGameState({
+        '4,4': makeHex('4,4', 'clear', 0),
+        '4,3': makeHex('4,3', 'clear', 3), // too high for Jumping MP 2
+        '5,3': makeHex('5,3', 'clear', 0), // the other two-hex path
+        '5,2': makeHex('5,2', 'clear', 0)
+      });
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('5,2')).toBe(true);
+      expect(moves.get('5,2').cost).toBe(2);
+      expect(moves.get('5,2').path).toEqual(['4,4', '5,3', '5,2']);
+    });
+
+    // ----------------------------------------------------------
+    // p18: "A 'Mech can move 1 hex for each available Jumping MP."
+    // ----------------------------------------------------------
+    it('reaches exactly Jumping MP hexes and no farther', () => {
+      const unit = makeUnit(4, 6, 3, 0);
+      const gs = makeGameState(buildSimpleHexMap('4,4', 5));
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.has('4,7')).toBe(true);
+      expect(moves.get('4,7').cost).toBe(3);
+      expect(moves.get('4,7').path).toEqual(['4,4', '4,5', '4,6', '4,7']);
+      expect(moves.has('4,8')).toBe(false);
+    });
+
+    it('rejects a jump path longer than Jumping MP', () => {
+      const unit = makeUnit(4, 6, 2, 0);
+      const gs = makeGameState(buildSimpleHexMap('4,4', 4));
+      const result = calc.validateMovement(unit, ['4,4', '4,5', '4,6', '4,7'], 'jump', gs);
+      expect(result.valid).toBe(false);
+      expect(result.errors.join(' ')).toContain('Exceeded max MP');
+    });
+
+    // ----------------------------------------------------------
+    // p18: "A 'Mech can only jump to its destination hex via the shortest
+    // path (i.e. the fewest number of hexes required to get there)."
+    // ----------------------------------------------------------
+    it('rejects a detour instead of the shortest path', () => {
+      const unit = makeUnit(4, 6, 4, 0);
+      const gs = makeGameState(buildSimpleHexMap('4,4', 4));
+      // Four hops: 4,4 -> 4,5 -> 5,5 -> 5,6 -> 6,6. 4,4 to 6,6 is three.
+      const result = calc.validateMovement(
+        unit, ['4,4', '4,5', '5,5', '5,6', '6,6'], 'jump', gs
+      );
+      expect(result.valid).toBe(false);
+      expect(result.errors.join(' ')).toContain('shortest path');
+    });
+
+    it('generates jump paths that all pass validation', () => {
+      const unit = makeUnit(4, 6, 3, 2);
+      const gs = makeGameState(buildSimpleHexMap('4,4', 4));
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      for (const [hexKey, data] of moves) {
+        if (hexKey === unit.position.hexKey) continue; // the "no move" entry
+        const result = calc.validateMovement(unit, data.path, 'jump', gs);
+        expect(result.valid, `${hexKey}: ${result.errors.join(', ')}`).toBe(true);
+        expect(result.totalCost).toBe(data.cost);
+      }
+    });
+  });
+
+  // ==========================================================
+  // JUMP JETS IN WATER (BMM p18 / p19)
+  // ==========================================================
+  describe('jump jets in water (p18/p19)', () => {
+    /** Mount operational standard jump jets in a location. */
+    function addJets(unit, location, count) {
+      if (!unit.criticalSlots[location]) unit.criticalSlots[location] = [];
+      for (let i = 0; i < count; i++) {
+        unit.criticalSlots[location].push({ item: 'jump_jet', status: 'ok' });
+      }
+      return unit;
+    }
+
+    /**
+     * p18 worked example: Jumping MP 6 with two of the jets in the legs (one
+     * per leg) and the other four in the torsos.
+     */
+    function makeFloodedJumper() {
+      const unit = makeUnit(4, 6, 6, 0, 0);
+      addJets(unit, 'leftLeg', 1);
+      addJets(unit, 'rightLeg', 1);
+      addJets(unit, 'centerTorso', 4);
+      return unit;
+    }
+
+    function mapWithStartWater(depth, radius) {
+      const hexes = buildSimpleHexMap('4,4', radius);
+      hexes['4,4'] = makeHex('4,4', `water_depth${depth}`, 0);
+      return hexes;
+    }
+
+    it('p18 example: 6 jets, 2 leg-mounted submerged in Depth 1 -> 4 MP and Level 3 ceiling', () => {
+      const unit = makeFloodedJumper();
+      const hexes = mapWithStartWater(1, 6);
+      hexes['4,3'] = makeHex('4,3', 'clear', 3); // 3 <= 4 + start level (-1)
+      hexes['4,2'] = makeHex('4,2', 'clear', 4); // 4 > 3
+      const gs = makeGameState(hexes);
+
+      // The rating is 6; the two submerged leg jets leave 4 available.
+      expect(calc.getMaxMP(unit, 'jump')).toBe(6);
+      expect(calc.getAvailableJumpMP(unit, gs)).toBe(4);
+
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      // "it can only jump over Level 3 terrain and lower this turn"
+      expect(moves.get('4,3').cost).toBe(1);
+      expect(moves.has('4,2')).toBe(false);
+      // Range is the available 4, not the design rating 6.
+      expect(moves.get('4,8').cost).toBe(4);
+      expect(moves.has('4,9')).toBe(false);
+
+      const jump = calc.validateMovement(unit, ['4,4', '4,5', '4,6', '4,7', '4,8'], 'jump', gs);
+      expect(jump.valid).toBe(true);
+      expect(jump.totalCost).toBe(4);
+
+      const tooFar = calc.validateMovement(
+        unit, ['4,4', '4,5', '4,6', '4,7', '4,8', '4,9'], 'jump', gs
+      );
+      expect(tooFar.valid).toBe(false);
+      expect(tooFar.errors.join(' ')).toContain('Exceeded max MP');
+    });
+
+    it('p19 example: 5 jets, one per leg plus three torso locations, leaves 3 in Depth 1', () => {
+      // p19 MOVEMENT IN WATER: "a 'Mech with a Jumping MP of 5 that has one
+      // jump jet in each leg and one in each torso location may only use 3
+      // Jumping MP when jumping out of Depth 1 water."
+      const unit = makeUnit(5, 8, 5, 0, 0);
+      addJets(unit, 'leftLeg', 1);
+      addJets(unit, 'rightLeg', 1);
+      addJets(unit, 'centerTorso', 1);
+      addJets(unit, 'leftTorso', 1);
+      addJets(unit, 'rightTorso', 1);
+
+      const gs = makeGameState(mapWithStartWater(1, 4));
+      expect(calc.getAvailableJumpMP(unit, gs)).toBe(3);
+    });
+
+    it('Depth 2 and deeper water forbids jumping entirely (p19)', () => {
+      for (const depth of [2, 3]) {
+        const unit = makeFloodedJumper();
+        const gs = makeGameState(mapWithStartWater(depth, 4));
+
+        // "a 'Mech standing in Depth 2 or deeper water cannot jump at all."
+        expect(calc.getAvailableJumpMP(unit, gs)).toBe(0);
+        expect(calc.getValidMoves(unit, gs, 'jump').size).toBe(0);
+
+        const result = calc.validateMovement(unit, ['4,4', '4,5'], 'jump', gs);
+        expect(result.valid).toBe(false);
+        expect(result.errors.join(' ')).toMatch(
+          new RegExp(`Cannot jump from Depth ${depth} water.*submerged`)
+        );
+      }
+    });
+
+    it('dry land keeps the full jet count, range and the free start hex', () => {
+      const unit = makeFloodedJumper();
+      const gs = makeGameState(buildSimpleHexMap('4,4', 7));
+
+      expect(calc.getAvailableJumpMP(unit, gs)).toBe(6);
+      const moves = calc.getValidMoves(unit, gs, 'jump');
+      expect(moves.get('4,4').cost).toBe(0);
+      expect(moves.get('4,10').cost).toBe(6); // six hexes away
+      expect(moves.has('4,11')).toBe(false); // seven away: beyond the rating
+    });
+
+    it('subtracts destroyed jump jets from the rating (p14)', () => {
+      const unit = makeFloodedJumper();
+      unit.criticalSlots.centerTorso[0].status = 'destroyed';
+
+      // "'Mechs lose one Jumping MP for each jump jet destroyed."
+      expect(calc.getMaxMP(unit, 'jump')).toBe(5);
+      const gs = makeGameState(buildSimpleHexMap('4,4', 4));
+      expect(calc.getAvailableJumpMP(unit, gs)).toBe(5);
+    });
+
+    it('drops jump jets that are in a destroyed location (p44)', () => {
+      const unit = makeFloodedJumper();
+      unit.internalStructure = { leftLeg: 0, rightLeg: 4, centerTorso: 12 };
+
+      // The left-leg jet went with the leg; the other five jets remain.
+      expect(calc.getMaxMP(unit, 'jump')).toBe(5);
+    });
+
+    it('falls back to the design rating when jets are not modelled per location', () => {
+      const unit = makeUnit(4, 6, 3, 0); // no jump_jet critical slots
+      const gs = makeGameState(buildSimpleHexMap('4,4', 4));
+      expect(calc.getMaxMP(unit, 'jump')).toBe(3);
+      expect(calc.getAvailableJumpMP(unit, gs)).toBe(3);
+    });
+  });
+
+  // ==========================================================
+  // ENGINE JUMP-MP ACCOUNTING (p19)
+  // ==========================================================
+  describe('engine jump MP accounting (p19)', () => {
+    /**
+     * A Jenner whose five torso-mounted jets are rearranged to three torso +
+     * two leg-mounted, so Depth 1 water submerges the leg pair (p18/p19).
+     */
+    function makeLegJetJumper() {
+      const unit = createTestUnit('jenner-jr7d', 0, 'jumper');
+      const jets = [];
+      for (const [location, slots] of Object.entries(unit.criticalSlots)) {
+        slots.forEach((slot, index) => {
+          if (slot.item === 'jump_jet') jets.push({ location, index });
+        });
+      }
+      ['leftLeg', 'rightLeg'].forEach((leg, k) => {
+        unit.criticalSlots[jets[k].location][jets[k].index].item = 'empty';
+        unit.criticalSlots[leg].push({ item: 'jump_jet', status: 'ok' });
+      });
+      return unit;
+    }
+
+    function moveEngine(unit, terrainType) {
+      unit.position = { hexKey: '4,4', facing: 0 };
+      const engine = createTestEngine({ units: { [unit.id]: unit } });
+      const state = engine.stateManager.getState();
+      if (terrainType !== 'clear') {
+        state.map.hexes.get('4,4').terrainType = terrainType;
+      }
+      engine.phaseManager.enterPhase('movement');
+      engine.phaseManager.clearQueue();
+      state.currentPlayer = 0;
+      return engine;
+    }
+
+    it('remaining jump MP comes from the standing hex, not the dry rating', () => {
+      const jumper = makeLegJetJumper();
+      const engine = moveEngine(jumper, 'water_depth1');
+
+      const result = engine.processAction(0, {
+        type: 'move', unitId: jumper.id, path: ['4,4', '4,5'], movementType: 'jump'
+      });
+
+      expect(result.success).toBe(true);
+      // p19: 5 jets, two submerged leg-mounted jets -> 3 available; one hex
+      // spent leaves 2 (the dry rating would have reported 4).
+      expect(result.remainingMP).toBe(2);
+    });
+
+    it('dry land still reports the full rating minus the hexes jumped', () => {
+      const jumper = makeLegJetJumper();
+      const engine = moveEngine(jumper, 'clear');
+
+      const result = engine.processAction(0, {
+        type: 'move', unitId: jumper.id, path: ['4,4', '4,5'], movementType: 'jump'
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.remainingMP).toBe(4); // 5 jets - 1 hex
     });
   });
 

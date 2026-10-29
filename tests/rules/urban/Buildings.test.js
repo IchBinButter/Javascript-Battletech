@@ -193,22 +193,29 @@ describe('urban helpers (p67-73)', () => {
     expect(combat.losBlocked).toBe(true); // more than two intervene
   });
 
-  it('does not block the line for a single intervening building hex', () => {
+  it('does not block a same-building line for a single intervening building hex', () => {
+    // p72: 'Mechs in different hexes of one multi-hex building can attack one
+    // another; only more than two intervening building hexes/levels block.
     const line = hexLine('0,0', '2,0');
     const between = line.slice(1, -1);
     const hexes = new Map();
     for (const key of line) {
-      hexes.set(key, new Hex(key, between.includes(key) ? { building: { levels: 1 } } : {}));
+      hexes.set(key, new Hex(key, {
+        building: { id: 'block', type: 'medium', levels: 2, cf: 40, currentCF: 40 }
+      }));
     }
 
     const combat = buildingCombat(
-      { position: { hexKey: '0,0' } },
-      { position: { hexKey: '2,0' } },
+      { position: { hexKey: '0,0', level: 0 } },
+      { position: { hexKey: '2,0', level: 0 } },
       { map: { hexes } }
     );
 
+    expect(combat.sameBuilding).toBe(true);
+    expect(combat.targetInside).toBe(true);
+    expect(combat.interveningHexes).toBe(between.length);
     expect(combat.losBlocked).toBe(false);
-    expect(combat.modifier).toBe(between.length);
+    expect(combat.modifier).toBe(1 + between.length); // +1 inside, +1 per hex
   });
 
   it('reports no modifier in the open', () => {
@@ -218,6 +225,120 @@ describe('urban helpers (p67-73)', () => {
     const combat = buildingCombat({ position: { hexKey: '0,0' } }, { position: { hexKey: '2,0' } }, state);
 
     expect(combat).toMatchObject({ targetInside: false, intervening: 0, modifier: 0, losBlocked: false });
+  });
+});
+
+describe('combat within buildings across levels (p72)', () => {
+  // The p72 building combat diagram: Hex A is a Level 4 heavy building hex and
+  // Hex C an adjacent Level 3 heavy hex of the same building; the building has
+  // CF 60 on every level. The BattleMaster enters Hex A at Level 0.
+  const p72Buildings = () => new Map([
+    ['5,5', new Hex('5,5', { building: { id: 'p72', type: 'heavy', levels: 4, cf: 60, currentCF: 60 } })],
+    ['6,5', new Hex('6,5', { building: { id: 'p72', type: 'heavy', levels: 3, cf: 60, currentCF: 60 } })]
+  ]);
+  const p72State = () => ({ map: { hexes: p72Buildings() } });
+  /** A unit standing at a building level: 0 is the ground floor, levels is the roof. */
+  const at = (hexKey, level) => ({ position: { hexKey, level } });
+
+  it('reads an explicit position.level as the building floor', () => {
+    const combat = buildingCombat(at('5,5', 0), at('5,5', 1), p72State());
+
+    expect(combat).toMatchObject({
+      attackerLevel: 0,
+      targetLevel: 1,
+      targetInside: true,
+      targetOnRoof: false,
+      interveningHexes: 0,
+      interveningLevels: 1,
+      intervening: 1,
+      modifier: 2,
+      losBlocked: false
+    });
+  });
+
+  it('treats a unit with no position.level as inside on the ground floor', () => {
+    // Units have no elevation field, so the absent level is the documented
+    // approximation: inside the building, not on the roof.
+    const attacker = { position: { hexKey: '5,5' } };
+    const target = { position: { hexKey: '5,5' } };
+    const combat = buildingCombat(attacker, target, p72State());
+
+    expect(combat.attackerLevel).toBe(0);
+    expect(combat.targetLevel).toBe(0);
+    expect(combat.targetInside).toBe(true);
+    expect(combat.targetOnRoof).toBe(false);
+    expect(combat.modifier).toBe(1);
+  });
+
+  it('does not treat a roof occupant as inside', () => {
+    const combat = buildingCombat(at('5,5', 0), at('5,5', 4), p72State());
+
+    expect(combat.targetOnRoof).toBe(true);
+    expect(combat.targetInside).toBe(false);
+    // Levels 1-3 lie between the ground floor and the Level 4 roof.
+    expect(combat.interveningLevels).toBe(3);
+    expect(combat.losBlocked).toBe(true);
+  });
+
+  it('still counts the levels between an inside Mech and a roof occupant', () => {
+    // A Medium building's roof is Level 2, so from Level 0 one level (Level 1)
+    // is between: the roof is visible and takes +1, but no inside +1.
+    const hexes = new Map([
+      ['2,2', new Hex('2,2', { building: { id: 'medium', type: 'medium', levels: 2, cf: 40, currentCF: 40 } })]
+    ]);
+    const combat = buildingCombat(at('2,2', 0), at('2,2', 2), { map: { hexes } });
+
+    expect(combat.targetInside).toBe(false);
+    expect(combat.interveningLevels).toBe(1);
+    expect(combat.modifier).toBe(1);
+    expect(combat.losBlocked).toBe(false);
+  });
+
+  it('blocks at three intervening levels but not at two', () => {
+    // Across two hexes of one building: Level 0 vs Level 3 leaves two whole
+    // levels between (Levels 1 and 2), so the line is still open.
+    const hexes = new Map([
+      ['5,5', new Hex('5,5', { building: { id: 'tower', levels: 4, cf: 60, currentCF: 60 } })],
+      ['6,5', new Hex('6,5', { building: { id: 'tower', levels: 4, cf: 60, currentCF: 60 } })]
+    ]);
+    const twoLevels = buildingCombat(at('5,5', 0), at('6,5', 3), { map: { hexes } });
+    expect(twoLevels.targetInside).toBe(true);
+    expect(twoLevels.interveningLevels).toBe(2);
+    expect(twoLevels.modifier).toBe(3); // +1 inside, +2 levels (table cap +3)
+    expect(twoLevels.losBlocked).toBe(false);
+
+    // Level 0 vs the Level 4 roof of the same hex: three levels between.
+    const threeLevels = buildingCombat(at('5,5', 0), at('5,5', 4), { map: { hexes } });
+    expect(threeLevels.targetInside).toBe(false);
+    expect(threeLevels.interveningLevels).toBe(3);
+    expect(threeLevels.losBlocked).toBe(true);
+  });
+
+  it('reproduces the p72 worked example modifiers and target numbers', () => {
+    const state = p72State();
+    const battlemaster = at('5,5', 0); // Level 0, Hex A
+    const warhammer = at('5,5', 1);    // Level 1, Hex A
+    const locust = at('6,5', 2);       // Level 2, Hex C
+    const wolverine = at('5,5', 4);    // Level 4 (the roof), Hex A
+
+    // p72: Warhammer TN 10 = 4 Gunnery + 2 (the BattleMaster ran) + 2 (the
+    // Warhammer moved 5 hexes) + 1 (target inside) + 1 (intervening level).
+    const vsWarhammer = buildingCombat(battlemaster, warhammer, state);
+    expect(vsWarhammer.modifier).toBe(2);
+    expect(4 + 2 + 2 + vsWarhammer.modifier).toBe(10);
+
+    // p72: Locust TN 8 = 4 Gunnery + 2 (ran) + 1 (target inside) + 1
+    // (intervening level); the Locust did not move.
+    const vsLocust = buildingCombat(battlemaster, locust, state);
+    expect(vsLocust.targetInside).toBe(true);
+    expect(vsLocust.modifier).toBe(2);
+    expect(4 + 2 + vsLocust.modifier).toBe(8);
+
+    // p72: "three building hex levels are between the BattleMaster (Level 0,
+    // Hex A) and the Wolverine (Level 4, Hex A)" -> line of sight is not valid.
+    const vsWolverine = buildingCombat(battlemaster, wolverine, state);
+    expect(vsWolverine.interveningLevels).toBe(3);
+    expect(vsWolverine.losBlocked).toBe(true);
   });
 });
 

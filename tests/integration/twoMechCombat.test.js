@@ -59,7 +59,7 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
   // =========================================================================
 
   describe('per-unit alternation', () => {
-    it('loser fires first in weapon attack phase (default initiative choice)', () => {
+    it('loser fires first in weapon attack phase (p10)', () => {
       const { engine, atlas, jenner } = setupEngagement();
 
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
@@ -76,22 +76,25 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       expect(weaponQueue[1].unitId).toBe('atlas-0');
     });
 
-    it('winner fires first in weapon attack phase when goFirst is chosen', () => {
+    it('the initiative winner cannot choose to fire first (H-11)', () => {
       const { engine } = setupEngagement();
 
       engine.diceRoller = makeSequencedDiceRoller([8, 5]);
       engine.phaseManager.enterPhase('initiative');
       expect(engine.stateManager.getState().initiativeWinner).toBe(0);
 
-      engine.phaseManager.chooseInitiative(true);
+      // p10: "The side that lost Initiative must act first." There is no
+      // winner-goes-first option in the manual, so the API is gone.
+      expect(engine.phaseManager.chooseInitiative).toBeUndefined();
+      expect('initiativeWinnerGoesFirst' in engine.phaseManager).toBe(false);
 
       engine.processAction(0, { type: 'endPhase' }); // init -> weapon
 
       const weaponQueue = engine.phaseManager.phaseUnitQueue;
-      expect(weaponQueue[0].playerId).toBe(0);
-      expect(weaponQueue[0].unitId).toBe('atlas-0');
-      expect(weaponQueue[1].playerId).toBe(1);
-      expect(weaponQueue[1].unitId).toBe('jenner-1');
+      expect(weaponQueue[0].playerId).toBe(1);
+      expect(weaponQueue[0].unitId).toBe('jenner-1');
+      expect(weaponQueue[1].playerId).toBe(0);
+      expect(weaponQueue[1].unitId).toBe('atlas-0');
     });
 
     it('physical attack phase repeats the weapon attack phase order (p12)', () => {
@@ -101,7 +104,6 @@ describe('Integration: Two Mechs Attacking Each Other', () => {
       engine.phaseManager.enterPhase('initiative');
       expect(engine.stateManager.getState().initiativeWinner).toBe(1); // P1 wins
 
-      engine.phaseManager.chooseInitiative(false); // loser declares first
       engine.processAction(0, { type: 'endPhase' }); // init -> movement
       engine.processAction(0, { type: 'endPhase' }); // movement -> weapon
       engine.processAction(0, { type: 'endPhase' }); // weapon -> physical

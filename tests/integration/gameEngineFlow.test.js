@@ -22,13 +22,10 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     return { engine, atlas, jenner };
   }
 
-  function setupPhaseWithWinner(phase, winnerPlayerId, goFirst = false) {
+  function setupPhaseWithWinner(phase, winnerPlayerId) {
     const { engine, atlas, jenner } = createEngineWithUnits();
     engine.phaseManager.enterPhase('initiative');
     engine.stateManager.getState().initiativeWinner = winnerPlayerId;
-    if (goFirst) {
-      engine.phaseManager.chooseInitiative(true);
-    }
     engine.phaseManager.enterPhase(phase);
     return { engine, atlas, jenner };
   }
@@ -73,7 +70,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
 
     it('accepts action for correct player and queue unit', () => {
-      const { engine } = setupPhaseWithWinner('movement', 1, true);
+      const { engine } = setupPhaseWithWinner('movement', 1);
       const entry = getCurrentQueueEntry(engine);
 
       const result = engine.processAction(entry.playerId, {
@@ -88,7 +85,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
 
     it('rejects entirely unknown action types', () => {
-      const { engine } = setupPhaseWithWinner('movement', 0, true);
+      const { engine } = setupPhaseWithWinner('movement', 0);
       const entry = getCurrentQueueEntry(engine);
 
       const result = engine.processAction(entry.playerId, { type: 'invalidAction' });
@@ -99,7 +96,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
 
   describe('Wrong-unit rejection', () => {
     it('rejects movement for opponent unit in queue-based validation', () => {
-      const { engine } = setupPhaseWithWinner('movement', 1, false);
+      const { engine } = setupPhaseWithWinner('movement', 1);
       const state = engine.stateManager.getState();
       const opponentUnits = state.getPlayerUnits(1);
       const opponentUnit = opponentUnits[0];
@@ -246,76 +243,56 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
   });
 
-  describe('Initiative choice', () => {
-    it('emits initiativeRolled and initiativeChoice events', () => {
+  describe('Initiative order (p10/p12)', () => {
+    it('emits initiativeRolled on initiative phase entry', () => {
       const { engine } = createEngineWithUnits();
       const events = [];
       engine.eventBus.on('initiativeRolled', (d) => events.push('initiativeRolled'));
-      engine.eventBus.on('initiativeChoice', (d) => events.push('initiativeChoice'));
 
       engine.phaseManager.enterPhase('initiative');
-      engine.phaseManager.chooseInitiative(true);
 
       expect(events).toContain('initiativeRolled');
-      expect(events).toContain('initiativeChoice');
     });
 
-    it('loser moves first by default (goFirst=false)', () => {
-      const { engine } = setupPhaseWithWinner('movement', 0, false);
+    it('has no winner-goes-first option; the loser declares first (p10)', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
+
+      expect(engine.phaseManager.chooseInitiative).toBeUndefined();
+      expect('initiativeWinnerGoesFirst' in engine.phaseManager).toBe(false);
+    });
+
+    it('loser moves first (p10)', () => {
+      const { engine } = setupPhaseWithWinner('movement', 0);
       const firstEntry = getCurrentQueueEntry(engine);
 
       expect(firstEntry.playerId).toBe(1);
       expect(firstEntry.unitId).toBe('jenner-1');
     });
 
-    it('winner moves first when goFirst=true', () => {
-      const { engine } = setupPhaseWithWinner('movement', 0, true);
-      const firstEntry = getCurrentQueueEntry(engine);
-
-      expect(firstEntry.playerId).toBe(0);
-      expect(firstEntry.unitId).toBe('atlas-0');
-    });
-
-    it('loser fires first by default in weapon_attack phase', () => {
-      const { engine } = setupPhaseWithWinner('weapon_attack', 0, false);
+    it('loser fires first in weapon_attack phase (p10)', () => {
+      const { engine } = setupPhaseWithWinner('weapon_attack', 0);
       const firstEntry = getCurrentQueueEntry(engine);
 
       expect(firstEntry.playerId).toBe(1);
       expect(firstEntry.unitId).toBe('jenner-1');
-    });
-
-    it('winner fires first when goFirst=true in weapon_attack', () => {
-      const { engine } = setupPhaseWithWinner('weapon_attack', 0, true);
-      const firstEntry = getCurrentQueueEntry(engine);
-
-      expect(firstEntry.playerId).toBe(0);
-      expect(firstEntry.unitId).toBe('atlas-0');
     });
 
     // p12: "Players repeat the steps given for the Weapon Attack Phase, except
     // for torso twisting" — so the Physical Attack Phase declares in the same
     // order as the Weapon Attack Phase (p10: the initiative loser declares
-    // first), not winner-first.
+    // first).
     it('physical_attack declares in weapon-attack order: loser first (p12)', () => {
-      const { engine } = setupPhaseWithWinner('physical_attack', 0, false);
+      const { engine } = setupPhaseWithWinner('physical_attack', 0);
       const firstEntry = getCurrentQueueEntry(engine);
 
       expect(firstEntry.playerId).toBe(1);
       expect(firstEntry.unitId).toBe('jenner-1');
     });
-
-    it('physical_attack follows the winner-goes-first option when chosen (p10 optional rule)', () => {
-      const { engine } = setupPhaseWithWinner('physical_attack', 0, true);
-      const firstEntry = getCurrentQueueEntry(engine);
-
-      expect(firstEntry.playerId).toBe(0);
-      expect(firstEntry.unitId).toBe('atlas-0');
-    });
   });
 
   describe('Movement with per-unit alternation', () => {
     it('both units get movement turns in alternating order', () => {
-      const { engine } = setupPhaseWithWinner('movement', 1, false);
+      const { engine } = setupPhaseWithWinner('movement', 1);
       const turnOrder = [];
 
       while (engine.phaseManager.currentPhase === 'movement') {
@@ -339,7 +316,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
 
     it('sets movement modifier based on movement type via queue', () => {
-      const { engine, atlas } = setupPhaseWithWinner('movement', 1, true);
+      const { engine, atlas } = setupPhaseWithWinner('movement', 1);
       const entry = getCurrentQueueEntry(engine);
       const unit = engine.stateManager.getState().getUnit(entry.unitId);
       const startHex = unit.position.hexKey;
@@ -355,7 +332,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
 
     it('movement path updates unit position', () => {
-      const { engine, atlas } = setupPhaseWithWinner('movement', 1, true);
+      const { engine, atlas } = setupPhaseWithWinner('movement', 1);
       const entry = getCurrentQueueEntry(engine);
       const expectedUnitId = entry.unitId;
       const unit = engine.stateManager.getState().getUnit(expectedUnitId);
@@ -484,7 +461,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
 
     it('rejects unknown physical attack type via queue', () => {
-      const { engine } = setupPhaseWithWinner('physical_attack', 1, false);
+      const { engine } = setupPhaseWithWinner('physical_attack', 1);
       const entry = getCurrentQueueEntry(engine);
       const targetId = entry.unitId === 'atlas-0' ? 'jenner-1' : 'atlas-0';
 
@@ -678,7 +655,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
 
     it('logs every action with correct phase info', () => {
-      const { engine } = setupPhaseWithWinner('movement', 1, true);
+      const { engine } = setupPhaseWithWinner('movement', 1);
 
       const q1 = getCurrentQueueEntry(engine);
       engine.processAction(q1.playerId, {
@@ -803,7 +780,7 @@ describe('Integration: GameEngine Action Processing Flow', () => {
     });
 
     it('updates unit facing in movement phase via queue', () => {
-      const { engine } = setupPhaseWithWinner('movement', 1, true);
+      const { engine } = setupPhaseWithWinner('movement', 1);
       const entry = getCurrentQueueEntry(engine);
       const unit = engine.stateManager.getState().getUnit(entry.unitId);
       const originalFacing = unit.position.facing;

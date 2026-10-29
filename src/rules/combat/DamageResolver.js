@@ -8,6 +8,10 @@
  * side torso blows off its arm, destroying the head kills the MechWarrior
  * (p44), CASE contains an ammunition explosion (p118) and an explosion that is
  * not contained keeps transferring through internal structure (p44).
+ *
+ * p52 ammunition: every critical slot that holds ammunition is its own bin, and
+ * an exploding bin destroys only "all of the appropriate ammo type in a single
+ * critical slot" - never the other bins of the same type.
  */
 
 import weaponsData from '../../data/weapons.json' with { type: 'json' };
@@ -37,6 +41,12 @@ function ammoDamagePerShot(ammoType) {
     return (weapon.damage || 1) * weapon.clusterSize;
   }
   return weapon.damage || 1;
+}
+
+/** The ammo type a bin feeds: its `type` field, or the bin key without `_ammo`. */
+function ammoBinType(bin, key) {
+  if (bin && bin.type) return bin.type;
+  return String(key || '').replace(/_ammo$/, '');
 }
 
 /**
@@ -405,8 +415,14 @@ export class DamageResolver {
   applyItemCritical(unit, slot, location, diceRoller) {
     switch (classifyCriticalItem(slot.item)) {
       case 'ammo': {
-        const exploded = this.resolveAmmoExplosion(unit, slot.item, diceRoller, location);
+        // p52: the hit slot is its own bin. Only that bin explodes; any other
+        // bins of the same ammo type in the unit stay loaded.
+        const binKey = this.findAmmoBinKey(unit, location, slot);
+        const exploded = binKey
+          ? this.resolveAmmoExplosion(unit, binKey, diceRoller, location)
+          : false;
         return {
+          ammoBin: binKey,
           ammoExplosion: exploded,
           effect: exploded ? 'AMMO EXPLOSION!' : 'Ammo bin destroyed'
         };
@@ -461,45 +477,126 @@ export class DamageResolver {
   }
 
   /**
-   * Resolve an ammunition explosion (p102/p118/p44).
+   * The ammunition bin a critical slot occupies (p52: one bin per slot).
    *
-   * The explosion's damage bypasses armour and, unless CASE contains it, keeps
-   * transferring through internal structure. The MechWarrior takes 2 points of
-   * damage (p58).
+   * Roster and imported bins carry the `location` and `slot` they sit in, so a
+   * critical hit on one of several bins of the same type explodes only that
+   * bin. A fixture whose bins carry no slot metadata falls back to the
+   * critical-slot item id (the original single-entry-per-type model).
    *
    * @param {object} unit
-   * @param {string} ammoBin - the critical slot item, e.g. 'lrm20_ammo'
-   * @param {object} [diceRoller]
-   * @param {string} [explodedLocation] - location of the slot that was hit; when
-   *   omitted the bin is located by its slot item
+   * @param {string} location
+   * @param {object} slot - the critical slot that was hit
+   * @returns {string|null} key into unit.equipment.ammo
    */
-  resolveAmmoExplosion(unit, ammoBin, diceRoller, explodedLocation = null) {
-    const ammo = unit.equipment && unit.equipment.ammo ? unit.equipment.ammo[ammoBin] : null;
-    if (!ammo || ammo.shots <= 0) return false;
+  findAmmoBinKey(unit, location, slot) {
+    if (!slot) return null;
+    const ammo = (unit.equipment && unit.equipment.ammo) || {};
 
-    // Find which location this ammo is in
-    let location = explodedLocation;
-    if (!location) {
-      for (const loc of Object.keys(unit.criticalSlots || {})) {
-        const slots = unit.criticalSlots[loc];
-        if (slots.some((s) => s.item === ammoBin)) {
-          location = loc;
-          break;
-        }
-      }
+    for (const [key, bin] of Object.entries(ammo)) {
+      if (bin && bin.location === location && bin.slot === slot.slot) return key;
     }
 
-    // p102: a missile bin explodes for launcher size x remaining shots x damage
-    // per missile; any other bin for its Damage Value per remaining shot.
-    const perShot = ammoDamagePerShot(ammo.type);
-    const explosionDamage = ammo.shots * perShot;
-    ammo.shots = 0; // All ammo destroyed
+    for (const [key, bin] of Object.entries(ammo)) {
+      if (!bin) continue;
+      if (bin.location && bin.location !== location) continue;
+      if (key === slot.item || `${bin.type}_ammo` === slot.item) return key;
+    }
+
+    return null;
+  }
+
+  /**
+   * Resolve the bin a resolveAmmoExplosion call names.
+   *
+   * An exact bin key wins. Callers that pass an ammo type id instead (the
+   * original API, and synthetic heat fixtures keyed by weapon id) get a bin of
+   * that type: one in the given location when there is one, otherwise the bin
+   * with the most shots remaining - p52's own tie-break, "the one with the most
+   * shots remaining explodes".
+   *
+   * @returns {{key: string, bin: object}|null}
+   */
+  findAmmoBin(unit, ammoBin, location = null) {
+    if (!ammoBin) return null;
+    const ammo = (unit.equipment && unit.equipment.ammo) || {};
+    if (Object.prototype.hasOwnProperty.call(ammo, ammoBin) && ammo[ammoBin]) {
+      return { key: ammoBin, bin: ammo[ammoBin] };
+    }
+
+    const type = String(ammoBin || '').replace(/_ammo$/, '');
+    const candidates = Object.entries(ammo).filter(([key, bin]) => {
+      if (!bin) return false;
+      return key === ammoBin
+        || bin.type === ammoBin
+        || bin.type === type
+        || `${bin.type}_ammo` === ammoBin;
+    });
+    if (candidates.length === 0) return null;
+
+    const atLocation = location
+      ? candidates.filter(([, bin]) => bin.location === location)
+      : [];
+    const pool = atLocation.length > 0 ? atLocation : candidates;
+    const best = pool.reduce((chosen, entry) => (
+      (entry[1].shots || 0) > (chosen[1].shots || 0) ? entry : chosen
+    ));
+    return { key: best[0], bin: best[1] };
+  }
+
+  /**
+   * Where a bin sits: the hit location first (a critical hit knows the slot it
+   * struck), then the bin's own location metadata, then a scan of the critical
+   * slots for the bin's item.
+   */
+  ammoBinLocation(unit, key, bin, explodedLocation = null) {
+    if (explodedLocation) return explodedLocation;
+    if (bin && bin.location) return bin.location;
+
+    const itemId = bin && bin.type ? `${bin.type}_ammo` : key;
+    for (const [location, slots] of Object.entries(unit.criticalSlots || {})) {
+      if ((slots || []).some((s) => s.item === itemId || s.item === key)) return location;
+    }
+    return null;
+  }
+
+  /**
+   * Resolve an ammunition explosion (p52/p96/p102/p118/p44).
+   *
+   * Exactly one bin explodes: the named bin (a critical hit names the slot it
+   * destroyed, a heat-induced explosion names the bin HeatManager selected). Its
+   * damage is the per-shot Damage Value times the shots remaining in that bin -
+   * for a missile launcher, launcher size x damage per missile per shot (p102).
+   * The explosion bypasses armour and, unless CASE contains it, keeps
+   * transferring through internal structure (p44); the MechWarrior takes 2
+   * points of damage (p58). Other bins of the same ammo type are untouched.
+   *
+   * @param {object} unit
+   * @param {string} ammoBin - key into unit.equipment.ammo, e.g. 'lrm20_ammo' or
+   *   'lrm20_ammo#2'; an ammo type id (e.g. 'lrm20' / 'lrm20_ammo') is also
+   *   accepted for callers that only know the type
+   * @param {object} [diceRoller]
+   * @param {string} [explodedLocation] - location of the slot that was hit; when
+   *   omitted the bin's own location is used
+   * @returns {boolean} true when a bin with shots remaining exploded
+   */
+  resolveAmmoExplosion(unit, ammoBin, diceRoller, explodedLocation = null) {
+    const found = this.findAmmoBin(unit, ammoBin, explodedLocation);
+    if (!found || !found.bin || (found.bin.shots || 0) <= 0) return false;
+    const { key, bin } = found;
+
+    // p52: all of the appropriate ammo in that one critical slot explodes; the
+    // other bins of the same type stay loaded.
+    const perShot = ammoDamagePerShot(ammoBinType(bin, key));
+    const explosionDamage = (bin.shots || 0) * perShot;
+    bin.shots = 0;
 
     // p58: an ammunition explosion injures the MechWarrior for 2 points.
     if (typeof unit.applyPilotDamage === 'function') {
       unit.applyPilotDamage(2);
     }
 
+    const location = this.ammoBinLocation(unit, key, bin, explodedLocation);
     if (location) {
       this.applyExplosionDamage(unit, location, explosionDamage, diceRoller);
     }

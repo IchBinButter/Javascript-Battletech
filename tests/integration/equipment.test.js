@@ -39,7 +39,8 @@ describe('Equipment: CASE containment', () => {
       units: { 'atlas-0': createAmmoTestUnit(true) }
     });
     const atlas = engine.stateManager.getState().getUnit('atlas-0');
-    atlas.equipment.ammo.lrm20_ammo.shots = 12;
+    // One bin = one critical slot = one ton of LRM-20 ammunition (6 shots).
+    atlas.equipment.ammo.lrm20_ammo.shots = 6;
     const initialLTArmor = atlas.getArmor('leftTorso');
     const initialLAArmor = atlas.getArmor('leftArm');
     const initialCTarmor = atlas.getArmor('centerTorso');
@@ -88,7 +89,7 @@ describe('Equipment: CASE containment', () => {
       units: { 'atlas-0': createAmmoTestUnit(false) }
     });
     const atlas = engine.stateManager.getState().getUnit('atlas-0');
-    atlas.equipment.ammo.lrm20_ammo.shots = 30;
+    atlas.equipment.ammo.lrm20_ammo.shots = 6; // one ton = 6 LRM-20 shots
     const initialCTarmor = atlas.getArmor('centerTorso');
 
     engine.damageResolver.resolveAmmoExplosion(atlas, 'lrm20_ammo', makeDiceRoller(7));
@@ -96,7 +97,7 @@ describe('Equipment: CASE containment', () => {
     expect(atlas.equipment.ammo.lrm20_ammo.shots).toBe(0);
     expect(atlas.isLocationDestroyed('leftTorso')).toBe(true);
     expect(atlas.isLocationDestroyed('leftArm')).toBe(true);
-    // 30 LRM-20 shots = 600 points: the left torso (21) and the centre torso
+    // 6 LRM-20 shots = 120 points: the left torso (21) and the centre torso
     // (31) are both destroyed; the centre torso armour is never touched.
     expect(atlas.getInternal('centerTorso')).toBe(0);
     expect(atlas.getArmor('centerTorso')).toBe(initialCTarmor);
@@ -109,7 +110,7 @@ describe('Equipment: CASE containment', () => {
     });
     const atlas = engine.stateManager.getState().getUnit('atlas-0');
     atlas.criticalSlots.rightTorso.push({ slot: 13, item: 'case', status: 'ok' });
-    atlas.equipment.ammo.lrm20_ammo.shots = 30;
+    atlas.equipment.ammo.lrm20_ammo.shots = 6;
     const initialArmor = atlas.getArmor('leftTorso');
 
     engine.damageResolver.resolveAmmoExplosion(atlas, 'lrm20_ammo', makeDiceRoller(7));
@@ -125,7 +126,7 @@ describe('Equipment: CASE containment', () => {
     });
     const atlas = engine.stateManager.getState().getUnit('atlas-0');
     atlas.criticalSlots.leftTorso.push({ slot: 13, item: 'case', status: 'destroyed' });
-    atlas.equipment.ammo.lrm20_ammo.shots = 30;
+    atlas.equipment.ammo.lrm20_ammo.shots = 6;
     const initialArmor = atlas.getArmor('leftTorso');
 
     engine.damageResolver.resolveAmmoExplosion(atlas, 'lrm20_ammo', makeDiceRoller(7));
@@ -142,19 +143,60 @@ describe('Equipment: CASE containment', () => {
     const atlas = engine.stateManager.getState().getUnit('atlas-0');
     atlas.criticalSlots.rightTorso.push({ slot: 13, item: 'case', status: 'ok' });
     atlas.criticalSlots.rightTorso.push({ slot: 14, item: 'ac20_ammo', status: 'ok' });
-    const ctSlots = atlas.criticalSlots.centerTorso;
-    for (const slot of ctSlots) {
-      if (slot.item === 'ac20_ammo') slot.item = 'empty';
-    }
-    atlas.equipment.ammo.ac20_ammo.shots = 5;
+    // One AC/20 bin per critical slot (p52): give the new right-torso slot its
+    // own bin next to the Atlas's centre-torso AC/20 bin.
+    atlas.equipment.ammo['ac20_ammo#2'] = {
+      type: 'ac20', shots: 5, explosive: true, location: 'rightTorso', slot: 14
+    };
     const initialCTis = atlas.getInternal('centerTorso');
 
-    engine.damageResolver.resolveAmmoExplosion(atlas, 'ac20_ammo', makeDiceRoller(7));
+    engine.damageResolver.resolveAmmoExplosion(atlas, 'ac20_ammo#2', makeDiceRoller(7));
 
-    expect(atlas.equipment.ammo.ac20_ammo.shots).toBe(0);
+    expect(atlas.equipment.ammo['ac20_ammo#2'].shots).toBe(0);
+    expect(atlas.equipment.ammo.ac20_ammo.shots).toBe(5); // other bin untouched
     expect(atlas.isLocationDestroyed('rightTorso')).toBe(true);
     expect(atlas.isLocationDestroyed('rightArm')).toBe(true);
     expect(atlas.getInternal('centerTorso')).toBe(initialCTis);
+  });
+
+  // D-05/p52: the Atlas carries two LRM-20 bins (slots 6 and 7 of the left
+  // torso). Only the bin that explodes loses its shots and feeds the blast.
+  it('explodes only the named bin when a Mech carries two LRM-20 bins (p52)', () => {
+    const engine = createTestEngine({
+      units: { 'atlas-0': createAmmoTestUnit(false) }
+    });
+    const atlas = engine.stateManager.getState().getUnit('atlas-0');
+    atlas.equipment.ammo['lrm20_ammo#2'].shots = 1; // slot 7 has one round left
+
+    engine.damageResolver.resolveAmmoExplosion(atlas, 'lrm20_ammo#2', makeDiceRoller(7));
+
+    expect(atlas.equipment.ammo['lrm20_ammo#2'].shots).toBe(0);
+    expect(atlas.equipment.ammo.lrm20_ammo.shots).toBe(6); // slot 6 keeps its ton
+    // One LRM-20 shot is 20 damage; the left torso's 21 internal structure
+    // survives with 1 point, so nothing transfers inward.
+    expect(atlas.getInternal('leftTorso')).toBe(1);
+    expect(atlas.isLocationDestroyed('centerTorso')).toBe(false);
+    expect(atlas.pilot.hits).toBe(2);
+  });
+
+  it('a critical hit maps to that slot\'s bin, not the first bin of the type (p52)', () => {
+    const engine = createTestEngine({
+      units: { 'atlas-0': createAmmoTestUnit(false) }
+    });
+    const atlas = engine.stateManager.getState().getUnit('atlas-0');
+    atlas.equipment.ammo['lrm20_ammo#2'].shots = 1;
+
+    // Left torso slot 7 is the second LRM-20 bin.
+    const result = engine.damageResolver.applyItemCritical(
+      atlas,
+      atlas.criticalSlots.leftTorso[6],
+      'leftTorso',
+      makeDiceRoller(7)
+    );
+
+    expect(result.ammoBin).toBe('lrm20_ammo#2');
+    expect(atlas.equipment.ammo['lrm20_ammo#2'].shots).toBe(0);
+    expect(atlas.equipment.ammo.lrm20_ammo.shots).toBe(6);
   });
 });
 

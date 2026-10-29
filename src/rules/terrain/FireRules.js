@@ -1,38 +1,51 @@
 /**
  * Fire and smoke (BMM pp63-64).
  *
- * Fire Table (p63):
+ * Fire Table (p64):
  *   Plasma / Inferno      automatic
  *   Flamer                4+
  *   Direct-Fire Energy    7+  (pulse included)
  *   Missile or Ballistic  9+
- * Environment: woods +0, jungle +1, light building -2, medium -1,
- *   heavy +0, hardened +1. Temperature: -1 per 10C above 30, +1 per 10C
- *   below -30.
+ * Environment modifier (p64): woods +0, jungle +1, light building -2,
+ *   medium -1, heavy +0, hardened +1. Extreme Temperatures footnote (p64):
+ *   -1 per 10C above 30, +1 per 10C below -30.
+ *
+ * p63 is the surrounding procedure - STARTING A FIRE and EFFECTS OF FIRE -
+ * and it points at the table itself: "the player rolls 2D6 and consults the
+ * Fire Table (p. 64)". Spreading/extinguishing fire, smoke and damage to
+ * burning buildings are also p64 (and fire heat is p50).
  */
 
 import { getNeighborInDirection } from '../../hex/HexMath.js';
 
+/** p64 Fire Table "Environment* Modifier" rows. */
 const ENVIRONMENT = {
   light_woods: 0,
   heavy_woods: 0,
-  jungle: 1,
+  light_jungle: 1,
+  heavy_jungle: 1,
   light_building: -2,
   medium_building: -1,
   heavy_building: 0,
   hardened_building: 1
 };
 
+/** p64 Fire Table building rows (same values as ENVIRONMENT's building entries). */
 const BUILDING_ENVIRONMENT = { light: -2, medium: -1, heavy: 0, hardened: 1 };
+
+/** p63/p64: woods and jungle can burn. */
+const BURNABLE_TERRAIN = new Set([
+  'light_woods', 'heavy_woods', 'light_jungle', 'heavy_jungle'
+]);
 
 /** Heavy and hardened buildings cannot catch fire this way (p64). */
 export function canBurn(hex) {
   if (!hex) return false;
   if (hex.building) return hex.building.type === 'light' || hex.building.type === 'medium';
-  return hex.terrainType === 'light_woods' || hex.terrainType === 'heavy_woods';
+  return BURNABLE_TERRAIN.has(hex.terrainType);
 }
 
-/** Environment modifier for the fire roll, or null when the hex cannot burn. */
+/** p64 Fire Table environment modifier for the fire roll, or null when the hex cannot burn. */
 export function environmentModifier(hex) {
   if (!canBurn(hex)) return null;
   if (hex.building) return BUILDING_ENVIRONMENT[hex.building.type] ?? 0;
@@ -47,6 +60,7 @@ function weaponCategory(weapon) {
   return 'other';
 }
 
+/** Extreme Temperatures footnote of the p64 Fire Table. */
 export function temperatureModifier(temperature = 20) {
   if (temperature > 30) return -Math.floor((temperature - 30) / 10);
   if (temperature < -30) return Math.ceil((-30 - temperature) / 10);
@@ -54,7 +68,7 @@ export function temperatureModifier(temperature = 20) {
 }
 
 /**
- * Target number to start a fire with this weapon in this hex.
+ * Target number to start a fire with this weapon in this hex (p64 Fire Table).
  * @returns {number|null} null when the hex cannot burn; 0 means automatic
  */
 export function fireTargetNumber(weapon, hex, temperature = 20) {

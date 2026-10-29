@@ -310,6 +310,24 @@ describe('quirkPSRModifier', () => {
       }
     });
 
+    // p89: Unbalanced covers "a building type or planetary condition (i.e.
+    // Terrain Type, Terrain Modification, and so on)", so the jungle and sand
+    // terrain-type entries are hex entries too (p60: light jungle +1, heavy
+    // jungle +2, sand +1).
+    it('adds +1 to jungle and sand terrain-entry PSRs (p60/p89)', () => {
+      expect(quirkPSRModifier(unit, {
+        triggers: [{ trigger: 'Light Jungle', baseModifier: 1 }]
+      }).modifier).toBe(1);
+
+      expect(quirkPSRModifier(unit, {
+        triggers: [{ trigger: 'Heavy Jungle', baseModifier: 2 }]
+      }).modifier).toBe(1);
+
+      expect(quirkPSRModifier(unit, {
+        triggers: [{ trigger: 'Sand', baseModifier: 1 }]
+      }).modifier).toBe(1);
+    });
+
     it('does not add to a PSR with no triggers', () => {
       expect(quirkPSRModifier(unit, { triggers: [] }).modifier).toBe(0);
     });
@@ -323,7 +341,12 @@ describe('quirkPSRModifier', () => {
 
     it('reads the movement context when one is supplied', () => {
       expect(quirkPSRModifier(unit, { movement: { enteredWater: true } }).modifier).toBe(1);
+      expect(quirkPSRModifier(unit, { movement: { enteredLightJungle: true } }).modifier).toBe(1);
+      expect(quirkPSRModifier(unit, { movement: { enteredHeavyJungle: true } }).modifier).toBe(1);
+      expect(quirkPSRModifier(unit, { movement: { enteredSand: true } }).modifier).toBe(1);
       expect(quirkPSRModifier(unit, { movement: { type: 'walk' } }).modifier).toBe(0);
+      // Woods force no PSR (p60), so they are not a hex entry for Unbalanced.
+      expect(quirkPSRModifier(unit, { movement: { enteredHeavyWoods: true } }).modifier).toBe(0);
     });
   });
 

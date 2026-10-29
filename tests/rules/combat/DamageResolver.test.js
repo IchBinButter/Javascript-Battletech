@@ -13,6 +13,8 @@
  *        heat sink) are disabled once and later slots soak the hit, while
  *        sensors are excepted and each sensor slot is its own component; a
  *        destroyed head kills the MechWarrior
+ *   p52  each ammunition critical slot is its own bin: an explosion destroys
+ *        only that slot's ammo, never the other bins of the same type
  *   p58  an ammunition explosion injures the MechWarrior for 2 points
  *   p96  ammunition explosion damage
  *   p118 CASE: internal structure damage only, excess ignored
@@ -93,8 +95,11 @@ function makeUnit(overrides = {}) {
         { type: 'large_laser', location: 'rightArm' }
       ],
       ammo: {
-        lrm20_ammo: { type: 'lrm20', shots: 6, explosive: true },
-        srm6_ammo: { type: 'srm6', shots: 15, explosive: true }
+        // p52: one bin per ammunition critical slot. The left torso carries two
+        // LRM-20 bins (slots 6 and 7) and an SRM-6 bin (slot 12).
+        lrm20_ammo: { type: 'lrm20', shots: 6, explosive: true, location: 'leftTorso', slot: 6 },
+        'lrm20_ammo#2': { type: 'lrm20', shots: 6, explosive: true, location: 'leftTorso', slot: 7 },
+        srm6_ammo: { type: 'srm6', shots: 15, explosive: true, location: 'leftTorso', slot: 12 }
       },
       other: {}
     },
@@ -573,14 +578,17 @@ describe('DamageResolver', () => {
     it('resolves only explosive criticals on a hit that destroys the location (p42)', () => {
       const unit = makeUnit();
       // Left torso: 21 armour + 8 internal. The 40th point destroys it.
-      // Crit roll 9, block 2 slot 1 -> slot 7, an LRM-20 ammo bin.
+      // Crit roll 9, block 2 slot 1 -> slot 7, the second LRM-20 ammo bin.
       const result = resolver.applyDamage(
         unit, 'leftTorso', 40, false, roller({ twoD6: [9], oneD6: [4, 1] })
       );
 
       expect(result.locationDestroyed).toBe(true);
       expect(result.ammoExplosion).toBe(true);
-      expect(unit.equipment.ammo.lrm20_ammo.shots).toBe(0);
+      // p52: only the hit slot's bin explodes; the other LRM-20 bin stays full.
+      expect(result.criticalHits.find((c) => c.ammoExplosion).ammoBin).toBe('lrm20_ammo#2');
+      expect(unit.equipment.ammo['lrm20_ammo#2'].shots).toBe(0);
+      expect(unit.equipment.ammo.lrm20_ammo.shots).toBe(6);
     });
 
     it('discards a non-explosive critical on a hit that destroys the location (p42)', () => {
@@ -658,7 +666,7 @@ describe('DamageResolver', () => {
   // CASE and ammunition explosions (p96/p118/p44)
   // =========================================================================
 
-  describe('CASE and ammunition explosions (p102/p118/p44)', () => {
+  describe('CASE and ammunition explosions (p52/p102/p118/p44)', () => {
     it('CASE contains the blast in internal structure and ignores the excess', () => {
       const unit = makeUnit();
       unit.criticalSlots.leftTorso[11] = { slot: 12, item: 'case', status: 'ok' };
@@ -748,13 +756,71 @@ describe('DamageResolver', () => {
       expect(unit.isLocationDestroyed('leftTorso')).toBe(false);
     });
 
-    it('explodes the bin in the location that was hit when the same ammo is carried twice', () => {
+    it('explodes the bin that was hit when the same ammo is carried twice (p52)', () => {
       const unit = makeUnit();
-      unit.equipment.ammo.lrm20_ammo.shots = 1;
       unit.criticalSlots.rightTorso[11] = { slot: 12, item: 'lrm20_ammo', status: 'ok' };
+      unit.equipment.ammo['lrm20_ammo#3'] = {
+        type: 'lrm20', shots: 1, explosive: true, location: 'rightTorso', slot: 12
+      };
 
-      resolver.resolveAmmoExplosion(unit, 'lrm20_ammo', noCrit, 'rightTorso');
+      resolver.resolveAmmoExplosion(unit, 'lrm20_ammo#3', noCrit);
 
+      expect(unit.equipment.ammo['lrm20_ammo#3'].shots).toBe(0);
+      // The left-torso LRM-20 bins keep their ammunition.
+      expect(unit.equipment.ammo.lrm20_ammo.shots).toBe(6);
+      expect(unit.equipment.ammo['lrm20_ammo#2'].shots).toBe(6);
+      expect(unit.isLocationDestroyed('rightTorso')).toBe(true);
+      expect(unit.isLocationDestroyed('leftTorso')).toBe(false);
+    });
+
+    it('a critical hit on one ammo slot explodes only that bin (p52)', () => {
+      const unit = makeUnit();
+      // Crit roll 9, block 1, slot 6 -> the first LRM-20 bin (slot 6).
+      const result = resolver.applyCriticalHit(
+        unit, 'leftTorso', roller({ twoD6: [9], oneD6: [2, 6] })
+      );
+
+      expect(result.criticals[0].ammoBin).toBe('lrm20_ammo');
+      expect(unit.equipment.ammo.lrm20_ammo.shots).toBe(0);
+      expect(unit.equipment.ammo['lrm20_ammo#2'].shots).toBe(6);
+    });
+
+    it('uses the bin location when no exploded location is given (heat path)', () => {
+      const unit = makeUnit();
+      // A heat-induced explosion names a bin, not a hit slot (p52). One LRM-20
+      // shot is 20 damage; 8 destroys the left torso's structure and the other
+      // 12 wipe out the centre torso's 10 internal structure.
+      unit.equipment.ammo['lrm20_ammo#2'].shots = 1;
+
+      resolver.resolveAmmoExplosion(unit, 'lrm20_ammo#2', noCrit);
+
+      expect(unit.isLocationDestroyed('leftTorso')).toBe(true);
+      expect(unit.internalStructure.centerTorso).toBe(0);
+      expect(unit.pilot.hits).toBe(2);
+    });
+
+    it('picks the bin with the most shots when given only the ammo type (p52)', () => {
+      const unit = makeUnit();
+      unit.equipment.ammo.lrm20_ammo.shots = 2;
+      unit.equipment.ammo['lrm20_ammo#2'].shots = 5;
+
+      resolver.resolveAmmoExplosion(unit, 'lrm20', noCrit);
+
+      expect(unit.equipment.ammo.lrm20_ammo.shots).toBe(2);
+      expect(unit.equipment.ammo['lrm20_ammo#2'].shots).toBe(0);
+    });
+
+    it('prefers a bin in the named location when given a type id and location', () => {
+      const unit = makeUnit();
+      unit.criticalSlots.rightTorso[11] = { slot: 12, item: 'lrm20_ammo', status: 'ok' };
+      unit.equipment.ammo['lrm20_ammo#3'] = {
+        type: 'lrm20', shots: 2, explosive: true, location: 'rightTorso', slot: 12
+      };
+
+      resolver.resolveAmmoExplosion(unit, 'lrm20', noCrit, 'rightTorso');
+
+      expect(unit.equipment.ammo['lrm20_ammo#3'].shots).toBe(0);
+      expect(unit.equipment.ammo.lrm20_ammo.shots).toBe(6);
       expect(unit.isLocationDestroyed('rightTorso')).toBe(true);
       expect(unit.isLocationDestroyed('leftTorso')).toBe(false);
     });

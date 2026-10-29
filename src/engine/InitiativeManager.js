@@ -46,17 +46,21 @@ export class InitiativeManager {
   /**
    * Get the declaration order for a phase.
    *
-   * p10: "The side that lost Initiative must act first." p12: the Physical
-   * Attack Phase "repeat[s] the steps given for the Weapon Attack Phase", so
-   * the initiative loser declares physical attacks first as well - there is no
-   * winner-first phase in the sequence of play.
+   * p10: "The side that lost Initiative must act first." The Weapon Attack
+   * Phase repeats that, and p12's Physical Attack Phase repeats the Weapon
+   * Attack Phase, so the loser declares first in all three acting phases.
+   * Nothing in p10/p12 lets the winner choose the phase order (the manual's
+   * only winner choice there is the pre-game deployment side), so there is no
+   * winner-goes-first option - H-11 removed that house rule.
    *
-   * @param {number} winner - player id that won initiative
+   * Before the first Initiative Phase there is no recorded winner; both slots
+   * fall back to the first player so the pre-roll declaration queue is stable.
+   *
+   * @param {number|null} winner - player id that won initiative
    * @param {Array<{id:number}>} players
-   * @param {string} [phase] - kept for callers that pass the phase
    * @returns {number[]} player ids in declaration order (loser first)
    */
-  getInitiativeOrder(winner, players, phase) {
+  getInitiativeOrder(winner, players) {
     const loser = players.find(p => p.id !== winner) || players[0];
     const winnerPlayer = players.find(p => p.id === winner) || players[0];
 

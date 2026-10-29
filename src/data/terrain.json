@@ -23,6 +23,24 @@
       "height": 2,
       "woodsDensity": 2
     },
+    "light_jungle": {
+      "name": "Light Jungle",
+      "mpCost": 3,
+      "color": "#2E8B57",
+      "blocksLOS": false,
+      "height": 2,
+      "woodsDensity": 1,
+      "psrModifier": 1
+    },
+    "heavy_jungle": {
+      "name": "Heavy Jungle",
+      "mpCost": 4,
+      "color": "#145A32",
+      "blocksLOS": false,
+      "height": 2,
+      "woodsDensity": 2,
+      "psrModifier": 2
+    },
     "water_depth1": {
       "name": "Water (Depth 1)",
       "mpCost": 2,
@@ -39,6 +57,14 @@
       "height": 0,
       "waterDepth": 2
     },
+    "water_depth3": {
+      "name": "Water (Depth 3)",
+      "mpCost": 3,
+      "color": "#00008B",
+      "blocksLOS": false,
+      "height": 0,
+      "waterDepth": 3
+    },
     "rough": {
       "name": "Rough",
       "mpCost": 2,
@@ -52,6 +78,14 @@
       "color": "#808080",
       "blocksLOS": false,
       "height": 1
+    },
+    "sand": {
+      "name": "Sand",
+      "mpCost": 1,
+      "color": "#F4E2A1",
+      "blocksLOS": false,
+      "height": 0,
+      "psrModifier": 1
     },
     "swamp": {
       "name": "Swamp",

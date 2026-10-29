@@ -118,18 +118,6 @@ export function createEngineWithPerUnitAlternation(config = {}) {
 }
 
 /**
- * Creates an engine with a specific initiative choice already made.
- * Rolls initiative and applies the winner's choice of goFirst.
- */
-export function createEngineWithInitiativeChoice(config = {}) {
-  const engine = createTestEngine(config);
-  const goFirst = config.goFirst !== undefined ? config.goFirst : false;
-  engine.phaseManager.enterPhase('initiative');
-  engine.phaseManager.chooseInitiative(goFirst);
-  return engine;
-}
-
-/**
  * Returns a dice roller suited for consciousness checks.
  *
  * Consciousness thresholds by pilot hits:

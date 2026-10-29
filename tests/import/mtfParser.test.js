@@ -412,20 +412,58 @@ describe('unitConverter', () => {
       expect(ac20.location).toBe('rightTorso');
     });
 
-    it('builds equipment ammo from critical slots with correct shots', () => {
+    it('builds one ammunition bin per critical slot with a full ton of shots', () => {
       const parsed = parseMTF(atlasMTF);
       const mechDef = convertToMechDef(parsed);
 
-      expect(mechDef.equipment.ammo.ac20_ammo).toBeDefined();
-      expect(mechDef.equipment.ammo.ac20_ammo.type).toBe('ac20');
-      expect(mechDef.equipment.ammo.ac20_ammo.shots).toBe(15);
-      expect(mechDef.equipment.ammo.ac20_ammo.explosive).toBe(true);
+      const bins = Object.entries(mechDef.equipment.ammo);
+      const ofType = (type) => bins
+        .filter(([, bin]) => bin.type === type)
+        .map(([key, bin]) => ({ key, ...bin }));
 
-      expect(mechDef.equipment.ammo.srm6_ammo).toBeDefined();
-      expect(mechDef.equipment.ammo.srm6_ammo.shots).toBe(30);
+      // p52: "All of the appropriate ammo type in a single critical slot
+      // explodes" - the importer makes each ammunition critical slot its own
+      // bin instead of merging the slots into one per-type pool.
+      const srm6 = ofType('srm6');
+      expect(srm6).toHaveLength(2);
+      expect(srm6.map((bin) => bin.key)).toEqual(['srm6_ammo', 'srm6_ammo#2']);
+      expect(srm6.map((bin) => bin.shots)).toEqual([15, 15]);
+      expect(srm6.map((bin) => bin.location)).toEqual(['leftTorso', 'leftTorso']);
+      expect(srm6.map((bin) => bin.slot)).toEqual([5, 6]);
+      expect(srm6.every((bin) => bin.explosive)).toBe(true);
 
-      expect(mechDef.equipment.ammo.lrm20_ammo).toBeDefined();
-      expect(mechDef.equipment.ammo.lrm20_ammo.shots).toBe(12);
+      const lrm20 = ofType('lrm20');
+      expect(lrm20).toHaveLength(2);
+      expect(lrm20.map((bin) => bin.shots)).toEqual([6, 6]);
+      expect(lrm20.map((bin) => bin.location)).toEqual(['leftTorso', 'leftTorso']);
+      expect(lrm20.map((bin) => bin.slot)).toEqual([7, 8]);
+
+      const ac20 = ofType('ac20');
+      expect(ac20).toHaveLength(3);
+      expect(ac20.map((bin) => bin.shots)).toEqual([5, 5, 5]);
+      expect(ac20.map((bin) => bin.location)).toEqual(['rightTorso', 'rightTorso', 'centerTorso']);
+      expect(ac20.map((bin) => bin.slot)).toEqual([11, 12, 10]);
+    });
+
+    it('maps every ammunition critical slot to exactly one imported bin', () => {
+      const parsed = parseMTF(atlasMTF);
+      const mechDef = convertToMechDef(parsed);
+
+      const slotCount = Object.values(mechDef.criticalSlots)
+        .flat()
+        .filter((slot) => /_ammo$/.test(slot.item))
+        .length;
+      expect(Object.keys(mechDef.equipment.ammo)).toHaveLength(slotCount);
+
+      for (const [location, slots] of Object.entries(mechDef.criticalSlots)) {
+        for (const slot of slots) {
+          if (!/_ammo$/.test(slot.item)) continue;
+          const matches = Object.values(mechDef.equipment.ammo)
+            .filter((bin) => bin.location === location && bin.slot === slot.slot);
+          expect(matches, `${location} slot ${slot.slot}`).toHaveLength(1);
+          expect(`${matches[0].type}_ammo`).toBe(slot.item);
+        }
+      }
     });
 
     it('includes engine and gyro in definition', () => {

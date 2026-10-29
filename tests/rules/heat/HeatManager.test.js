@@ -1,4 +1,4 @@
-﻿import { describe, it, expect } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { HeatManager } from '../../../src/rules/heat/HeatManager.js';
 
 function makeUnit(overrides = {}) {
@@ -90,6 +90,17 @@ describe('HeatManager', () => {
       const heat = manager.calculateHeatGeneration(unit, [{ heat: 3 }], 'run');
       expect(heat).toBe(7);
     });
+
+    // p50: engine critical hits add 5/10 heat per turn - and p52 excludes a
+    // shut-down 'Mech. calculateHeatGeneration is dead code, but it must not
+    // disagree with the live Heat Phase (which uses engineHeatPerTurn).
+    it('adds engine-critical heat unless shut down', () => {
+      const damaged = makeUnit({ engine: { hits: 1 } });
+      expect(manager.calculateHeatGeneration(damaged, [], 'stationary')).toBe(5);
+
+      const shutDown = makeUnit({ engine: { hits: 2 }, shutdown: true });
+      expect(manager.calculateHeatGeneration(shutDown, [], 'stationary')).toBe(0);
+    });
   });
 
   describe('applyHeatDissipation', () => {
@@ -139,6 +150,115 @@ describe('HeatManager', () => {
       const gs = makeGameState({ '4,4': {} });
       const dissipated = manager.applyHeatDissipation(unit, gs);
       expect(dissipated).toBe(10);
+    });
+  });
+
+  describe('waterCoolingBonus (p50/p51)', () => {
+    // p51 DISSIPATING HEAT: "A 'Mech standing in Depth 1 water has its
+    // leg-mounted heat sinks submerged." p50: "+1 additional per operational
+    // single heat sink under water (maximum 6 points)."
+    it('adds +1 for each operational single heat sink in the legs', () => {
+      const unit = makeUnit();
+      unit.criticalSlots = {
+        leftLeg: [{ item: 'heat_sink', status: 'ok' }, { item: 'heat_sink', status: 'ok' }],
+        rightLeg: [{ item: 'heat_sink', status: 'ok' }]
+      };
+      const gs = makeGameState({ '4,4': { terrainType: 'water_depth1' } });
+      expect(manager.waterCoolingBonus(unit, gs)).toBe(3);
+    });
+
+    // p50: "+2 additional per operational double heat sink underwater
+    // (maximum 6 points)". p46: a double heat sink fills three critical slots.
+    it('adds +2 for an operational double heat sink (three slots)', () => {
+      const unit = makeUnit({ heatSinks: { count: 10, damaged: 0, type: 'double' } });
+      unit.criticalSlots = {
+        leftLeg: [
+          { item: 'heat_sink', status: 'ok' },
+          { item: 'heat_sink', status: 'ok' },
+          { item: 'heat_sink', status: 'ok' }
+        ],
+        rightLeg: []
+      };
+      const gs = makeGameState({ '4,4': { terrainType: 'water_depth1' } });
+      expect(manager.waterCoolingBonus(unit, gs)).toBe(2);
+    });
+
+    it('caps the water bonus at 6 points', () => {
+      const unit = makeUnit();
+      unit.criticalSlots = {
+        leftLeg: Array.from({ length: 4 }, () => ({ item: 'heat_sink', status: 'ok' })),
+        rightLeg: Array.from({ length: 4 }, () => ({ item: 'heat_sink', status: 'ok' }))
+      };
+      const gs = makeGameState({ '4,4': { terrainType: 'water_depth1' } });
+      expect(manager.waterCoolingBonus(unit, gs)).toBe(6);
+    });
+
+    // p51: "A 'Mech standing in Depth 2 or deeper water or prone in Depth 1 or
+    // deeper water has all of its heat sinks submerged (even those in the
+    // engine)." Ten single sinks would be +10, capped at 6.
+    it('Depth 2 submerges every heat sink, capped at 6', () => {
+      const unit = makeUnit();
+      const gs = makeGameState({ '4,4': { terrainType: 'water_depth2' } });
+      expect(manager.waterCoolingBonus(unit, gs)).toBe(6);
+    });
+
+    it('prone in Depth 1 submerges every heat sink', () => {
+      const unit = makeUnit({ prone: true });
+      const gs = makeGameState({ '4,4': { terrainType: 'water_depth1' } });
+      expect(manager.waterCoolingBonus(unit, gs)).toBe(6);
+    });
+
+    it('does not count sinks in other locations in Depth 1', () => {
+      const unit = makeUnit();
+      unit.criticalSlots = {
+        leftLeg: [],
+        rightLeg: [],
+        centerTorso: [{ item: 'heat_sink', status: 'ok' }]
+      };
+      const gs = makeGameState({ '4,4': { terrainType: 'water_depth1' } });
+      expect(manager.waterCoolingBonus(unit, gs)).toBe(0);
+    });
+
+    it('does not count damaged leg sinks', () => {
+      const unit = makeUnit();
+      unit.criticalSlots = {
+        leftLeg: [{ item: 'heat_sink', status: 'ok' }, { item: 'heat_sink', status: 'crit' }],
+        rightLeg: [{ item: 'heat_sink', status: 'ok' }]
+      };
+      const gs = makeGameState({ '4,4': { terrainType: 'water_depth1' } });
+      expect(manager.waterCoolingBonus(unit, gs)).toBe(2);
+    });
+
+    it('is 0 on dry land', () => {
+      const unit = makeUnit();
+      unit.criticalSlots = {
+        leftLeg: [{ item: 'heat_sink', status: 'ok' }],
+        rightLeg: []
+      };
+      const gs = makeGameState({ '4,4': { terrainType: 'clear' } });
+      expect(manager.waterCoolingBonus(unit, gs)).toBe(0);
+    });
+  });
+
+  describe('engineHeatPerTurn (p47/p50/p52)', () => {
+    it('is 0 for an undamaged engine', () => {
+      expect(manager.engineHeatPerTurn(makeUnit({ engine: { hits: 0 } }))).toBe(0);
+    });
+
+    // p50: "The first engine hit to a 'Mech generates 5 points of heat per turn.
+    // The second hit raises this to 10 (total) points of heat per turn."
+    it('is +5 for the first engine hit and +10 for the second', () => {
+      expect(manager.engineHeatPerTurn(makeUnit({ engine: { hits: 1 } }))).toBe(5);
+      expect(manager.engineHeatPerTurn(makeUnit({ engine: { hits: 2 } }))).toBe(10);
+    });
+
+    it('stays at +10 for a third hit (the Mech is destroyed at three, p47)', () => {
+      expect(manager.engineHeatPerTurn(makeUnit({ engine: { hits: 3 } }))).toBe(10);
+    });
+
+    // p52: "Engine critical hits do not generate heat while a 'Mech is shut down."
+    it('is 0 while the Mech is shut down', () => {
+      expect(manager.engineHeatPerTurn(makeUnit({ engine: { hits: 2 }, shutdown: true }))).toBe(0);
     });
   });
 
@@ -327,6 +447,110 @@ describe('applyHeatEffects - record sheet scale', () => {
       expect(effects.some(e => e.includes('AMMO EXPLOSION') && e.includes('empty'))).toBe(false);
       expect(effects.some(e => e.includes('AMMO EXPLOSION') && e.includes('lrm15'))).toBe(true);
       expect(unit.equipment.ammo.lrm15.shots).toBe(0);
+    });
+
+    // H-02: the live Heat Phase generates the engine's 5/10 heat points. The
+    // dead calculateHeatGeneration is not on the pipeline, so the amount must be
+    // applied here (p50/p51), before dissipation.
+    it('applies engine-critical heat in the live Heat Phase path', () => {
+      const unit = makeUnit({
+        heat: 0,
+        engine: { hits: 1 },
+        heatSinks: { count: 3, damaged: 0, type: 'single' }
+      });
+      unit.id = 'u1';
+
+      const gs = makeGameState({ '4,4': {} });
+      gs.units = { u1: unit };
+
+      const results = manager.resolveHeatPhase(gs, makeDiceRoller(7));
+
+      expect(results[0].engineHeat).toBe(5);
+      expect(results[0].heat).toBe(2); // 5 generated - 3 dissipated
+      expect(results[0].effects).toContain('Engine critical: +5 heat');
+    });
+
+    // p52: "Engine critical hits do not generate heat while a 'Mech is shut down."
+    it('does not apply engine heat while shut down', () => {
+      const unit = makeUnit({
+        heat: 0,
+        shutdown: true,
+        engine: { hits: 2 },
+        heatSinks: { count: 0, damaged: 0, type: 'single' }
+      });
+      unit.id = 'u1';
+
+      const gs = makeGameState({ '4,4': {} });
+      gs.units = { u1: unit };
+
+      const results = manager.resolveHeatPhase(gs, makeDiceRoller(7));
+
+      expect(results[0].engineHeat).toBe(0);
+      expect(unit.heat).toBe(0);
+    });
+
+    // H-08: the heat-phase explosion must call the shared DamageResolver for
+    // ONE bin instead of zeroing bins and adding 2 pilot hits inline.
+    it('calls DamageResolver.resolveAmmoExplosion for the one exploding bin', () => {
+      const unit = makeUnit({ heat: 34, heatSinks: { count: 0, damaged: 0, type: 'single' } });
+      unit.id = 'u1';
+      unit.equipment.ammo = { lrm15: { type: 'lrm15', shots: 10 } };
+
+      const calls = [];
+      const mockResolver = {
+        resolveAmmoExplosion(explodingUnit, binName, dice) {
+          calls.push({ unit: explodingUnit, binName, dice });
+          explodingUnit.equipment.ammo[binName].shots = 0;
+          return true;
+        }
+      };
+      const withResolver = new HeatManager(mockResolver);
+
+      const gs = makeGameState({ '4,4': {} });
+      gs.units = { u1: unit };
+      const dice = makeDiceRoller(5);
+
+      const results = withResolver.resolveHeatPhase(gs, dice);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].unit).toBe(unit);
+      expect(calls[0].binName).toBe('lrm15');
+      expect(calls[0].dice).toBe(dice);
+      expect(results[0].effects.some(e => e.includes('AMMO EXPLOSION in lrm15'))).toBe(true);
+    });
+
+    it('applies real explosion damage through the default DamageResolver', () => {
+      const unit = makeUnit({
+        heat: 34,
+        heatSinks: { count: 0, damaged: 0, type: 'single' },
+        criticalSlots: { leftTorso: [{ slot: 6, item: 'lrm20_ammo', status: 'ok' }] },
+        internalStructure: { leftTorso: 21 },
+        pilot: { hits: 0 }
+      });
+      unit.id = 'u1';
+      // `location` is what the shared resolver uses for roster/imported bins;
+      // older data locates the bin by its critical-slot item, which this
+      // fixture also carries, so either lookup finds the left torso.
+      unit.equipment.ammo = {
+        lrm20_ammo: { type: 'lrm20', shots: 1, explosive: true, location: 'leftTorso', slot: 6 }
+      };
+      unit.applyPilotDamage = function (points = 1) {
+        this.pilot.hits = Math.min(6, (this.pilot.hits || 0) + points);
+        return this.pilot.hits;
+      };
+
+      const gs = makeGameState({ '4,4': {} });
+      gs.units = { u1: unit };
+
+      const results = manager.resolveHeatPhase(gs, makeDiceRoller(5));
+
+      // One LRM-20 shot is 20 points (p102: launcher size per shot) straight to
+      // internal structure (p44: explosions bypass armour).
+      expect(unit.equipment.ammo.lrm20_ammo.shots).toBe(0);
+      expect(unit.internalStructure.leftTorso).toBe(1);
+      // p52/p58: the explosion injures the MechWarrior for 2 points, once.
+      expect(unit.pilot.hits).toBe(2);
+      expect(results[0].effects.some(e => e.includes('AMMO EXPLOSION in lrm20_ammo'))).toBe(true);
     });
   });
 });

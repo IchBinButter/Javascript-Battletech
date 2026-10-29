@@ -4,7 +4,7 @@
  */
 
 import { deepClone } from '../utils/helpers.js';
-import { getMaxMP } from '../rules/movement/maxMP.js';
+import { getMaxMP, getAvailableJumpMP } from '../rules/movement/maxMP.js';
 
 const LOCATIONS = [
   'head', 'centerTorso', 'leftTorso', 'rightTorso',
@@ -89,6 +89,21 @@ export class Unit {
    */
   get currentMP() {
     return getMaxMP(this, this.movementMode || 'walk');
+  }
+
+  /**
+   * Jumping MP available where the Mech is standing (p19).
+   *
+   * `currentMP` has no map context, so it can only report the dry-land jumping
+   * rating. Callers that know the standing hex's water depth (the UI's MP label,
+   * engine move accounting) use this accessor instead: Depth 1 water submerges
+   * the leg-mounted jets and Depth 2+ water allows no jump at all.
+   *
+   * @param {number} [waterDepth] - depth of the hex the unit occupies (0 = dry)
+   * @returns {number} available Jumping MP (0 means jumping is impossible)
+   */
+  getJumpMP(waterDepth = 0) {
+    return getAvailableJumpMP(this, waterDepth);
   }
 
   /**

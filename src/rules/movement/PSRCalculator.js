@@ -6,8 +6,11 @@
  * not be mixed up:
  *
  *  - Causes (what makes the player roll): taking 20+ damage in a phase,
- *    entering woods/water, running after a facing change on pavement, running
- *    with a damaged hip or gyro, jumping with damaged actuators, and so on.
+ *    entering jungle/sand/rubble/water, running after a facing change on
+ *    pavement, running with a damaged hip or gyro, jumping with damaged
+ *    actuators, and so on. p60 gives both woods rows "PSR Modifier: No PSR" -
+ *    only jungle rolls (+1 light, +2 heavy) - so entering a woods hex is
+ *    never a cause.
  *  - Preexisting damage modifiers (footnote 9): "These cases do not cause
  *    PSRs, but their modifiers apply to all PSRs made." A damaged gyro, a
  *    destroyed hip and a destroyed leg are standing modifiers, not extra
@@ -55,29 +58,30 @@ export class PSRCalculator {
     const triggers = [];
 
     if (movement) {
-      // p54: entering light jungle/woods +1, heavy +2
-      if (movement.enteredLightWoods) {
-        triggers.push({ trigger: 'Light Woods', baseModifier: 1 });
+      // p60 Terrain Types: "WOODS, LIGHT ... PSR Modifier: No PSR" and
+      // "WOODS, HEAVY ... PSR Modifier: No PSR". Only the jungle rows carry a
+      // modifier, so a woods flag must never be read as a jungle cause.
+      // p142: "Entered light jungle hex +1", "Entered heavy jungle hex +2".
+      if (movement.enteredLightJungle) {
+        triggers.push({ trigger: 'Light Jungle', baseModifier: 1 });
       }
 
-      if (movement.enteredHeavyWoods) {
-        triggers.push({ trigger: 'Heavy Woods', baseModifier: 2 });
+      if (movement.enteredHeavyJungle) {
+        triggers.push({ trigger: 'Heavy Jungle', baseModifier: 2 });
       }
 
+      // p60: "SAND ... PSR Modifier: +1"; p142: "Entered sand hex +1".
+      if (movement.enteredSand) {
+        triggers.push({ trigger: 'Sand', baseModifier: 1 });
+      }
+
+      // p60/p142: "Entered rubble hex 0".
       if (movement.enteredRubble) {
         triggers.push({ trigger: 'Rubble', baseModifier: 0 });
       }
 
-      if (movement.largeLevelDrop) {
-        triggers.push({ trigger: 'Large Level Drop', baseModifier: 0 });
-      }
-
       if (movement.isSkidding) {
         triggers.push({ trigger: 'Skidding', baseModifier: 0 });
-      }
-
-      if (movement.rapidTurnWhileRunning) {
-        triggers.push({ trigger: 'Rapid Turn (Running)', baseModifier: 0 });
       }
 
       // p54/p142: "Ran with damaged hip or gyro" and "Jumped with damaged
@@ -92,15 +96,17 @@ export class PSRCalculator {
         triggers.push({ trigger: 'Jumped with damaged actuators', baseModifier: 0 });
       }
 
-      if (movement.jumpedIntoWoods) {
-        triggers.push({ trigger: 'Jumped Into Woods', baseModifier: 0 });
-      }
-
       if (movement.enteredWater) {
-        // p54: entering Depth 1 water is -1, Depth 2 is 0, Depth 3+ is +1
-        const depth = movement.waterDepth || 0;
-        const waterMod = depth === 1 ? -1 : depth >= 3 ? 1 : 0;
-        triggers.push({ trigger: 'Entered Water', baseModifier: waterMod });
+        // p54/p142: "Entered Depth 1 water hex -1", "Entered Depth 2 water hex
+        // 0", "Entered Depth 3+ water hex +1". p60 gives Depth 0 water "PSR
+        // Modifier: No PSR", so a surface-water hex is not a cause at all and
+        // must not push a 0-modifier "Entered Water" trigger. A missing depth
+        // is treated as Depth 0 for the same reason.
+        const depth = Number(movement.waterDepth) || 0;
+        if (depth > 0) {
+          const waterMod = depth === 1 ? -1 : depth >= 3 ? 1 : 0;
+          triggers.push({ trigger: 'Entered Water', baseModifier: waterMod });
+        }
       }
 
       // p61: terrain modifications (ice +3, mud +1, deep snow +1, swamp +1).

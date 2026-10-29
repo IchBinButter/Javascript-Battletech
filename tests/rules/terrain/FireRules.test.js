@@ -13,6 +13,7 @@ import {
 import * as FireRules from '../../../src/rules/terrain/FireRules.js';
 
 const woods = () => new Hex('1,1', { terrainType: 'light_woods' });
+const jungle = (density = 'light') => new Hex('1,1', { terrainType: `${density}_jungle` });
 const building = (type) => new Hex('1,1', { terrainType: 'clear', building: { type, levels: 2, cf: 40, currentCF: 40 } });
 
 describe('what can burn', () => {
@@ -20,6 +21,12 @@ describe('what can burn', () => {
     expect(canBurn(woods())).toBe(true);
     expect(canBurn(new Hex('1,1', { terrainType: 'clear' }))).toBe(false);
     expect(canBurn(new Hex('1,1', { terrainType: 'water_depth1' }))).toBe(false);
+  });
+
+  // p63/p64: jungle is woods-like terrain and catches fire the same way.
+  it('burns light and heavy jungle (p63)', () => {
+    expect(canBurn(jungle('light'))).toBe(true);
+    expect(canBurn(jungle('heavy'))).toBe(true);
   });
 
   it('burns light and medium buildings but not heavy or hardened', () => {
@@ -30,7 +37,7 @@ describe('what can burn', () => {
   });
 });
 
-describe('Fire Table (p63)', () => {
+describe('Fire Table (p64)', () => {
   it('uses the weapon category target numbers', () => {
     expect(fireTargetNumber({ id: 'flamer', type: 'DE' }, woods())).toBe(4);
     expect(fireTargetNumber({ id: 'med_laser', type: 'DE' }, woods())).toBe(7);
@@ -48,6 +55,15 @@ describe('Fire Table (p63)', () => {
     expect(environmentModifier(building('light'))).toBe(-2);
     expect(environmentModifier(building('medium'))).toBe(-1);
     expect(environmentModifier(building('heavy'))).toBeNull(); // cannot burn
+  });
+
+  // p64 Fire Table environment: woods +0, jungle +1 (light and heavy alike).
+  it('jungle ignites one point harder than woods (p64)', () => {
+    expect(environmentModifier(jungle('light'))).toBe(1);
+    expect(environmentModifier(jungle('heavy'))).toBe(1);
+    expect(fireTargetNumber({ id: 'med_laser', type: 'DE' }, jungle('light'))).toBe(8);
+    expect(fireTargetNumber({ id: 'med_laser', type: 'DE' }, jungle('heavy'))).toBe(8);
+    expect(fireTargetNumber({ id: 'flamer', type: 'DE' }, jungle('light'))).toBe(5);
   });
 
   it('a laser needs 5+ in a light building', () => {

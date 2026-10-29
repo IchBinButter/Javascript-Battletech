@@ -20,6 +20,7 @@
 import { hexDistance, directionBetween } from '../../hex/HexMath.js';
 import { getTargetArc, ARC } from './ArcRules.js';
 import { getActuatorDamage as readActuatorDamage } from './UnitDamage.js';
+import { getAvailableJumpMP } from '../movement/maxMP.js';
 import hitTables from '../../data/hitTables.json' with { type: 'json' };
 import physicalWeapons from '../../data/physicalWeapons.json' with { type: 'json' };
 
@@ -412,10 +413,36 @@ export class PhysicalAttackResolver {
 
   /**
    * Resolve a Death From Above attack.
+   *
+   * p19 MOVEMENT IN WATER: "Jump jets cannot be fired while submerged. As
+   * such, a 'Mech standing in Depth 1 water may not fire jump jets located in
+   * its legs, and a 'Mech standing in Depth 2 or deeper water cannot jump at
+   * all." A DFA is a jump, so it needs jump MP: the caller may pass the
+   * attacker's standing hex depth as `options.waterDepth` (the engine does),
+   * and a direct caller that omits it keeps the dry-land behaviour.
    */
   resolveDFA(attacker, target, diceRoller, options = {}) {
-    if (!attacker.movement || !attacker.movement.jump || attacker.movement.jump <= 0) {
-      return { success: false, reason: 'No jump jets' };
+    // p19: a 'Mech standing in Depth 2+ water cannot jump, so it cannot
+    // declare a death from above attack at all.
+    const waterDepth = Number.isFinite(options.waterDepth) ? options.waterDepth : 0;
+    if (waterDepth >= 2) {
+      return {
+        success: false,
+        reason: `Cannot make a death from above attack from Depth ${waterDepth} water: jump jets cannot be fired while submerged (p19)`
+      };
+    }
+
+    // Available Jumping MP accounts for destroyed jets and for Depth 1 water
+    // submerging the leg-mounted ones (p14/p19). With no water context this is
+    // the same rating check as before.
+    const jumpMP = getAvailableJumpMP(attacker, waterDepth);
+    if (jumpMP <= 0) {
+      return {
+        success: false,
+        reason: waterDepth >= 1
+          ? 'No jump jets available: the jump jets in the legs are submerged in Depth 1 water (p19)'
+          : 'No jump jets'
+      };
     }
     if (attacker.prone) {
       return { success: false, reason: 'Attacker is prone' };

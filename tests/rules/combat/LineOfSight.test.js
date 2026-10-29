@@ -141,6 +141,50 @@ describe('intervening terrain', () => {
     expect(result.blocked).toBe(true);
     expect(result.reason).toContain('woods');
   });
+
+  // p60: jungle blocks like woods — light jungle is worth 1 point and heavy
+  // jungle 2 (the p26 attack modifier uses the same +1/+2 scale).
+  it('counts jungle by points like woods (p60)', () => {
+    const one = makeMap({ ...corridor(LINE), '5,5': { terrainType: 'light_jungle', level: 0 } });
+    const oneResult = los.calculateLOS('5,4', '5,7', one, {
+      attacker: unit('5,4'), target: unit('5,7')
+    });
+    expect(oneResult.blocked).toBe(false);
+    expect(oneResult.woodsCount).toBe(1);
+
+    const heavy = makeMap({ ...corridor(LINE), '5,5': { terrainType: 'heavy_jungle', level: 0 } });
+    const heavyResult = los.calculateLOS('5,4', '5,7', heavy, {
+      attacker: unit('5,4'), target: unit('5,7')
+    });
+    expect(heavyResult.woodsCount).toBe(2);
+    expect(heavyResult.blocked).toBe(false);
+
+    const three = makeMap({
+      ...corridor(['5,4', '5,5', '5,6', '5,7', '5,8']),
+      '5,5': { terrainType: 'light_jungle', level: 0 },
+      '5,6': { terrainType: 'light_jungle', level: 0 },
+      '5,7': { terrainType: 'light_jungle', level: 0 }
+    });
+    const blocked = los.calculateLOS('5,4', '5,8', three, {
+      attacker: unit('5,4'), target: unit('5,8')
+    });
+    expect(blocked.blocked).toBe(true);
+    expect(blocked.reason).toContain('woods');
+  });
+
+  it('adds woods and jungle points together (p60)', () => {
+    const mixed = makeMap({
+      ...corridor(['5,4', '5,5', '5,6', '5,7', '5,8']),
+      '5,5': { terrainType: 'light_woods', level: 0 },
+      '5,6': { terrainType: 'light_jungle', level: 0 },
+      '5,7': { terrainType: 'heavy_jungle', level: 0 }
+    });
+    const result = los.calculateLOS('5,4', '5,8', mixed, {
+      attacker: unit('5,4'), target: unit('5,8')
+    });
+    expect(result.woodsCount).toBe(4); // light woods 1 + light jungle 1 + heavy jungle 2
+    expect(result.blocked).toBe(true);
+  });
 });
 
 // =============================================================================
