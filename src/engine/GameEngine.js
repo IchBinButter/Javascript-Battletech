@@ -107,7 +107,12 @@ export class GameEngine {
    */
   processAction(playerId, action) {
     const unitId = this._getActionUnitId(action);
-    const validation = this.phaseManager.validateAction(action.type, playerId, unitId);
+    // A batched weapon declaration answers to the same phase/queue rules as a
+    // single shot; the per-weapon declaration checks run inside _handleFire for
+    // each shot. PhaseManager owns those rules, so the action type is mapped
+    // here rather than taught a second fire action there.
+    const validationType = action.type === 'fireWeapons' ? 'fire' : action.type;
+    const validation = this.phaseManager.validateAction(validationType, playerId, unitId);
     if (!validation.valid) {
       return { success: false, error: validation.reason };
     }
@@ -120,6 +125,9 @@ export class GameEngine {
         break;
       case 'fire':
         result = this._handleFire(playerId, action);
+        break;
+      case 'fireWeapons':
+        result = this._handleFireWeapons(playerId, action);
         break;
       case 'physicalAttack':
         result = this._handlePhysicalAttack(playerId, action);
@@ -152,8 +160,10 @@ export class GameEngine {
     // instances (a Weapon arrives without its methods).
     this.eventBus.emit('actionProcessed', toTransferable({ playerId, action, result }));
 
-    // Advance the unit queue after actions that consume a unit's turn
-    if (result.success && ['move', 'fire', 'physicalAttack', 'pass'].includes(action.type)) {
+    // Advance the unit queue after actions that consume a unit's turn. A
+    // batched weapon declaration is one declaration, so it advances one slot.
+    if (result.success
+      && ['move', 'fire', 'fireWeapons', 'physicalAttack', 'pass'].includes(action.type)) {
       this.phaseManager.advanceQueueOrNextPhase();
     }
 
@@ -950,6 +960,91 @@ export class GameEngine {
 
     result.success = true;
     return result;
+  }
+
+  /**
+   * Resolve a whole weapon declaration: every checked weapon of one 'Mech at
+   * one target, in a single per-'Mech declaration slot (p24/p31).
+   *
+   * The single-shot `fire` action spends the unit's declaration slot on its
+   * own, so a UI that called it once per checked weapon lost every shot after
+   * the first to "Not your turn" - the queue had already advanced. This action
+   * runs each shot through the same `_handleFire` path (declaration validation,
+   * arc, range, LOS, heat, ammo and hit resolution all stay in one place),
+   * collects a per-shot result, and lets `processAction` advance the queue
+   * exactly once.
+   *
+   * A rejected shot does not abort the rest of the declaration: it is reported
+   * in `shots` with `success:false` and its `error`, while the accepted shots
+   * still resolve. If every shot is rejected the action fails and no slot is
+   * spent (the caller can retry with a legal weapon), matching the single-shot
+   * failure behaviour.
+   *
+   * @param {number} playerId
+   * @param {{attackerId: string, targetId: string,
+   *   shots: Array<{weapon: object, weaponLocation?: string, ammoBin?: string,
+   *     indirect?: boolean, spotterId?: string, aimedLocation?: string}>}} action
+   * @returns {{success: boolean, attackerId: string, targetId: string,
+   *   fired: number, rejected: number, shots: Array<object>, error?: string}}
+   */
+  _handleFireWeapons(playerId, action) {
+    const shots = Array.isArray(action.shots) ? action.shots : [];
+    const results = [];
+    let fired = 0;
+    let firstError = null;
+
+    for (const shot of shots) {
+      // A malformed entry is reported per shot like any other rejection; the
+      // single-shot path assumes it was handed a weapon.
+      if (!shot || !shot.weapon) {
+        const error = 'No weapon declared';
+        if (!firstError) firstError = error;
+        results.push({ weapon: null, weaponLocation: null, ammoBin: null, success: false, error });
+        continue;
+      }
+
+      // Each shot reuses the single-shot path with its own action object, so a
+      // declaration that resolves the ammo bin or weapon location cannot leak
+      // into the next shot's validation.
+      const fireAction = {
+        type: 'fire',
+        attackerId: action.attackerId,
+        targetId: action.targetId,
+        weapon: shot.weapon,
+        weaponLocation: shot.weaponLocation,
+        ammoBin: shot.ammoBin || null
+      };
+      if (shot.indirect) {
+        fireAction.indirect = true;
+        fireAction.spotterId = shot.spotterId;
+      }
+      if (shot.aimedLocation) fireAction.aimedLocation = shot.aimedLocation;
+
+      const result = this._handleFire(playerId, fireAction);
+      if (result && result.success) {
+        fired++;
+      } else {
+        const error = (result && result.error) || 'Weapon could not fire';
+        if (!firstError) firstError = error;
+      }
+
+      results.push({
+        weapon: fireAction.weapon,
+        weaponLocation: fireAction.weaponLocation,
+        ammoBin: fireAction.ammoBin,
+        ...result
+      });
+    }
+
+    return {
+      success: fired > 0,
+      attackerId: action.attackerId,
+      targetId: action.targetId,
+      fired,
+      rejected: results.length - fired,
+      shots: results,
+      ...(fired === 0 ? { error: firstError || 'No weapon could fire' } : {})
+    };
   }
 
   /**

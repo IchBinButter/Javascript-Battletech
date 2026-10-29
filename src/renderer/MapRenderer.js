@@ -3,8 +3,15 @@
  * Handles terrain, grid, overlays, and unit rendering.
  */
 
-import { hexToPixel, getHexCorners } from '../hex/HexMath.js';
-import { drawHex, drawHexGrid, drawFacingArrow, drawHexText, drawHexOverlay } from '../hex/HexRenderer.js';
+import { hexToPixel, directionBetween } from '../hex/HexMath.js';
+import {
+  drawHex,
+  drawHexGrid,
+  drawFacingArrow,
+  drawHexText,
+  drawHexOverlay,
+  drawHexOutline
+} from '../hex/HexRenderer.js';
 
 const TERRAIN_COLORS = {
   clear: '#90EE90',
@@ -24,6 +31,19 @@ const TERRAIN_COLORS = {
 };
 
 const PLAYER_COLORS = ['#3b82f6', '#ef4444'];
+
+// Movement affordances. The reachable wash is deliberately much stronger than
+// the old 0.15-0.25 tint: in live play the reachable set was indistinguishable
+// from the terrain behind it. The path colour is yellow so the plotted route
+// and the destination facing never read as terrain or as the blue reachable set.
+const REACHABLE_RGB = '59, 130, 246';
+const REACHABLE_OUTLINE = '#93c5fd';
+const PATH_COLOR = '#facc15';
+const PATH_HALO_COLOR = 'rgba(15, 23, 42, 0.65)';
+const PATH_COST_COLOR = '#fde68a';
+const REACHABLE_COST_COLOR = '#e0f2fe';
+// Below this hex size a cost label in every reachable hex is unreadable clutter.
+const MIN_HEX_SIZE_FOR_COST_TEXT = 20;
 
 export class MapRenderer {
   constructor(canvas, hexSize = 30) {
@@ -97,20 +117,23 @@ export class MapRenderer {
       this._drawTerrainDetails(ctx, drawX, drawY, hex);
     }
 
-    // 2. Draw movement preview overlay
+    // 2. Draw grid lines. `hexes.values()` is an iterator, so the grid pass
+    // does not copy the whole map into a fresh array every frame.
+    if (this.showGrid) {
+      drawHexGrid(ctx, { getAllHexes: () => hexes.values() },
+        this.hexSize, this.offsetX, this.offsetY);
+    }
+
+    // 3. Draw movement preview overlay. Above the grid (so the plotted path is
+    // not crossed out by grid lines) and below the units (a token always sits
+    // on top of its own hex's tint).
     if (this.validMoves) {
       this.drawMovementPreview(this.validMoves);
     }
 
-    // 3. Draw LOS preview
+    // 4. Draw LOS preview
     if (this.losPreview) {
       this.drawLOSPreview(this.losPreview);
-    }
-
-    // 4. Draw grid lines
-    if (this.showGrid) {
-      drawHexGrid(ctx, { getAllHexes: () => Array.from(hexes.values()) },
-        this.hexSize, this.offsetX, this.offsetY);
     }
 
     // 5. Draw units
@@ -169,8 +192,11 @@ export class MapRenderer {
       unit.heat < 20 ? '#ef4444' : '#ff0000';
     drawHexText(ctx, cx, cy + 8, `H:${unit.heat}`, heatColor, 8);
 
-    // Facing arrow
-    drawFacingArrow(ctx, cx, cy, size * 0.75, unit.position.facing, '#ffffff');
+    // Facing arrow. The selected 'Mech gets a bigger, bright-yellow arrow so
+    // its current facing stays readable while a movement path is previewed.
+    const facingSize = isSelected ? this.hexSize * 0.8 : size * 0.75;
+    drawFacingArrow(ctx, cx, cy, facingSize, unit.position.facing,
+      isSelected ? '#ffff00' : '#ffffff', isSelected ? 3 : 2);
 
     // Status indicators
     if (unit.prone) {
@@ -183,9 +209,25 @@ export class MapRenderer {
 
   /**
    * Draw movement preview overlays.
+   *
+   * Reachable hexes get a strong wash plus an outline so the movement range
+   * reads on any terrain, with the MP cost stamped on each hex when the zoom is
+   * large enough to hold text. When `hoveredHex` is one of the valid moves the
+   * plotted route (from `validMoves` itself, so it is the route the engine will
+   * validate) is drawn together with its total cost and the facing the 'Mech
+   * will have when it stops there.
+   *
+   * @param {Map<string, {
+   *   cost: number,
+   *   path?: string[],
+   *   remainingMP?: number,
+   *   facing?: number
+   * }>} validMoves - keyed by destination hex key; `facing` is the arrival
+   *   facing MovementCalculator assigns (ground: last hop, jump: landing facing)
    */
   drawMovementPreview(validMoves) {
     const ctx = this.ctx;
+    const showCosts = this.hexSize >= MIN_HEX_SIZE_FOR_COST_TEXT;
 
     for (const [key, data] of validMoves) {
       // Skip the hexKey@facing variants (stay-and-turn moves)
@@ -197,13 +239,109 @@ export class MapRenderer {
 
       if (!this._isVisible(drawX, drawY)) continue;
 
-      // Color by remaining MP percentage
+      // Color by remaining MP percentage; the floor keeps every reachable hex
+      // clearly tinted instead of fading into the terrain.
       const pct = data.remainingMP !== undefined ?
         Math.min(1, data.remainingMP / 10) : 0.3;
-      const color = `rgba(59, 130, 246, ${0.15 + pct * 0.1})`;
+      const alpha = (0.34 + pct * 0.26).toFixed(2);
 
-      drawHexOverlay(ctx, drawX, drawY, this.hexSize, color, 0.3);
+      drawHexOverlay(ctx, drawX, drawY, this.hexSize,
+        `rgba(${REACHABLE_RGB}, ${alpha})`, 1);
+      // The wash alone disappears on water and heavy woods; trace the hex too.
+      drawHexOutline(ctx, drawX, drawY, this.hexSize * 0.92, REACHABLE_OUTLINE, 2);
+
+      if (showCosts && Number.isFinite(data.cost)) {
+        drawHexText(ctx, drawX, drawY + this.hexSize * 0.45,
+          `${data.cost}`, REACHABLE_COST_COLOR, 9);
+      }
     }
+
+    if (!this.hoveredHex) return;
+    const hoveredMove = validMoves.get(this.hoveredHex);
+    if (hoveredMove) this.drawMovementPath(hoveredMove.path, hoveredMove);
+  }
+
+  /**
+   * Draw the route for a hovered/plotted move: the path through every
+   * intermediate hex, the total cost near the destination, and a large facing
+   * arrow showing the facing on arrival.
+   *
+   * The path comes from the valid move (`path`), never from a straight line, so
+   * the preview shows the exact hexes the engine will walk the 'Mech through.
+   *
+   * @param {string[]|undefined} path - hex keys, starting at the unit's hex
+   * @param {{ cost: number, facing?: number }} moveData
+   */
+  drawMovementPath(path, moveData) {
+    if (!Array.isArray(path) || path.length < 2) return;
+
+    const ctx = this.ctx;
+    const dest = hexToPixel(path[path.length - 1], this.hexSize);
+    const destX = dest.x + this.offsetX;
+    const destY = dest.y + this.offsetY;
+
+    // Two passes: a dark halo first so the route stays readable on pale
+    // (pavement) and dark (heavy woods, water) hexes, then the bright line.
+    for (let pass = 0; pass < 2; pass++) {
+      let { x, y } = hexToPixel(path[0], this.hexSize);
+      ctx.beginPath();
+      ctx.moveTo(x + this.offsetX, y + this.offsetY);
+      for (let i = 1; i < path.length; i++) {
+        ({ x, y } = hexToPixel(path[i], this.hexSize));
+        ctx.lineTo(x + this.offsetX, y + this.offsetY);
+      }
+      ctx.strokeStyle = pass === 0 ? PATH_HALO_COLOR : PATH_COLOR;
+      ctx.lineWidth = pass === 0 ? 7 : 3;
+      ctx.stroke();
+    }
+
+    // A dot on each intermediate hex reads as "this hex is a step", not just
+    // as a line that happens to pass nearby.
+    ctx.fillStyle = PATH_COLOR;
+    for (let i = 1; i < path.length - 1; i++) {
+      const hop = hexToPixel(path[i], this.hexSize);
+      ctx.beginPath();
+      ctx.arc(hop.x + this.offsetX, hop.y + this.offsetY, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Total MP for this move, next to (above) the destination hex.
+    if (Number.isFinite(moveData.cost)) {
+      drawHexText(ctx, destX, destY - this.hexSize * 0.7,
+        `${moveData.cost} MP`, PATH_COST_COLOR, 11);
+    }
+
+    // Facing on arrival comes from the move data's `facing` (the calculator's
+    // arrival facing): the last hop for ground movement, the landing facing for
+    // a jump (p18: a jumping 'Mech chooses any facing desired).
+    const facing = this._destinationFacing(path, moveData);
+    if (facing >= 0) {
+      drawFacingArrow(ctx, destX, destY, this.hexSize * 0.9, facing, PATH_COLOR, 3);
+    }
+  }
+
+  /**
+   * The facing a 'Mech will have at the end of `path`.
+   *
+   * `MovementCalculator.getValidMoves` reports the arrival facing in `facing`:
+   * ground movement faces the hex it entered last (so it equals the final hop),
+   * while a jump keeps the chosen landing facing - the take-off facing unless
+   * the caller passed a `landingFacing` option - which can differ from the
+   * direction of flight (p18: "when it lands it chooses any facing desired").
+   * Reading the geometric last hop instead of `facing` draws the wrong arrow
+   * for most jump destinations.
+   *
+   * @param {string[]} path - at least two hex keys
+   * @param {{ facing?: number }} moveData - a valid move from getValidMoves
+   * @returns {number} facing 0-5, or -1 when it cannot be determined
+   */
+  _destinationFacing(path, moveData) {
+    if (moveData && Number.isFinite(moveData.facing)) {
+      return ((Math.trunc(moveData.facing) % 6) + 6) % 6;
+    }
+    // Hand-built preview data may carry only the path; the last hop is the
+    // closest thing to an arrival facing then.
+    return directionBetween(path[path.length - 2], path[path.length - 1]);
   }
 
   /**

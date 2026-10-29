@@ -56,6 +56,7 @@ function createMockGameEngine(stateOverrides = {}) {
     phaseManager: {
       currentPhase: 'initiative',
       validateAction() { return { valid: true }; },
+      getCurrentQueueEntry() { return null; },
       enterPhase() {}
     },
     movementCalc: {
@@ -422,5 +423,94 @@ describe('UIController', () => {
 
       expect(ui.physicalPanel.style.display).toBe('block');
     });
+  });
+});
+
+/**
+ * F1: the movement preview (and the Walk/Run/Jump radio that re-builds it) must
+ * follow the engine's declaration queue, not just the selected 'Mech's side.
+ * Previewing moves for a non-acting own 'Mech drew destinations the engine
+ * refuses ("... is declaring movement now; finish its move first") and left a
+ * stale highlight behind.
+ */
+describe('UIController movement preview gating', () => {
+  let ui, engine, renderer, atlas;
+
+  beforeEach(() => {
+    createDOMFixture();
+
+    const atlasDef = mechsData.mechs.find(m => m.id === 'atlas-as7d');
+    atlas = new Unit(atlasDef, 0, 'atlas-0');
+    atlas.position = { hexKey: '5,7', facing: 3 };
+
+    engine = createMockGameEngine({ units: { 'atlas-0': atlas } });
+    renderer = createMockMapRenderer();
+
+    ui = new UIController();
+    ui.init(engine, renderer);
+    engine.stateManager.getState().phase = 'movement';
+    ui.selectedUnitId = 'atlas-0';
+  });
+
+  function setQueueEntry(unitId, playerId = 0) {
+    engine.phaseManager.getCurrentQueueEntry = () => ({ unitId, playerId });
+  }
+
+  function changeMode(mode) {
+    const radio = document.querySelector(`input[name="moveMode"][value="${mode}"]`);
+    radio.checked = true;
+    radio.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  it('clears a drawn preview when the selected Mech is not the acting unit', () => {
+    ui._pendingMove = { path: ['5,7', '6,7'], movementType: 'walk' };
+    renderer.validMoves = new Map([['6,7', { cost: 1 }]]);
+    renderer.hoveredHex = '6,7';
+    setQueueEntry('other-mech');
+
+    const getValidMoves = vi.spyOn(engine.movementCalc, 'getValidMoves');
+    changeMode('run');
+
+    expect(ui.movementMode).toBe('run');
+    expect(renderer.validMoves).toBeNull();
+    expect(renderer.hoveredHex).toBeNull();
+    expect(ui._pendingMove).toBeNull();
+    // The non-acting Mech is never handed to the movement calculator.
+    expect(getValidMoves).not.toHaveBeenCalled();
+  });
+
+  it('still previews the acting unit when the movement mode changes', () => {
+    engine.movementCalc.getValidMoves = vi.fn(() => new Map([['6,7', { cost: 1 }]]));
+    setQueueEntry('atlas-0');
+
+    changeMode('run');
+
+    expect(engine.movementCalc.getValidMoves)
+      .toHaveBeenCalledWith(atlas, engine.stateManager.getState(), 'run');
+    expect(renderer.validMoves).toBeInstanceOf(Map);
+    expect(renderer.validMoves.has('6,7')).toBe(true);
+  });
+
+  it('clears the preview when the declaration queue moves on', () => {
+    renderer.validMoves = new Map([['6,7', { cost: 1 }]]);
+    renderer.hoveredHex = '6,7';
+    ui._pendingMove = { path: ['5,7', '6,7'], movementType: 'walk' };
+
+    engine.eventBus.emit('queueAdvanced', { unitId: 'atlas-0', playerId: 0 });
+
+    expect(renderer.validMoves).toBeNull();
+    expect(renderer.hoveredHex).toBeNull();
+    expect(ui._pendingMove).toBeNull();
+  });
+
+  it('clears the preview when the selection changes', () => {
+    renderer.validMoves = new Map([['6,7', { cost: 1 }]]);
+    renderer.hoveredHex = '6,7';
+
+    ui.updateUnitPanel(null);
+
+    expect(ui.selectedUnitId).toBeNull();
+    expect(renderer.validMoves).toBeNull();
+    expect(renderer.hoveredHex).toBeNull();
   });
 });

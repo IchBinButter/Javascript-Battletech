@@ -259,50 +259,87 @@ export function getHexCorners(centerX, centerY, size) {
 }
 
 /**
+ * Distance between the centres of two horizontally adjacent columns.
+ * A flat-top hex is 2 * hexSize wide, but columns interlock: each hex covers
+ * only a quarter of its own width past its centre, so the stride is 1.5x.
+ */
+export function hexColumnStride(hexSize) {
+  return 1.5 * hexSize;
+}
+
+/** Distance between the centres of two vertically adjacent hexes. */
+export function hexRowStride(hexSize) {
+  return Math.sqrt(3) * hexSize;
+}
+
+/**
  * Convert hex key to pixel center coordinates.
- * Flat-top, even-q layout.
+ * Flat-top, even-q layout: adjacent columns interlock at a 1.5 * hexSize
+ * horizontal stride and odd columns sit half a row lower.
  */
 export function hexToPixel(key, hexSize) {
   const { col, row } = parseHexKey(key);
-  const width = 2 * hexSize;
-  const height = Math.sqrt(3) * hexSize;
+  const colStride = hexColumnStride(hexSize);
+  const rowStride = hexRowStride(hexSize);
 
-  const x = hexSize + col * width;
-  const y = hexSize + row * height + (col % 2 === 0 ? 0 : height / 2);
+  const x = hexSize + col * colStride;
+  const y = hexSize + row * rowStride + (col % 2 === 0 ? 0 : rowStride / 2);
 
   return { x, y };
 }
 
 /**
+ * Tolerances used when picking the hex under a pixel. Exact ties happen on
+ * shared edges and vertices; PICK_EPSILON keeps floating-point noise from
+ * changing the winner, and PICK_DIST_EPSILON is its square, for use on the
+ * squared distances.
+ */
+const PICK_EPSILON = 1e-9;
+const PICK_DIST_EPSILON = PICK_EPSILON * PICK_EPSILON;
+
+/**
  * Convert pixel coordinates to hex key.
- * Uses the even-q offset grid.
+ * Uses the even-q offset grid and mirrors hexToPixel exactly.
  */
 export function pixelToHex(px, py, hexSize) {
-  const width = 2 * hexSize;
-  const height = Math.sqrt(3) * hexSize;
+  const colStride = hexColumnStride(hexSize);
+  const rowStride = hexRowStride(hexSize);
 
-  let col = Math.round((px - hexSize) / width);
+  // Estimate the column, then the row for that column's parity. Near a
+  // column boundary the parity-driven row estimate can be off by one, so the
+  // estimate is only a seed: the closest centre among it and its six
+  // neighbours wins.
+  let col = Math.round((px - hexSize) / colStride);
   col = Math.max(0, col);
 
-  const rowOffset = col % 2 === 0 ? 0 : height / 2;
+  const rowOffset = col % 2 === 0 ? 0 : rowStride / 2;
 
-  let row = Math.round((py - hexSize - rowOffset) / height);
+  let row = Math.round((py - hexSize - rowOffset) / rowStride);
   row = Math.max(0, row);
 
-  // Refine: check neighbor hexes and pick closest
-  const candidates = [hexKey(col, row)];
-  const neighbors = hexNeighbors(hexKey(col, row));
-  candidates.push(...neighbors);
+  const candidates = [hexKey(col, row), ...hexNeighbors(hexKey(col, row))];
 
   let bestKey = hexKey(col, row);
+  let bestCol = col;
+  let bestRow = row;
   let bestDist = Infinity;
 
   for (const key of candidates) {
     const center = hexToPixel(key, hexSize);
     const dist = (px - center.x) ** 2 + (py - center.y) ** 2;
-    if (dist < bestDist) {
-      bestDist = dist;
+    const { col: candCol, row: candRow } = parseHexKey(key);
+
+    // Closest centre wins. Exact ties (a click on a shared edge or vertex)
+    // go to the lowest row, then the lowest column so picking is stable.
+    const closer = dist < bestDist - PICK_DIST_EPSILON;
+    const tied = Math.abs(dist - bestDist) <= PICK_DIST_EPSILON;
+    const winsTie = tied && (candRow < bestRow || (candRow === bestRow && candCol < bestCol));
+
+    if (closer || winsTie) {
       bestKey = key;
+      bestCol = candCol;
+      bestRow = candRow;
+      bestDist = dist;
     }
   }
 

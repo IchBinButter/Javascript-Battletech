@@ -1989,3 +1989,188 @@ describe('PhaseManager: Full Turn Integration', () => {
     expect(state.smokeHexes['10,5'].turnsRemaining).toBe(2);
   });
 });
+
+// =============================================================================
+// Batched Weapon Fire: one declaration, many shots
+// =============================================================================
+
+describe('GameEngine: batched weapon fire (one declaration)', () => {
+  /**
+   * Weapon Attack Phase with a real per-'Mech declaration queue. Player 1 wins
+   * initiative, so player 0's Atlas declares first (p10). The target is another
+   * Atlas 6 hexes due south: forward arc, AC/20 medium range, LRM-20 short
+   * range and clear LOS on the standard all-clear test map. It is sturdy enough
+   * to survive the whole volley, so the queue is not skipped as "destroyed".
+   */
+  function createBatchedFireEngine() {
+    const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    const target = createTestUnit('atlas-as7d', 1, 'target-1');
+    atlas.position = { hexKey: '5,7', facing: 3 };
+    target.position = { hexKey: '5,13', facing: 0 };
+
+    const engine = createTestEngine({
+      units: { 'atlas-0': atlas, 'target-1': target },
+      enforceWeaponDeclarations: true
+    });
+    engine.stateManager.getState().initiativeWinner = 1;
+    engine.phaseManager.enterPhase('weapon_attack');
+    return { engine, atlas, target };
+  }
+
+  function twoWeaponDeclaration() {
+    return {
+      type: 'fireWeapons',
+      attackerId: 'atlas-0',
+      targetId: 'target-1',
+      shots: [
+        { weapon: createWeaponDef('ac20'), weaponLocation: 'rightTorso' },
+        { weapon: createWeaponDef('lrm20'), weaponLocation: 'leftTorso' }
+      ]
+    };
+  }
+
+  it('resolves two weapons in one declaration and spends one queue slot', () => {
+    const { engine, atlas } = createBatchedFireEngine();
+    engine.diceRoller = makeDiceRoller(7);
+    const state = engine.stateManager.getState();
+    const queueAdvanced = [];
+    engine.eventBus.on('queueAdvanced', (entry) => queueAdvanced.push(entry));
+
+    const indexBefore = engine.phaseManager.phaseUnitIndex;
+    const result = engine.processAction(0, twoWeaponDeclaration());
+
+    expect(result.success).toBe(true);
+    expect(result.fired).toBe(2);
+    expect(result.rejected).toBe(0);
+    expect(result.shots).toHaveLength(2);
+    expect(result.shots.map(shot => shot.success)).toEqual([true, true]);
+    expect(result.shots.every(shot => typeof shot.hit === 'boolean')).toBe(true);
+
+    // Heat and ammunition are spent for BOTH shots.
+    expect(atlas.heat).toBe(13); // AC/20 (7) + LRM-20 (6)
+    expect(atlas.equipment.ammo['ac20_ammo'].shots).toBe(4); // 5 - 1
+    expect(atlas.equipment.ammo['lrm20_ammo'].shots).toBe(5); // 6 - 1
+
+    // One declaration = one slot: the queue moved by exactly one entry.
+    expect(engine.phaseManager.phaseUnitIndex).toBe(indexBefore + 1);
+    expect(queueAdvanced).toHaveLength(1);
+    expect(state.currentPlayer).toBe(1);
+  });
+
+  it('validates the batched declaration with the same phase/queue rules as a single shot', () => {
+    const { engine } = createBatchedFireEngine();
+
+    // Player 1 is not the acting player: the Atlas declares first.
+    const wrongPlayer = engine.processAction(1, twoWeaponDeclaration());
+    expect(wrongPlayer.success).toBe(false);
+    expect(wrongPlayer.error).toBe('Not your turn');
+
+    // The declaration is still weapon-attack-phase only.
+    engine.stateManager.getState().phase = 'movement';
+    const wrongPhase = engine.processAction(0, twoWeaponDeclaration());
+    expect(wrongPhase.success).toBe(false);
+    expect(wrongPhase.error).toBe('Only in weapon attack phase');
+  });
+
+  it('keeps the first shot when a later shot is rejected', () => {
+    const { engine, atlas } = createBatchedFireEngine();
+    engine.diceRoller = makeDiceRoller(7);
+    const queueAdvanced = [];
+    engine.eventBus.on('queueAdvanced', (entry) => queueAdvanced.push(entry));
+
+    const result = engine.processAction(0, {
+      type: 'fireWeapons',
+      attackerId: 'atlas-0',
+      targetId: 'target-1',
+      shots: [
+        { weapon: createWeaponDef('ac20'), weaponLocation: 'rightTorso' },
+        // The same weapon/location twice: the first shot spends it for the
+        // turn (p24), so the second must be refused without undoing the first.
+        { weapon: createWeaponDef('ac20'), weaponLocation: 'rightTorso' }
+      ]
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fired).toBe(1);
+    expect(result.rejected).toBe(1);
+    expect(result.shots[0].success).toBe(true);
+    expect(result.shots[1].success).toBe(false);
+    expect(result.shots[1].error).toMatch(/already fired/);
+    expect(atlas.heat).toBe(7);
+    expect(atlas.equipment.ammo['ac20_ammo'].shots).toBe(4);
+    expect(queueAdvanced).toHaveLength(1);
+  });
+
+  it('spends no declaration slot when every shot is rejected', () => {
+    const { engine, atlas } = createBatchedFireEngine();
+    atlas.firedWeaponsThisTurn = new Set(['ac20@rightTorso']);
+    atlas.firedWeaponsTurn = 1;
+    const queueAdvanced = [];
+    engine.eventBus.on('queueAdvanced', (entry) => queueAdvanced.push(entry));
+    const indexBefore = engine.phaseManager.phaseUnitIndex;
+
+    const result = engine.processAction(0, {
+      type: 'fireWeapons',
+      attackerId: 'atlas-0',
+      targetId: 'target-1',
+      shots: [{ weapon: createWeaponDef('ac20'), weaponLocation: 'rightTorso' }]
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.fired).toBe(0);
+    expect(result.error).toMatch(/already fired/);
+    expect(atlas.heat).toBe(0);
+    expect(queueAdvanced).toHaveLength(0);
+    expect(engine.phaseManager.phaseUnitIndex).toBe(indexBefore);
+  });
+
+  it('leaves the single-shot fire action unchanged', () => {
+    const { engine, atlas } = createBatchedFireEngine();
+    engine.diceRoller = makeDiceRoller(7);
+    const queueAdvanced = [];
+    engine.eventBus.on('queueAdvanced', (entry) => queueAdvanced.push(entry));
+    const indexBefore = engine.phaseManager.phaseUnitIndex;
+
+    const result = engine.processAction(0, {
+      type: 'fire',
+      attackerId: 'atlas-0',
+      targetId: 'target-1',
+      weapon: createWeaponDef('ac20'),
+      weaponLocation: 'rightTorso'
+    });
+
+    expect(result.success).toBe(true);
+    expect(typeof result.hit).toBe('boolean');
+    expect(result.shots).toBeUndefined();
+    expect(atlas.heat).toBe(7);
+    expect(atlas.equipment.ammo['ac20_ammo'].shots).toBe(4);
+    expect(engine.phaseManager.phaseUnitIndex).toBe(indexBefore + 1);
+    expect(queueAdvanced).toHaveLength(1);
+  });
+
+  it('resolves a one-shot batched declaration exactly like a single shot', () => {
+    const { engine, atlas } = createBatchedFireEngine();
+    engine.diceRoller = makeDiceRoller(7);
+    const queueAdvanced = [];
+    engine.eventBus.on('queueAdvanced', (entry) => queueAdvanced.push(entry));
+    const indexBefore = engine.phaseManager.phaseUnitIndex;
+
+    const result = engine.processAction(0, {
+      type: 'fireWeapons',
+      attackerId: 'atlas-0',
+      targetId: 'target-1',
+      shots: [{ weapon: createWeaponDef('ac20'), weaponLocation: 'rightTorso' }]
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fired).toBe(1);
+    expect(result.rejected).toBe(0);
+    expect(result.shots).toHaveLength(1);
+    expect(typeof result.shots[0].hit).toBe('boolean');
+    expect(atlas.heat).toBe(7);
+    expect(atlas.equipment.ammo['ac20_ammo'].shots).toBe(4);
+    expect(engine.phaseManager.phaseUnitIndex).toBe(indexBefore + 1);
+    expect(queueAdvanced).toHaveLength(1);
+  });
+});
+

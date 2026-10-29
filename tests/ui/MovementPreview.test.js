@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { UIController } from '../../src/ui/UIController.js';
 import { Hex } from '../../src/models/Hex.js';
 import { EventBus } from '../../src/engine/EventBus.js';
+import { MovementCalculator } from '../../src/rules/movement/MovementCalculator.js';
 import { createTestUnit } from '../helpers/testUtils.js';
 
 function makeHex(key, terrainType = 'clear', level = 0, overrides = {}) {
@@ -318,6 +319,58 @@ describe('MovementPreview', () => {
       gameState.getUnit = () => null;
       ui._refreshMovementPreview();
       expect(renderer.validMoves).toBeNull();
+    });
+  });
+
+  // ==========================================================
+  // PREVIEW DATA THE RENDERER DRAWS
+  // ==========================================================
+  describe('preview data handed to the renderer', () => {
+    // Swap the mocked calculator for the real one: the renderer plots whatever
+    // route the engine's movement rules actually computed.
+    beforeEach(() => {
+      ui.gameEngine.movementCalc = new MovementCalculator();
+      ui.movementMode = 'walk';
+    });
+
+    it('every previewed move carries the route the renderer plots', () => {
+      ui._refreshMovementPreview();
+
+      const moves = renderer.validMoves;
+      expect(moves.size).toBeGreaterThan(1);
+      for (const [key, move] of moves) {
+        expect(Array.isArray(move.path)).toBe(true);
+        expect(move.path[0]).toBe('5,7');                   // starts on the unit's hex
+        expect(move.path[move.path.length - 1]).toBe(key);   // ends on the destination
+        expect(Number.isFinite(move.cost)).toBe(true);
+        expect(Number.isFinite(move.facing)).toBe(true);     // arrival facing the renderer draws
+      }
+    });
+
+    it('jump previews carry the arrival facing in `facing`', () => {
+      ui.movementMode = 'jump';
+      ui._refreshMovementPreview();
+
+      const moves = renderer.validMoves;
+      expect(moves.size).toBeGreaterThan(1);
+      for (const [, move] of moves) {
+        // MovementCalculator stores a jump's landing facing in `facing`; the
+        // renderer must not depend on a second key that is never emitted.
+        expect(Number.isFinite(move.facing)).toBe(true);
+        expect(move.landingFacing).toBeUndefined();
+      }
+    });
+
+    it('keeps the hovered destination resolvable through validMoves', () => {
+      ui._refreshMovementPreview();
+
+      const destination = [...renderer.validMoves.keys()].find(key => key !== '5,7');
+      expect(destination).toBeDefined();
+      renderer.hoveredHex = destination;
+
+      const move = renderer.validMoves.get(renderer.hoveredHex);
+      expect(move).toBeDefined();
+      expect(move.path.length).toBeGreaterThan(1);
     });
   });
 

@@ -5,6 +5,9 @@
 
 import { describeHeatEffects } from '../rules/heat/HeatScale.js';
 import { projectStateForPlayer } from '../engine/visibility.js';
+import { canWeaponFireAt } from '../rules/combat/ArcRules.js';
+import { buildingCombat } from '../rules/urban/Buildings.js';
+import { hexDistance } from '../hex/HexMath.js';
 
 export class UIController {
   constructor({ viewerId = 0 } = {}) {
@@ -49,6 +52,7 @@ export class UIController {
     gameEngine.eventBus.on('unitAttacked', (data) => this._onUnitAttacked(data));
     gameEngine.eventBus.on('unitDestroyed', (data) => this._onUnitDestroyed(data));
     gameEngine.eventBus.on('actionProcessed', (data) => this._onActionProcessed(data));
+    gameEngine.eventBus.on('queueAdvanced', (data) => this._onQueueAdvanced(data));
 
     // Setup UI listeners
     this._setupActionButtons();
@@ -87,11 +91,8 @@ export class UIController {
     this.physicalPanel.style.display = 'none';
     this.weaponFireMode = false;
     this._pendingTarget = null;
-    this._pendingMove = null;
-
-    if (this.mapRenderer) {
-      this.mapRenderer.validMoves = null;
-    }
+    // Phase change: the previous phase's destinations/hover are meaningless.
+    this._clearMovementPreview();
   }
 
   _onPhaseChanged(data) {
@@ -180,35 +181,53 @@ export class UIController {
     const target = state.getUnit(this._pendingTarget);
     if (!target) { this.log('Target no longer available', 'miss'); return; }
 
-    const checks = document.querySelectorAll('.weapon-check:checked');
+    const checks = [...document.querySelectorAll('.weapon-check:checked')];
     if (checks.length === 0) { this.log('Select weapons to fire', 'miss'); return; }
 
+    // One declaration carries every checked weapon. Calling the single-shot
+    // 'fire' action once per weapon advanced the per-'Mech declaration queue
+    // after the first shot, so every later shot was rejected with
+    // "Not your turn" - a 'Mech could never fire two weapons at once.
+    const shots = [];
     for (const check of checks) {
-      const weaponType = check.dataset.type;
-      const weaponDef = this._getWeaponData(weaponType);
+      const weaponDef = this._getWeaponData(check.dataset.type);
       if (!weaponDef) continue;
-
-      const result = this.gameEngine.processAction(state.currentPlayer, {
-        type: 'fire',
-        attackerId: attacker.id,
-        targetId: target.id,
+      shots.push({
         weapon: weaponDef,
         weaponLocation: check.dataset.location,
         ammoBin: check.dataset.ammo || null
       });
+    }
+    if (shots.length === 0) { this.log('Select weapons to fire', 'miss'); return; }
 
-      if (result.error) {
-        this.log(`Fire error: ${result.error}`, 'miss');
+    const result = this.gameEngine.processAction(state.currentPlayer, {
+      type: 'fireWeapons',
+      attackerId: attacker.id,
+      targetId: target.id,
+      shots
+    });
+
+    if (result && Array.isArray(result.shots)) {
+      // Per-shot rejections (already fired, no ammo, out of arc, ...) are the
+      // engine's decision; report them without hiding the shots that resolved.
+      for (const shot of result.shots) {
+        if (!shot.success && shot.error) this.log(`Fire error: ${shot.error}`, 'miss');
       }
+    } else if (result && result.error) {
+      // The declaration itself was refused (phase/queue), so nothing fired.
+      this.log(`Fire error: ${result.error}`, 'miss');
     }
 
     this._pendingTarget = null;
     if (this.mapRenderer) {
-      // Re-project: a shot can reveal a hidden target, and the reveal must be
-      // on screen immediately.
+      // Re-project once: a shot can reveal a hidden target, and the reveal must
+      // be on screen immediately.
       this.mapRenderer.render(this.viewState());
     }
     this.updateUnitPanel(attacker);
+    // The shots spent ammo and/or marked weapons as fired this turn. Rebuild
+    // the picker once so a dead weapon stops being offered immediately.
+    if (this.weaponFireMode) this._showWeaponPanel();
   }
 
   _handlePhysicalAttack() {
@@ -246,6 +265,21 @@ export class UIController {
     this.updateUnitPanel(attacker);
   }
 
+  /**
+   * Build the weapon picker.
+   *
+   * The engine's fire validation (PhaseManager.validateAction + C-09 +
+   * GameEngine._handleFire) is the only authority on whether a shot is legal.
+   * This panel is an affordance that asks the same rules ahead of time:
+   *
+   * 1. unit level - is this the acting unit, and can it act at all (destroyed,
+   *    shut down, unconscious warrior)? If not, the whole picker is disabled
+   *    with one reason and the Fire button is turned off;
+   * 2. weapon level - mounted and not destroyed, ammunition, once per turn, and
+   *    (with a target pending) firing arc, range and line of sight.
+   *
+   * Ineligible rows stay visible: greyed out, disabled, with a short reason.
+   */
   _showWeaponPanel() {
     if (!this.selectedUnitId) {
       this.log('Select a unit first', 'miss');
@@ -259,19 +293,249 @@ export class UIController {
     this.weaponPanel.style.display = 'block';
     this.weaponList.innerHTML = '';
 
+    const unitEligibility = this._getUnitFireEligibility(unit, state);
+
+    const fireButton = document.getElementById('btn-fire');
+    if (fireButton) fireButton.disabled = !unitEligibility.eligible;
+
+    if (!unitEligibility.eligible) {
+      const notice = document.createElement('p');
+      notice.className = 'weapon-panel-notice';
+      notice.style.color = '#ff8fa3';
+      notice.style.fontSize = '12px';
+      notice.textContent = `This Mech cannot fire: ${unitEligibility.reason}`;
+      this.weaponList.appendChild(notice);
+    }
+
     for (const w of unit.getAllWeapons()) {
       const weaponData = this._getWeaponData(w.type);
       if (!weaponData) continue;
 
-      const rangeText = `${weaponData.shortRange}/${weaponData.mediumRange}/${weaponData.longRange}`;
-      const label = document.createElement('label');
-      label.innerHTML = `
-        <input type="checkbox" class="weapon-check" data-type="${w.type}" data-location="${w.location}"
-          data-ammo="${w.ammoBin || ''}">
-        ${weaponData.name} (${rangeText}) | ${weaponData.heat}♥ | ${weaponData.damage}dmg
-      `;
-      this.weaponList.appendChild(label);
+      const eligibility = unitEligibility.eligible
+        ? this._getWeaponEligibility(unit, w, weaponData, state)
+        : { eligible: false, reason: null }; // the unit-level notice carries the reason
+      this.weaponList.appendChild(
+        this._renderWeaponOption(w, weaponData, eligibility.eligible, eligibility.reason)
+      );
     }
+  }
+
+  /**
+   * The 'Mech whose declaration slot is current, or null when no queue is
+   * installed (initiative/heat) or the fixture has no phase manager.
+   */
+  _currentQueueEntry() {
+    const phaseManager = this.gameEngine && this.gameEngine.phaseManager;
+    if (!phaseManager || typeof phaseManager.getCurrentQueueEntry !== 'function') return null;
+    return phaseManager.getCurrentQueueEntry();
+  }
+
+  /**
+   * Can `unit` fire at all right now? Returns `{ eligible, reason }` with the
+   * 'Mech-level reason, or `{ eligible: true, reason: null }`.
+   *
+   * These are the guards the engine applies before any weapon row matters:
+   * PhaseManager.validateAction refuses a unit that is not the current
+   * declaration slot ('Not the current acting unit' / 'Not your turn'), and
+   * GameEngine._handleFire refuses a destroyed 'Mech and a shut-down or
+   * unconscious-warrior 'Mech (p44/p52/p58).
+   *
+   * @param {Unit|object} unit - selected 'Mech
+   * @param {object} state - projected game state
+   * @returns {{eligible: boolean, reason: string|null}}
+   */
+  _getUnitFireEligibility(unit, state) {
+    const phaseManager = this.gameEngine && this.gameEngine.phaseManager;
+    const entry = this._currentQueueEntry();
+
+    if (entry) {
+      if (entry.unitId !== unit.id) {
+        return {
+          eligible: false,
+          reason: entry.playerId === unit.player ? 'not the acting unit' : 'not your turn'
+        };
+      }
+    } else if (!state || unit.player !== state.currentPlayer) {
+      return { eligible: false, reason: 'not your turn' };
+    }
+
+    const destroyed = phaseManager && typeof phaseManager.isDestroyedUnit === 'function'
+      ? phaseManager.isDestroyedUnit(unit)
+      : (typeof unit.isDestroyed === 'function' ? unit.isDestroyed() : Boolean(unit.pilot && unit.pilot.dead));
+    if (destroyed) return { eligible: false, reason: 'destroyed' };
+
+    const immobile = phaseManager && typeof phaseManager.isImmobile === 'function'
+      ? phaseManager.isImmobile(unit)
+      : Boolean(unit.shutdown || (unit.pilot && (unit.pilot.conscious === false || unit.pilot.dead)));
+    if (immobile) {
+      return { eligible: false, reason: unit.shutdown ? 'shut down' : 'warrior unconscious' };
+    }
+
+    return { eligible: true, reason: null };
+  }
+
+  /**
+   * Can this weapon fire right now? Returns `{ eligible, reason }`, where
+   * `reason` is the short UI label when it cannot: 'destroyed', 'no ammo',
+   * 'already fired', 'out of arc', 'out of range', 'no line of sight'.
+   *
+   * The checks reuse the helpers the engine uses instead of restating the
+   * rules: `_validateWeaponDeclaration` (destroyed slots, ammo bins, once per
+   * turn), `canWeaponFireAt` (arcs), `Weapon.getRangeModifier` (range) and the
+   * LOS gate of `_handleFire` (`buildingCombat` + `LineOfSight.calculateLOS`).
+   *
+   * @param {Unit|object} unit - attacker
+   * @param {{type: string, location: string, ammoBin?: string}} weapon - mounted entry
+   * @param {Weapon|object} weaponData - weapon definition for `weapon.type`
+   * @param {object} state - projected game state
+   * @returns {{eligible: boolean, reason: string|null}}
+   */
+  _getWeaponEligibility(unit, weapon, weaponData, state) {
+    // p46: a weapon whose critical slots are all destroyed cannot fire. The
+    // engine only calls it destroyed when the weapon has slots to lose.
+    const slots = (unit.criticalSlots && unit.criticalSlots[weapon.location]) || [];
+    const weaponSlots = slots.filter(slot => slot.item === weaponData.id);
+    if (weaponSlots.length > 0 && weaponSlots.every(slot => slot.status === 'destroyed')) {
+      return { eligible: false, reason: 'destroyed' };
+    }
+
+    // p31: ammunition comes from a real bin that feeds this weapon and has
+    // enough shots, picked exactly the way `_validateWeaponDeclaration` does.
+    const usesAmmo = typeof weaponData.usesAmmo === 'function'
+      ? weaponData.usesAmmo()
+      : Boolean(weaponData.ammoPerShot);
+    if (usesAmmo && !this._hasAmmoForWeapon(unit, weapon, weaponData)) {
+      return { eligible: false, reason: 'no ammo' };
+    }
+
+    // p24: one attack per weapon per turn. The engine keys declarations by
+    // "<weapon id>@<location>" and resets the set when the turn changes.
+    const firedKey = `${weaponData.id}@${weapon.location}`;
+    if (this._weaponFiredThisTurn(unit, firedKey, state)) {
+      return { eligible: false, reason: 'already fired' };
+    }
+
+    // Target-dependent checks only apply while a target is actually picked;
+    // otherwise the panel must not invent an arc/range/LOS verdict.
+    const target = this._pendingTarget ? state.getUnit(this._pendingTarget) : null;
+    if (target && target.id !== unit.id) {
+      const arc = canWeaponFireAt(unit, weaponData, target.position.hexKey, {
+        weaponLocation: weapon.location,
+        mount: weaponData.mount
+      });
+      if (!arc.legal) return { eligible: false, reason: 'out of arc' };
+
+      const distance = hexDistance(unit.position.hexKey, target.position.hexKey);
+      if (typeof weaponData.getRangeModifier === 'function'
+        && weaponData.getRangeModifier(distance) === null) {
+        return { eligible: false, reason: 'out of range' };
+      }
+
+      if (this._isLineOfSightBlocked(unit, target, state)) {
+        return { eligible: false, reason: 'no line of sight' };
+      }
+    }
+
+    return { eligible: true, reason: null };
+  }
+
+  /** Does a bin feed `weapon` with enough shots? Mirrors the engine's pick. */
+  _hasAmmoForWeapon(unit, weapon, weaponData) {
+    const ammo = (unit.equipment && unit.equipment.ammo) || {};
+    const needed = weaponData.ammoPerShot || 1;
+
+    const explicitBin = weapon.ammoBin || null;
+    if (explicitBin) {
+      const bin = ammo[explicitBin];
+      if (!bin) return false;
+      if (bin.type && bin.type !== weaponData.id) return false;
+      return (bin.shots || 0) >= needed;
+    }
+
+    return Object.keys(ammo).some(name => {
+      const bin = ammo[name];
+      if (!bin) return false;
+      const feeds = !bin.type || bin.type === weaponData.id;
+      return feeds && (bin.shots || 0) >= needed;
+    });
+  }
+
+  /**
+   * Has `key` already fired this turn? Mirrors `_validateWeaponDeclaration`
+   * exactly: only a Set recorded on the current turn counts. The engine treats
+   * anything else (an array after a JSON round-trip, or a Set from an earlier
+   * turn) as a fresh empty set, so the UI must not report a stale shot either.
+   */
+  _weaponFiredThisTurn(unit, key, state) {
+    const fired = unit.firedWeaponsThisTurn;
+    if (!(fired instanceof Set)) return false;
+    if (unit.firedWeaponsTurn !== state.turn) return false;
+    return fired.has(key);
+  }
+
+  /**
+   * The line-of-sight gate of `GameEngine._handleFire`, read-only: a same-building
+   * pair only checks the p72 building count, an outside shot into a building is
+   * blocked by intervening building hexes, everything else uses the generic LOS.
+   * A missing LOS engine (minimal test fixtures) is treated as clear - the
+   * engine still rejects a blocked shot.
+   */
+  _isLineOfSightBlocked(attacker, target, state) {
+    const los = this.gameEngine && this.gameEngine.los;
+    if (!los || typeof los.calculateLOS !== 'function') return false;
+    if (!state || !state.map || !state.map.hexes) return false;
+    if (typeof state.map.hexes.get !== 'function') return false;
+
+    const urban = buildingCombat(attacker, target, state);
+    if (urban.sameBuilding) return Boolean(urban.losBlocked);
+    if (urban.targetInside && urban.interveningHexes > 0) return true;
+
+    return Boolean(los.calculateLOS(
+      attacker.position.hexKey,
+      target.position.hexKey,
+      state,
+      { attacker, target }
+    ).blocked);
+  }
+
+  /** One row of the weapon picker; disabled and greyed out when ineligible. */
+  _renderWeaponOption(weapon, weaponData, eligible, reason) {
+    const rangeText = `${weaponData.shortRange}/${weaponData.mediumRange}/${weaponData.longRange}`;
+
+    const label = document.createElement('label');
+    label.className = 'weapon-option';
+    label.dataset.eligible = String(eligible);
+    if (!eligible) {
+      label.classList.add('weapon-option-disabled');
+      label.setAttribute('aria-disabled', 'true');
+      label.style.opacity = '0.45';
+      label.style.cursor = 'not-allowed';
+    }
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'weapon-check';
+    checkbox.dataset.type = weapon.type;
+    checkbox.dataset.location = weapon.location;
+    checkbox.dataset.ammo = weapon.ammoBin || '';
+    checkbox.disabled = !eligible;
+    label.appendChild(checkbox);
+
+    const description = document.createElement('span');
+    description.className = 'weapon-description';
+    description.textContent = `${weaponData.name} (${rangeText}) | ${weaponData.heat}♥ | ${weaponData.damage}dmg`;
+    label.appendChild(description);
+
+    if (!eligible && reason) {
+      const reasonLabel = document.createElement('span');
+      reasonLabel.className = 'weapon-reason';
+      reasonLabel.textContent = reason;
+      reasonLabel.style.color = '#ff8fa3';
+      reasonLabel.style.fontSize = '11px';
+      label.appendChild(reasonLabel);
+    }
+
+    return label;
   }
 
   _getWeaponData(weaponType) {
@@ -311,9 +575,14 @@ export class UIController {
     if (!unit) {
       this.unitDetails.innerHTML = '<p>Select a unit to view details</p>';
       this.selectedUnitId = null;
+      // Deselecting drops the previous selection's destinations.
+      this._clearMovementPreview();
       return;
     }
 
+    // A different 'Mech is now selected: the previous reachable-hex preview
+    // belonged to the old selection and must not linger over the map.
+    if (this.selectedUnitId !== unit.id) this._clearMovementPreview();
     this.selectedUnitId = unit.id;
 
     let armorHTML = '<div class="armor-diagram">';
@@ -445,6 +714,27 @@ export class UIController {
   }
 
   _onActionProcessed(data) {
+    // A resolved fire spends ammo and marks the weapon as fired this turn. If
+    // the picker is still open, rebuild it against the current target so a
+    // spent weapon is greyed out immediately instead of staying clickable.
+    // The UI declares all checked weapons in one batched 'fireWeapons' action;
+    // a single-shot 'fire' is still handled for direct callers.
+    const actionType = data && data.action ? data.action.type : null;
+    if (this.weaponFireMode && this.selectedUnitId
+      && (actionType === 'fire' || actionType === 'fireWeapons')) {
+      this._showWeaponPanel();
+    }
+  }
+
+  /**
+   * The declaration slot moved to another 'Mech: any reachable-hex preview (and
+   * pending destination) was computed for the previous acting unit, so it does
+   * not describe what the engine will accept now. Drop it before the next
+   * click; the user picks the next acting 'Mech to see its moves.
+   */
+  _onQueueAdvanced() {
+    this._clearMovementPreview();
+    this._renderView();
   }
 
   _handleConfirmMove() {
@@ -486,16 +776,63 @@ export class UIController {
     if (this.mapRenderer) {
       this.mapRenderer.validMoves = null;
       this.mapRenderer.hoveredHex = null;
+      this.mapRenderer.hoveredMove = null;
     }
   }
 
+  /** Render the viewer's projection (guarding fixtures with no units map). */
+  _renderView() {
+    if (!this.mapRenderer || !this.gameEngine) return;
+    const state = this.gameEngine.stateManager.getState();
+    if (!state || !state.units) return;
+    this.mapRenderer.render(this.viewState());
+  }
+
+  /**
+   * Is `unit` the 'Mech whose declaration slot is current?
+   *
+   * Mirrors PhaseManager.validateAction's queue check ("Not the current acting
+   * unit") and the click-path gate in main.js. With no queue installed
+   * (initiative/heat, or a bare fixture) a unit of the active player may act,
+   * exactly as the engine's player-only check does.
+   */
+  _isActingUnit(unit, state) {
+    const entry = this._currentQueueEntry();
+    if (entry) return entry.unitId === unit.id;
+    return Boolean(state) && unit.player === state.currentPlayer;
+  }
+
+  /**
+   * Rebuild - or clear - the reachable-hex preview for the selected 'Mech when
+   * the movement mode (Walk/Run/Jump) changes.
+   *
+   * The preview follows the engine's declaration queue, not just the selected
+   * unit's side: PhaseManager.validateAction only accepts a move from the
+   * current queue slot ("Not the current acting unit"), so highlighting
+   * destinations for any other own 'Mech promises a move the engine refuses.
+   * When the selected 'Mech cannot declare, the preview and any hover/pending
+   * destination are cleared and redrawn as empty.
+   */
   _refreshMovementPreview() {
     // The movement calculator needs the full state (it validates against the
     // engine's rules); only what is drawn is projected back down to the view.
     const state = this.gameEngine.stateManager.getState();
-    if (state.phase !== 'movement') return;
+
+    // Nothing selected: leave the renderer as the caller left it (inspection
+    // mode); a real deselection clears it through updateUnitPanel(null).
+    if (!this.selectedUnitId) return;
+
+    if (state.phase !== 'movement') {
+      this._clearMovementPreview();
+      return;
+    }
+
     const unit = state.getUnit(this.selectedUnitId);
-    if (!unit || unit.player !== state.currentPlayer) return;
+    if (!unit || unit.player !== this.viewerId || !this._isActingUnit(unit, state)) {
+      this._clearMovementPreview();
+      this._renderView();
+      return;
+    }
 
     const validMoves = this.gameEngine.movementCalc.getValidMoves(unit, state, this.movementMode);
     if (this.mapRenderer) {

@@ -19,11 +19,21 @@ const HEX_SIZE = 30;
 // Solo play looks at the game through player 0's eyes. The projection removes
 // hidden enemy units, so they never reach the renderer, the UI or a click test.
 const VIEWER_ID = 0;
+
+// Phases whose rules declare one 'Mech per side, in initiative order. The
+// local viewer commands only one side (there is no AI opponent yet), so the
+// queue in these phases can stop on a slot nobody controls; see
+// skipUncontrolledDeclarations().
+const DECLARATION_PHASES = new Set(['movement', 'weapon_attack', 'physical_attack']);
+
 let gameEngine;
 let mapRenderer;
 let ui;
 let weaponsLookup;
 let mechsData, weaponsData, hitTables, mapsData;
+
+/** Re-entrancy guard for skipUncontrolledDeclarations(). */
+let _skippingDeclarations = false;
 
 // Canvas setup
 const canvas = document.getElementById('map-canvas');
@@ -83,6 +93,155 @@ function hideGame() {
 function viewState() {
   if (!gameEngine) return null;
   return projectStateForPlayer(gameEngine.stateManager.getState(), VIEWER_ID);
+}
+
+/** The display name of `playerId`, with a fallback for partial fixtures. */
+function playerName(state, playerId) {
+  const player = ((state && state.players) || []).find(p => p.id === playerId);
+  return player ? player.name : `Player ${playerId + 1}`;
+}
+
+/** The 'Mech whose declaration slot is current, or null when the queue is empty. */
+function queueEntry() {
+  if (!gameEngine || !gameEngine.phaseManager) return null;
+  return gameEngine.phaseManager.getCurrentQueueEntry();
+}
+
+/**
+ * Can `unit` declare its movement right now?
+ *
+ * The engine accepts a move only from the 'Mech whose declaration slot is
+ * current (`PhaseManager.validateAction`: "Not the current acting unit"), so
+ * the click handler gates the preview on queue ownership rather than on the
+ * unit merely belonging to the player who happens to be declaring.
+ */
+function isActingUnit(unit, state) {
+  if (!unit) return false;
+  const entry = queueEntry();
+  if (entry) return entry.unitId === unit.id;
+  return Boolean(state) && unit.player === state.currentPlayer;
+}
+
+/**
+ * Spend the declaration slots of every side the local viewer does not control.
+ *
+ * Solo play has a single local viewer (player 0's eyes) and no AI opponent yet
+ * (TODO.md "AI opponent"). The engine's movement/attack phases declare one
+ * 'Mech per side in initiative order, so the queue regularly stops on a 'Mech
+ * nobody can command. On the demo game's second turn the initiative loser is
+ * player 1, whose slot is first: the viewer's own 'Mechs never become the
+ * acting unit and every click on them silently does nothing - the "stuck on
+ * turn two" report.
+ *
+ * Those slots are spent with the engine's own declaration pass
+ * (`processAction {type:'pass'}`), so the rules engine stays authoritative and
+ * the viewer's next 'Mech becomes the acting unit. When every remaining slot in
+ * the phase belongs to the uncontrolled side the pass exhausts the queue and
+ * the phase advances, exactly as it does after any other declaration.
+ *
+ * @returns {boolean} true when at least one declaration slot was passed
+ */
+function skipUncontrolledDeclarations() {
+  if (!gameEngine || !mapRenderer || !ui || _skippingDeclarations) return false;
+
+  const state = gameEngine.stateManager.getState();
+  if (!DECLARATION_PHASES.has(state.phase)) return false;
+
+  let passed = false;
+  _skippingDeclarations = true;
+  try {
+    for (let guard = 0; guard < 64; guard++) {
+      const current = gameEngine.stateManager.getState();
+      if (!DECLARATION_PHASES.has(current.phase)) break;
+
+      const entry = gameEngine.phaseManager.getCurrentQueueEntry();
+      if (!entry || entry.playerId === VIEWER_ID) break;
+
+      // Only name the 'Mech when the projection already shows it: an automatic
+      // pass must not reveal the existence of a hidden enemy (p82).
+      const projected = viewState();
+      const visibleUnit = projected ? projected.getUnit(entry.unitId) : null;
+      ui.log(
+        `${playerName(current, entry.playerId)}: ${visibleUnit ? visibleUnit.name : 'unit'} declaration passed (no local controller)`,
+        'info'
+      );
+
+      const result = gameEngine.processAction(entry.playerId, {
+        type: 'pass',
+        unitId: entry.unitId
+      });
+      if (!result || !result.success) break;
+      passed = true;
+    }
+  } finally {
+    _skippingDeclarations = false;
+  }
+
+  return passed;
+}
+
+/** Redraw the map and HUD after the engine state moved outside a click. */
+function refreshGameView() {
+  if (!gameEngine || !mapRenderer) return;
+  updateUI();
+  mapRenderer.render(viewState());
+}
+
+/** The map hex under a mouse event, in the same coordinates a click uses. */
+function hexKeyAtPoint(event) {
+  if (!mapRenderer) return null;
+  const rect = canvas.getBoundingClientRect();
+  const px = event.clientX - rect.left - mapRenderer.offsetX;
+  const py = event.clientY - rect.top - mapRenderer.offsetY;
+  return pixelToHex(px, py, mapRenderer.hexSize);
+}
+
+/**
+ * Drop the hover preview. Renderer contract for render-fix:
+ * - `hoveredHex`: the hex under the cursor, or null;
+ * - `hoveredMove`: `{ hexKey, path, cost, remainingMP, facing }` when that hex
+ *   is a legal destination for the selected 'Mech, else null.
+ */
+function clearHover() {
+  if (!mapRenderer) return;
+  mapRenderer.hoveredHex = null;
+  mapRenderer.hoveredMove = null;
+}
+
+/** Drop the pending move and hover preview (selection or phase changed). */
+function clearPendingMovement() {
+  if (mapRenderer) {
+    mapRenderer.validMoves = null;
+    clearHover();
+  }
+  if (ui) ui._pendingMove = null;
+}
+
+/**
+ * Build - or clear - the movement preview for a selected 'Mech.
+ *
+ * Selection stays available for inspection, but the reachable-hex preview (and
+ * the move itself) follows the declaration queue: previewing moves for a 'Mech
+ * the engine will refuse to move would promise something the click cannot
+ * deliver.
+ */
+function refreshMovementPreview(unit, state) {
+  if (!mapRenderer || !ui) return;
+
+  clearPendingMovement();
+  if (!unit || !state || state.phase !== 'movement') return;
+  if (unit.player !== VIEWER_ID) return;
+
+  if (!isActingUnit(unit, state)) {
+    const entry = queueEntry();
+    const acting = entry ? state.getUnit(entry.unitId) : null;
+    ui.log(acting
+      ? `${acting.name} is declaring movement now; finish its move first`
+      : 'That Mech is not the current movement declaration', 'info');
+    return;
+  }
+
+  mapRenderer.validMoves = gameEngine.movementCalc.getValidMoves(unit, state, ui.movementMode);
 }
 
 // ---- Initialize Game with Selected Forces ----
@@ -183,10 +342,19 @@ async function startGame(forceBuilder) {
 
   // Hook up render updates
   gameEngine.eventBus.on('phaseChanged', () => {
-    mapRenderer.render(viewState());
-    updateUI();
+    clearHover();
+    // A declaration phase can open on the side this view cannot command.
+    skipUncontrolledDeclarations();
+    refreshGameView();
+  });
+  gameEngine.eventBus.on('queueAdvanced', () => {
+    // The viewer's declaration is spent; spend any uncontrolled slots now at
+    // the front of the queue so the next usable 'Mech becomes the acting unit.
+    if (skipUncontrolledDeclarations()) refreshGameView();
   });
   gameEngine.eventBus.on('unitMoved', () => {
+    // The preview belonged to where the 'Mech used to stand.
+    clearHover();
     mapRenderer.render(viewState());
   });
   gameEngine.eventBus.on('damageApplied', () => {
@@ -291,13 +459,16 @@ async function init() {
 
 // ---- Game Interaction (only active when game is running) ----
 canvas.addEventListener('click', (event) => {
-  if (!gameEngine) return;
+  if (!gameEngine || !mapRenderer) return;
+
+  // The declaration queue may still be sitting on the side the local viewer
+  // does not control; spend those slots before interpreting the click so the
+  // state read below is the one the player is actually looking at.
+  if (skipUncontrolledDeclarations()) refreshGameView();
+
   const state = viewState();
   if (!state) return;
-  const rect = canvas.getBoundingClientRect();
-  const px = event.clientX - rect.left - mapRenderer.offsetX;
-  const py = event.clientY - rect.top - mapRenderer.offsetY;
-  const hexKey = pixelToHex(px, py, mapRenderer.hexSize);
+  const hexKey = hexKeyAtPoint(event);
 
   const hex = state.map.hexes.get(hexKey);
   if (!hex) return;
@@ -317,49 +488,25 @@ canvas.addEventListener('click', (event) => {
         ui._pendingTarget = unitOnHex.id;
         ui.log(`Target selected: ${clickedUnit.name}`);
         mapRenderer.selectedUnit = ui.selectedUnitId;
-        mapRenderer.render(state);
 
-        if (ui.weaponFireMode) {
-          const checks = document.querySelectorAll('.weapon-check:checked');
-          for (const check of checks) {
-            const weaponType = check.dataset.type;
-            const weaponDef = weaponsLookup[weaponType];
-            if (!weaponDef) continue;
-
-            const result = gameEngine.processAction(state.currentPlayer, {
-              type: 'fire',
-              attackerId: selectedUnit.id,
-              targetId: clickedUnit.id,
-              weapon: weaponDef,
-              weaponLocation: check.dataset.location,
-              ammoBin: check.dataset.ammo || null
-            });
-
-            if (result.error) {
-              ui.log(`Fire error: ${result.error}`, 'miss');
-            }
-          }
-          // Re-project so a target revealed by this shot appears right away.
-          mapRenderer.render(viewState());
-          ui.updateUnitPanel(selectedUnit);
+        // Two-step fire flow: picking the target only records it and refreshes
+        // the weapon panel, because target-dependent eligibility (out of arc,
+        // out of range, no line of sight) can only be judged once the target is
+        // known. "Fire Selected" resolves the checked weapons afterwards.
+        if (ui.weaponFireMode && typeof ui._showWeaponPanel === 'function') {
+          ui._showWeaponPanel();
         }
+        mapRenderer.render(state);
         return;
       }
     }
 
-    // Normal selection
+    // Normal selection. The panel stays an inspection tool - movement follows
+    // the declaration queue (see refreshMovementPreview).
     mapRenderer.selectedUnit = unitOnHex.id;
     ui.updateUnitPanel(unitOnHex);
-
-    // Show movement preview for own units in movement phase
-    if (state.phase === 'movement' && unitOnHex.player === state.currentPlayer) {
-      const validMoves = gameEngine.movementCalc.getValidMoves(unitOnHex, state, ui.movementMode);
-      mapRenderer.validMoves = validMoves;
-      ui._pendingMove = null;
-    } else {
-      mapRenderer.validMoves = null;
-    }
-
+    ui._pendingTarget = null;
+    refreshMovementPreview(unitOnHex, state);
     mapRenderer.render(state);
     return;
   }
@@ -374,21 +521,46 @@ canvas.addEventListener('click', (event) => {
 
   if (state.phase === 'movement' && mapRenderer.selectedUnit) {
     const unit = state.getUnit(mapRenderer.selectedUnit);
-    if (unit && unit.player === state.currentPlayer) {
-      const validMoves = mapRenderer.validMoves;
-      if (validMoves && validMoves.has(hexKey)) {
-        const moveData = validMoves.get(hexKey);
-        ui._pendingMove = {
-          path: moveData.path,
-          movementType: ui.movementMode
-        };
-        mapRenderer.hoveredHex = hexKey;
-        ui.log(`Move pending to ${hexKey} (${moveData.cost} MP). Click Confirm Move.`);
-      } else {
-        ui.log('Cannot reach that hex', 'miss');
-      }
+    if (!unit) {
+      mapRenderer.selectedUnit = null;
+      ui.updateUnitPanel(null);
+      clearPendingMovement();
       mapRenderer.render(state);
+      return;
     }
+
+    if (!isActingUnit(unit, state)) {
+      const entry = queueEntry();
+      const acting = entry ? state.getUnit(entry.unitId) : null;
+      ui.log(acting
+        ? `${acting.name} is declaring movement now; finish its move first`
+        : 'That Mech is not the current movement declaration', 'info');
+      mapRenderer.render(state);
+      return;
+    }
+
+    const validMoves = mapRenderer.validMoves;
+    if (validMoves && validMoves.has(hexKey)) {
+      const moveData = validMoves.get(hexKey);
+      ui._pendingMove = {
+        path: moveData.path,
+        movementType: ui.movementMode
+      };
+      // The pending destination doubles as the hover preview until the move is
+      // resolved; `hoveredMove` is what render-fix draws the path/cost from.
+      mapRenderer.hoveredHex = hexKey;
+      mapRenderer.hoveredMove = {
+        hexKey,
+        path: [...moveData.path],
+        cost: moveData.cost,
+        remainingMP: moveData.remainingMP,
+        facing: moveData.facing
+      };
+      ui.log(`Move pending to ${hexKey} (${moveData.cost} MP). Click Confirm Move.`);
+    } else {
+      ui.log('Cannot reach that hex', 'miss');
+    }
+    mapRenderer.render(state);
     return;
   }
 
@@ -396,7 +568,7 @@ canvas.addEventListener('click', (event) => {
   if (state.phase !== 'movement') {
     mapRenderer.selectedUnit = null;
     ui.updateUnitPanel(null);
-    mapRenderer.validMoves = null;
+    clearPendingMovement();
     mapRenderer.render(state);
   }
 });
@@ -410,6 +582,41 @@ canvas.addEventListener('wheel', (event) => {
   if (gameEngine) {
     mapRenderer.render(viewState());
   }
+});
+
+// Hover tracking: the renderer previews the selected 'Mech's path under the
+// cursor. `hoveredHex` is the hex under the pointer; when that hex is a legal
+// destination `hoveredMove` carries the path, cost and destination facing.
+canvas.addEventListener('mousemove', (event) => {
+  if (!gameEngine || !mapRenderer) return;
+
+  const hexKey = hexKeyAtPoint(event);
+  const validMoves = mapRenderer.validMoves;
+  const moveData = validMoves ? validMoves.get(hexKey) : null;
+  const previous = mapRenderer.hoveredMove;
+
+  const changed = mapRenderer.hoveredHex !== hexKey
+    || Boolean(moveData) !== Boolean(previous)
+    || Boolean(moveData && previous && (
+      moveData.cost !== previous.cost || String(moveData.path) !== String(previous.path)
+    ));
+
+  mapRenderer.hoveredHex = hexKey;
+  mapRenderer.hoveredMove = moveData ? {
+    hexKey,
+    path: [...moveData.path],
+    cost: moveData.cost,
+    remainingMP: moveData.remainingMP,
+    facing: moveData.facing
+  } : null;
+
+  if (changed && validMoves) mapRenderer.render(viewState());
+});
+
+canvas.addEventListener('mouseleave', () => {
+  if (!mapRenderer) return;
+  clearHover();
+  if (gameEngine) mapRenderer.render(viewState());
 });
 
 // Keyboard shortcuts - stored as a named handler for cleanup
@@ -428,14 +635,17 @@ _keydownHandler = (event) => {
       ui.updateUnitPanel(null);
       ui.weaponFireMode = false;
       ui.weaponPanel.style.display = 'none';
+      clearPendingMovement();
       break;
     case 'n':
       if (mapRenderer.selectedUnit) {
-        const units = ui.getVisibleUnits(state.currentPlayer);
+        const units = ui.getVisibleUnits(VIEWER_ID);
         const idx = units.findIndex(u => u.id === mapRenderer.selectedUnit);
         if (idx >= 0 && idx < units.length - 1) {
-          mapRenderer.selectedUnit = units[idx + 1].id;
-          ui.updateUnitPanel(state.getUnit(units[idx + 1].id));
+          const next = units[idx + 1];
+          mapRenderer.selectedUnit = next.id;
+          ui.updateUnitPanel(next);
+          refreshMovementPreview(next, state);
         }
       }
       break;
@@ -454,6 +664,8 @@ function updateUI() {
   if (!state) return;
   document.getElementById('turn-label').textContent = `Turn: ${state.turn}`;
   document.getElementById('phase-label').textContent = `Phase: ${state.phase}`;
+  const activePlayer = document.getElementById('active-player');
+  if (activePlayer) activePlayer.textContent = `Active: ${playerName(state, state.currentPlayer)}`;
 }
 
 // Start

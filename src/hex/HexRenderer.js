@@ -6,6 +6,21 @@
 import { getHexCorners, hexToPixel } from './HexMath.js';
 
 /**
+ * Trace the outline of one hex onto the current path. Shared by the filled,
+ * outlined and overlay variants so all three cover exactly the same area.
+ */
+function traceHexPath(ctx, cx, cy, size) {
+  const corners = getHexCorners(cx, cy, size);
+
+  ctx.beginPath();
+  ctx.moveTo(corners[0].x, corners[0].y);
+  for (let i = 1; i < 6; i++) {
+    ctx.lineTo(corners[i].x, corners[i].y);
+  }
+  ctx.closePath();
+}
+
+/**
  * Draw a single hex on a canvas context.
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} cx - Center x pixel
@@ -15,14 +30,7 @@ import { getHexCorners, hexToPixel } from './HexMath.js';
  * @param {string} strokeColor - Stroke color
  */
 export function drawHex(ctx, cx, cy, size, fillColor, strokeColor = '#333333') {
-  const corners = getHexCorners(cx, cy, size);
-
-  ctx.beginPath();
-  ctx.moveTo(corners[0].x, corners[0].y);
-  for (let i = 1; i < 6; i++) {
-    ctx.lineTo(corners[i].x, corners[i].y);
-  }
-  ctx.closePath();
+  traceHexPath(ctx, cx, cy, size);
 
   ctx.fillStyle = fillColor;
   ctx.fill();
@@ -49,8 +57,9 @@ export function drawHexGrid(ctx, grid, hexSize, offsetX = 0, offsetY = 0) {
  * @param {number} size - Hex size
  * @param {number} facing - Facing 0-5
  * @param {string} color - Arrow color
+ * @param {number} lineWidth - Shaft width
  */
-export function drawFacingArrow(ctx, cx, cy, size, facing, color = '#ffffff') {
+export function drawFacingArrow(ctx, cx, cy, size, facing, color = '#ffffff', lineWidth = 2) {
   const angle = -Math.PI / 2 + (facing * Math.PI / 3);
   const arrowLength = size * 0.6;
   const tipX = cx + arrowLength * Math.cos(angle);
@@ -69,7 +78,7 @@ export function drawFacingArrow(ctx, cx, cy, size, facing, color = '#ffffff') {
   ctx.moveTo(cx, cy);
   ctx.lineTo(tipX, tipY);
   ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = lineWidth;
   ctx.stroke();
 
   ctx.beginPath();
@@ -93,16 +102,22 @@ export function drawHexText(ctx, cx, cy, text, color = '#ffffff', fontSize = 10)
 }
 
 /**
+ * Draw the outline of a hex without filling it.
+ * Used for movement affordances, where a filled overlay would hide the terrain
+ * but the reachable hex still has to read at a glance.
+ */
+export function drawHexOutline(ctx, cx, cy, size, color = '#ffffff', lineWidth = 2) {
+  traceHexPath(ctx, cx, cy, size);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.stroke();
+}
+
+/**
  * Draw a colored overlay on a hex (for movement preview, range bands, etc.).
  */
 export function drawHexOverlay(ctx, cx, cy, size, color, alpha = 0.3) {
-  const corners = getHexCorners(cx, cy, size);
-  ctx.beginPath();
-  ctx.moveTo(corners[0].x, corners[0].y);
-  for (let i = 1; i < 6; i++) {
-    ctx.lineTo(corners[i].x, corners[i].y);
-  }
-  ctx.closePath();
+  traceHexPath(ctx, cx, cy, size);
   ctx.fillStyle = color;
   ctx.globalAlpha = alpha;
   ctx.fill();
