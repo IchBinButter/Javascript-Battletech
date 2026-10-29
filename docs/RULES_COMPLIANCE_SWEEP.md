@@ -1851,6 +1851,8 @@ These tests currently lock in behaviour the audits found wrong. They must be rew
 
 Pages not listed have no body chunk in the KB. (p31 is a table-of-contents fragment only; p137, p140 and p144 are present inside the p136/p139/p143 chunks, not as separate `kb_list` entries.)
 
+**Gap-fill (after the audit above).** The workspace copy `battlemechmanual.pdf` was extracted page-by-page with `pdfjs-dist` (printed page = PDF page − 2) and the **65 pages the KB lacked** across p1–p148 were imported as 156 entries (kb ids 77–232, tags `BMM`, `gap-fill`). Every printed page 1–148 now has a body, so citations to p9, p11, p13, p15, p19, p25, p34–p35, p37, p39–p40, p47, p49, p51, p55, p57, p59, p61, p63, p67, p71, p75, p77, p79, p89, p109 and p117 are now verifiable. The paragraph above is preserved as the pre-import state that the citation audit was performed against.
+
 **Citation audit (mechanical).** A regex scan (`p<number>` / `p. <number>`) over §1–§5 (excluding this appendix's page list) found **819 page tokens covering 106 distinct pages**:
 
 - **68 distinct pages / 671 tokens** match the present list.
@@ -1975,4 +1977,4 @@ No finding now attributes a rule quote to an absent page. Where the source text 
 1. Coverage was not re-measured after the repairs; the 93.66 % / 85.01 % / 91.53 % figures are the pre-verification artifact.
 2. The green suite includes tests rewritten in phase D; every audited value was re-derived from the KB text, but the dead-but-present PSR triggers (M-23/M-24/M-25) remain a gap a future test could mask.
 3. H-01 (movement heat) is a top-tier blocker still absent from play and is the main rules-visible gap left by this run.
-4. Jump-fall damage levels: `GameEngine._handleMove` charges the start-to-end level drop for an ordinary missed-PSR fall, including jumps. p56 reads that falls are 0-level unless the 'Mech is displaced downwards 2+ levels and explicitly includes 'Mechs that fall due to jumping, so a 35 t Jenner failing its landing PSR after jumping Level 2 to Level 0 should take 4 damage (0 levels), while the code gives 12 (2 levels). The one-level-drop test added in this run rests on p57, whose body is absent from the KB, so this needs a manual check before either value is treated as settled. Logged by review round 2, not fixed.
+4. Jump-fall damage levels: **resolved** by the PDF gap-fill. p56 reads "Unless stated otherwise, 'Mech falls are 0-level falls; this includes 'Mechs that fall due to jumping", with levels counted only for a displacement of two or more levels (p55). The engine was charging the start-to-end level drop for every failed movement PSR, including jumps. Fixed: `GameEngine._handleMove` now always resolves a failed movement PSR as a 0-level fall, and `applyFall` defaults to 0 levels; the one-level test was corrected to the p56 value (100 t = 10 damage), and the 0-level jump case is covered by the same rule.

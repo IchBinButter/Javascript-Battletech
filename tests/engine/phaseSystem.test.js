@@ -1527,12 +1527,12 @@ describe('GameEngine: Fall resolution (p56/p58)', () => {
     });
   });
 
-  it('a fall down one level takes damage x (1 + 1) (p57/p143)', () => {
+  it('a fall while moving into a lower hex is still a 0-level fall (p56)', () => {
     const { engine, atlas } = createTwoMechEngine();
     atlas.gyro.hits = 1; // run with a damaged gyro forces the PSR
     // Movement PSR 2 (fails), warrior PSR 2 (fails), Consciousness Roll 7
-    // (passes), then four hit-location rolls of 7 (centre torso).
-    engine.diceRoller = makeFallRoller({ facingRoll: 1, twoD6: [2, 2, 7, 7, 7, 7] });
+    // (passes), then hit-location rolls of 7 (centre torso).
+    engine.diceRoller = makeFallRoller({ facingRoll: 1, twoD6: [2, 2, 7, 7] });
     engine.phaseManager.enterPhase('movement');
     engine.phaseManager.clearQueue();
     engine.stateManager.getState().currentPlayer = 0;
@@ -1548,8 +1548,11 @@ describe('GameEngine: Fall resolution (p56/p58)', () => {
     expect(result.success).toBe(true);
     expect(atlas.prone).toBe(true);
     expect(atlas.pilot.hits).toBe(1);
-    // 100 tons, one level: 10 x (1 + 1) = 20 damage in four 5-point groupings.
-    expect(atlas.getArmor('centerTorso')).toBe(47 - 20);
+    // p56: "Mech falls are 0-level falls ... this includes Mechs that fall due
+    // to jumping". A failed movement PSR is 0 levels even when the hex it lands
+    // in is lower; only displacement of 2+ levels changes the count.
+    // 100 tons, 0 levels: 10 x (0 + 1) = 10 damage in two 5-point groupings.
+    expect(atlas.getArmor('centerTorso')).toBe(47 - 10);
     expect(atlas.getArmor('centerTorso', true)).toBe(14);
   });
 

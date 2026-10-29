@@ -171,7 +171,7 @@ export class GameEngine {
    *   modifiers carry over to the warrior's roll.
    * @returns {object} the PSRCalculator fall result, with `damageResults`
    */
-  applyFall(unit, { levelsFallen = 1, causeTriggers = [], fallDirection = null } = {}) {
+  applyFall(unit, { levelsFallen = 0, causeTriggers = [], fallDirection = null } = {}) {
     const pilotHitsBefore = unit.pilot ? (unit.pilot.hits || 0) : 0;
     const direction = Number.isFinite(fallDirection)
       ? fallDirection
@@ -462,22 +462,12 @@ export class GameEngine {
       if (psrTriggers.length > 0) {
         const psrResult = this.psrCalc.makePSR(unit, this.diceRoller, psrTriggers);
         if (!psrResult.passed) {
-          // p57/p143: falling damage is ceil(tonnage / 10) x (levels fallen + 1).
-          // A fall on level ground therefore falls 0 levels (not 1); only a
-          // drop to a lower hex counts.
-          let levelsFallen = 0;
-          if (effectivePath.length > 1) {
-            const startHex = state.map.hexes.get(effectivePath[0]);
-            const endHex = state.map.hexes.get(effectivePath[effectivePath.length - 1]);
-            if (startHex && endHex) {
-              const totalDrop = startHex.level - endHex.level;
-              if (totalDrop > 0) levelsFallen = totalDrop;
-            }
-          }
-          // p56/p58: a failed PSR makes the Mech fall - the fall damages the
-          // Mech (in 5-point groupings) and injures the warrior. The triggers
-          // that caused the fall carry over to the warrior's own PSR.
-          this.applyFall(unit, { levelsFallen, causeTriggers: psrTriggers });
+          // p56: "Unless stated otherwise, 'Mech falls are 0-level falls; this
+          // includes 'Mechs that fall due to jumping." Only a displacement
+          // downwards two or more levels (p55) changes the number of levels
+          // fallen; displacement is not modelled on a normal move, so a failed
+          // movement PSR is always a 0-level fall regardless of the drop.
+          this.applyFall(unit, { levelsFallen: 0, causeTriggers: psrTriggers });
         }
       }
     });
