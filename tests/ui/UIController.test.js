@@ -244,129 +244,18 @@ describe('UIController', () => {
     });
   });
 
-  describe('heat bar rendering (classic view)', () => {
-    beforeEach(() => {
-      // The legacy health-bar list is still available behind the view control.
-      ui.setUnitView('classic');
-    });
-
-    it('renders heat bar with inactive segments at zero heat', () => {
-      atlas.heat = 0;
-      ui.updateUnitPanel(atlas);
-
-      const heatBar = ui.unitDetails.querySelector('.heat-bar');
-      expect(heatBar).not.toBeNull();
-      const segments = heatBar.querySelectorAll('.heat-segment');
-      expect(segments.length).toBe(15);
-
-      const inactiveSegments = heatBar.querySelectorAll('.heat-segment.inactive');
-      expect(inactiveSegments.length).toBe(15);
-    });
-
-    it('shows safe segments for low heat', () => {
-      atlas.heat = 3;
-      ui.updateUnitPanel(atlas);
-
-      const safeSegs = ui.unitDetails.querySelectorAll('.heat-segment.safe');
-      expect(safeSegs.length).toBeGreaterThan(0);
-    });
-
-    it('shows warn segments for moderate heat', () => {
-      atlas.heat = 8;
-      ui.updateUnitPanel(atlas);
-
-      const warnSegs = ui.unitDetails.querySelectorAll('.heat-segment.warn');
-      expect(warnSegs.length).toBeGreaterThan(0);
-    });
-
-    it('shows danger segments for high heat', () => {
-      atlas.heat = 13;
-      ui.updateUnitPanel(atlas);
-
-      const dangerSegs = ui.unitDetails.querySelectorAll('.heat-segment.danger');
-      expect(dangerSegs.length).toBeGreaterThan(0);
-    });
-
-    it('shows critical segments for very high heat', () => {
-      atlas.heat = 20;
-      ui.updateUnitPanel(atlas);
-
-      const critSegs = ui.unitDetails.querySelectorAll('.heat-segment.critical');
-      expect(critSegs.length).toBeGreaterThan(0);
-    });
-
-    it('shows heat effects text', () => {
-      atlas.heat = 12;
-      ui.updateUnitPanel(atlas);
-
-      expect(ui.unitDetails.innerHTML).toContain('-2 Walk MP');
-    });
-
-    it('shows shutdown warning at high heat', () => {
-      atlas.heat = 26;
-      ui.updateUnitPanel(atlas);
-
-      expect(ui.unitDetails.innerHTML).toContain('Shutdown check: avoid on 10+');
-    });
-  });
-
-  describe('armor bar rendering (classic view)', () => {
-    beforeEach(() => {
-      ui.setUnitView('classic');
-    });
-
-    it('uses getMaxArmor from the unit for each location', () => {
-      const maxArmorSpy = vi.spyOn(atlas, 'getMaxArmor');
-      ui.updateUnitPanel(atlas);
-      expect(maxArmorSpy).toHaveBeenCalled();
-    });
-
-    it('renders armor bars with percentage widths', () => {
-      atlas.armor.head.front = 5;
-      ui.updateUnitPanel(atlas);
-
-      const armorBars = ui.unitDetails.querySelectorAll('.armor-bar');
-      expect(armorBars.length).toBe(8);
-
-      // head armor: 5 / 9 = 55.55% → width:55.56%
-      const headBar = armorBars[0];
-      const width = parseFloat(headBar.style.width);
-      expect(width).toBeGreaterThan(50);
-      expect(width).toBeLessThan(60);
-    });
-
-    it('marks destroyed locations', () => {
-      atlas.internalStructure.head = 0;
-      ui.updateUnitPanel(atlas);
-
-      expect(ui.unitDetails.innerHTML).toContain('DESTROYED');
-    });
-
-    it('shows zero width for zero max armor', () => {
-      // Simulate missing location
-      const original = atlas.getMaxArmor;
-      atlas.getMaxArmor = (loc) => loc === 'head' ? 0 : original.call(atlas, loc);
-      ui.updateUnitPanel(atlas);
-
-      const armorBars = ui.unitDetails.querySelectorAll('.armor-bar');
-      expect(parseFloat(armorBars[0].style.width)).toBe(0);
-
-      atlas.getMaxArmor = original;
-    });
-  });
-
   describe('unit panel rendering', () => {
     it('shows active indicator for current player unit', () => {
       ui.updateUnitPanel(atlas);
 
-      expect(ui.unitDetails.innerHTML).toContain('[ACTIVE]');
+      expect(ui.unitDetails.querySelector('.record-unit-active')).not.toBeNull();
     });
 
     it('does not show active for opponent unit', () => {
       engine.stateManager.getState().currentPlayer = 1; // Player 2 is active
       ui.updateUnitPanel(atlas); // atlas belongs to player 0
 
-      expect(ui.unitDetails.innerHTML).not.toContain('[ACTIVE]');
+      expect(ui.unitDetails.querySelector('.record-unit-active')).toBeNull();
     });
 
     it('shows placeholder text when unit is null', () => {
@@ -389,10 +278,9 @@ describe('UIController', () => {
       'leftArm', 'rightArm', 'leftLeg', 'rightLeg'
     ];
 
-    it('renders the record card instead of the health bars by default', () => {
+    it('renders the record card (the only inline presentation)', () => {
       ui.updateUnitPanel(atlas);
 
-      expect(ui.unitView).toBe('record');
       expect(ui.unitDetails.querySelector('.record-card')).not.toBeNull();
       expect(ui.unitDetails.querySelector('.record-armor')).not.toBeNull();
       expect(ui.unitDetails.querySelector('.record-internal')).not.toBeNull();
@@ -417,15 +305,25 @@ describe('UIController', () => {
       }
     });
 
-    it('shows the A/I text, movement, engine and pilot info', () => {
+    it('shows a compact tactical header without duplicated stats', () => {
       ui.updateUnitPanel(atlas);
 
-      const text = ui.unitDetails.textContent;
-      expect(text).toContain('A:9/9 I:3/3'); // head
-      expect(text).toContain('MP: 3/3(5)');
-      expect(text).toContain('Pilot: G4/P5');
-      expect(text).toContain('Engine: standard');
-      expect(text).toContain('Heat Sinks: 20');
+      const header = ui.unitDetails.querySelector('.record-unit-header');
+      expect(header).not.toBeNull();
+      const text = header.textContent;
+      expect(text).toContain('Atlas AS7-D');
+      expect(text).toContain('(100t)');
+      expect(text).toContain('MP 3/3(5)');
+      expect(text).toContain('Facing 3');
+
+      // Heat, pilot, sinks and engine each own a record block; BV/Role/Tech
+      // Base/Rules Level are not tactical and are gone from the map UI.
+      expect(text).not.toContain('Heat:');
+      expect(text).not.toContain('Pilot:');
+      expect(text).not.toContain('Heat Sinks:');
+      expect(text).not.toContain('BV:');
+      expect(text).not.toContain('Role:');
+      expect(ui.unitDetails.querySelector('.record-ai')).toBeNull();
     });
 
     it('always shows the rear torso armour strip', () => {
@@ -441,22 +339,13 @@ describe('UIController', () => {
         .toBe(atlas.getMaxArmor('centerTorso', true));
     });
 
-    it('keeps the classic bars available and remembers the choice', () => {
+    it('has no classic health-bar option left', () => {
       ui.updateUnitPanel(atlas);
+
+      expect(document.getElementById('btn-view-classic')).toBeNull();
+      expect(document.getElementById('btn-view-record')).toBeNull();
       expect(ui.unitDetails.querySelector('.armor-bar')).toBeNull();
-
-      ui.setUnitView('classic');
-      expect(ui.unitDetails.querySelectorAll('.armor-bar')).toHaveLength(8);
-      expect(ui.unitDetails.querySelector('.heat-bar')).not.toBeNull();
-      expect(ui.unitDetails.querySelector('.record-card')).toBeNull();
-
-      // The choice survives a re-render and a selection change for the session.
-      ui.updateUnitPanel(atlas);
-      expect(ui.unitView).toBe('classic');
-      expect(ui.unitDetails.querySelectorAll('.armor-bar')).toHaveLength(8);
-
-      ui.setUnitView('record');
-      expect(ui.unitDetails.querySelector('.record-card')).not.toBeNull();
+      expect(ui.unitDetails.querySelector('.heat-bar')).toBeNull();
     });
 
     it('marks a destroyed location in the record card', () => {
@@ -490,7 +379,7 @@ describe('UIController', () => {
 
       engine.eventBus.emit('unitMoved', { unitId: 'atlas-0', hexKey: '6,7', facing: 3 });
 
-      expect(ui.unitDetails.innerHTML).toContain('MP: 1/3');
+      expect(ui.unitDetails.innerHTML).toContain('MP 1/3');
       atlas.heat = 0;
     });
   });

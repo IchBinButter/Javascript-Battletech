@@ -23,9 +23,7 @@ export const RECORD_DOM = `
   </div>
   <div id="unit-panel">
     <h3>Unit Info</h3>
-    <div id="unit-view-controls" data-view="record">
-      <button type="button" id="btn-view-record" class="active" aria-pressed="true">Record card</button>
-      <button type="button" id="btn-view-classic" aria-pressed="false">Classic bars</button>
+    <div id="unit-view-controls">
       <button type="button" id="btn-record-sheet" disabled>Record Sheet</button>
     </div>
     <div id="unit-details"><p>Select a unit to view details</p></div>

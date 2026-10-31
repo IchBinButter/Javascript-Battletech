@@ -3,7 +3,6 @@
  * Handles unit panel, action buttons, dice log, and phase display.
  */
 
-import { describeHeatEffects } from '../rules/heat/HeatScale.js';
 import { projectStateForPlayer } from '../engine/visibility.js';
 import { weaponInstanceKey, weaponModelKey } from '../engine/GameEngine.js';
 import { weaponMountAt, weaponMountFor } from '../rules/combat/WeaponMounts.js';
@@ -13,8 +12,7 @@ import { hexDistance } from '../hex/HexMath.js';
 import { RecordCard, RecordSheet } from './record/index.js';
 import {
   movementValues,
-  currentMP as unitCurrentMP,
-  heatSinkInfo
+  currentMP as unitCurrentMP
 } from './record/unitValues.js';
 
 export class UIController {
@@ -39,16 +37,11 @@ export class UIController {
     this.diceLog = document.getElementById('dice-log');
     this.mpDisplay = document.getElementById('mp-display');
 
-    // Record-sheet views. The chosen presentation lives in memory for the
-    // session only (no localStorage): 'record' is the new card, 'classic' keeps
-    // the old health-bar list available for comparison.
-    this.unitView = 'record';
+    // Record-sheet card is the only unit presentation; the overlay adds the
+    // full printed sheet on demand.
     this.recordOverlayOpen = false;
     this._selectedUnit = null;
     this._recordKeyHandler = null;
-    this.unitViewControls = document.getElementById('unit-view-controls');
-    this.btnViewRecord = document.getElementById('btn-view-record');
-    this.btnViewClassic = document.getElementById('btn-view-classic');
     this.btnRecordSheet = document.getElementById('btn-record-sheet');
     this.recordOverlay = document.getElementById('record-overlay');
     this.recordSheetBody = document.getElementById('record-sheet-body');
@@ -684,44 +677,10 @@ export class UIController {
     return null;
   }
 
-  _renderHeatBar(unit) {
-    const scale = 30;
-    const segments = 15;
-    const heatPerSegment = scale / segments;
-
-    let html = '<div class="heat-bar">';
-    for (let i = 0; i < segments; i++) {
-      const segStart = i * heatPerSegment;
-      let cls = 'inactive';
-      if (unit.heat > segStart) {
-        if (segStart < 5) cls = 'safe';
-        else if (segStart < 10) cls = 'warn';
-        else if (segStart < 15) cls = 'danger';
-        else cls = 'critical';
-      }
-      html += `<div class="heat-segment ${cls}" title="Heat ${Math.round(segStart)}-${Math.round(segStart + heatPerSegment)}"></div>`;
-    }
-    html += '</div>';
-    return html;
-  }
-
-  _getHeatEffects(unit) {
-    const effects = describeHeatEffects(unit.heat);
-    return effects.length ? ` (${effects.join(', ')})` : '';
-  }
-
   /**
-   * Render the unit panel.
-   *
-   * Two presentations share the same header (name, player, heat, MP, pilot,
-   * engine/gyro) and differ below it:
-   *
-   *  - 'record' (default): the record-sheet card - humanoid armour and
-   *    internal-structure diagrams, compact weapons inventory, heat scale,
-   *    MechWarrior block, and the old A/I text;
-   *  - 'classic': the previous health-bar list, kept for comparison.
-   *
-   * The choice is memory-only and survives selection changes for the session.
+   * Render the unit panel: compact tactical header plus the record card
+   * (armour/internal diagrams, weapons, heat, warrior data). The full printed
+   * sheet is available as an overlay from the header control.
    */
   updateUnitPanel(unit) {
     if (!unit) {
@@ -755,16 +714,20 @@ export class UIController {
 
     if (this.unitDetails) {
       this.unitDetails.innerHTML = this._renderUnitHeader(unit);
-      if (this.unitView === 'classic') {
-        this.unitDetails.insertAdjacentHTML('beforeend', this._renderClassicBody(unit));
-      } else {
-        this.unitDetails.appendChild(RecordCard(unit, this._recordOptions(unit)));
-      }
+      this.unitDetails.appendChild(RecordCard(unit, this._recordOptions(unit)));
     }
 
     this._updateMPDisplay(unit);
     this._syncUnitViewControls();
     if (this.recordOverlayOpen) this._renderRecordOverlay(unit);
+  }
+
+  /**
+   * Reflect the current selection on the record-sheet button. The record card
+   * is the only inline presentation; the overlay is the full printed sheet.
+   */
+  _syncUnitViewControls() {
+    if (this.btnRecordSheet) this.btnRecordSheet.disabled = !this.selectedUnitId;
   }
 
   /**
@@ -786,18 +749,17 @@ export class UIController {
     if (this.weaponFireMode) this._showWeaponPanel();
   }
 
-  /** Header lines shared by both presentations (movement, engine, pilot...). */
+  /**
+   * Compact tactical header: identity, movement, facing and status chips.
+   * Heat, pilot state, weapons and damage each own a record block, so the
+   * header does not duplicate them.
+   */
   _renderUnitHeader(unit) {
     const movement = movementValues(unit);
     const currentMP = unitCurrentMP(unit);
-    const sinks = heatSinkInfo(unit);
-    const pilot = unit.pilot || {};
-    const engine = unit.engine || {};
-    const gyro = unit.gyro || {};
     const facing = unit.position && unit.position.facing !== undefined
       ? unit.position.facing
       : '—';
-    const heat = Number(unit.heat) || 0;
 
     const playerColor = unit.player === 0 ? '#3b82f6' : '#ef4444';
     const playerName = this.gameEngine
@@ -806,91 +768,35 @@ export class UIController {
     const isActive = this.gameEngine
       && this.gameEngine.stateManager.getState().currentPlayer === unit.player;
 
+    const engineHits = Number(unit.engine && unit.engine.hits) || 0;
+    const gyroHits = Number(unit.gyro && unit.gyro.hits) || 0;
+    const chips = [];
+    if (engineHits > 0) {
+      chips.push('<span class="unit-chip" title="Engine hits add heat every turn">Engine ' + engineHits + '</span>');
+    }
+    if (gyroHits > 0) {
+      chips.push('<span class="unit-chip" title="Gyro hits force piloting skill rolls">Gyro ' + gyroHits + '</span>');
+    }
+    if (unit.prone) chips.push('<span class="unit-chip unit-chip-danger">PRONE</span>');
+    if (unit.shutdown) chips.push('<span class="unit-chip unit-chip-danger">SHUTDOWN</span>');
+
     return `
-      <p>
-        <strong>${unit.name}</strong> (${unit.tonnage}t)
-        <span style="color:${playerColor}"> - ${playerName}</span>
-        ${isActive ? ' <span style="color:#4cc9f0">[ACTIVE]</span>' : ''}
-      </p>
-      <div class="record-meta">
-        <span class="record-meta-item" title="not modelled yet">BV: —</span>
-        <span class="record-meta-item" title="not modelled yet">Role: —</span>
-        <span class="record-meta-item" title="not modelled yet">Tech Base: —</span>
-        <span class="record-meta-item" title="not modelled yet">Rules Level: —</span>
-      </div>
-      <p>Heat: ${heat} / ${sinks.dissipation} dissipation${this._getHeatEffects(unit)}</p>
-      ${this.unitView === 'classic' ? this._renderHeatBar(unit) : ''}
-      <p>MP: ${currentMP}/${movement.walk}(${movement.run})</p>
-      <p>Pilot: G${pilot.gunnery ?? '—'}/P${pilot.piloting ?? '—'} | Facing: ${facing}</p>
-      ${unit.prone ? '<p style="color:#ff4444">PRONE</p>' : ''}
-      ${unit.shutdown ? '<p style="color:#ff4444">SHUTDOWN</p>' : ''}
-      <p>Heat Sinks: ${sinks.count} (${sinks.type})</p>
-      <p>Engine: ${engine.type || '—'} (${engine.hits ?? 0}hits) | Gyro: ${gyro.hits ?? 0}hits</p>
+      <section class="record-section record-unit-header">
+        <div class="record-unit-title">
+          <strong>${unit.name}</strong>
+          <span class="record-unit-tonnage">(${unit.tonnage}t)</span>
+          <span class="record-unit-owner" style="color:${playerColor}">● ${playerName}</span>
+          ${isActive ? '<span class="record-unit-active">ACTIVE</span>' : ''}
+        </div>
+        <div class="record-unit-line">
+          <span class="record-unit-mp">MP ${currentMP}/${movement.walk}(${movement.run})</span>
+          <span class="record-unit-facing">Facing ${facing}</span>
+          ${chips.join('')}
+        </div>
+      </section>
     `;
   }
 
-  /** The old health-bar armour list plus the simple weapons list. */
-  _renderClassicBody(unit) {
-    let armorHTML = '<div class="armor-diagram">';
-    const locations = ['head', 'centerTorso', 'leftTorso', 'rightTorso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg'];
-    for (const loc of locations) {
-      const armor = typeof unit.getArmor === 'function' ? unit.getArmor(loc) : 0;
-      const maxArmor = typeof unit.getMaxArmor === 'function' ? unit.getMaxArmor(loc) : 0;
-      const pct = maxArmor > 0 ? Math.min(100, Math.max(0, (armor / maxArmor) * 100)) : 0;
-      const internal = typeof unit.getInternal === 'function' ? unit.getInternal(loc) : 0;
-      const destroyed = typeof unit.isLocationDestroyed === 'function'
-        && unit.isLocationDestroyed(loc) ? ' DESTROYED' : '';
-      armorHTML += `
-        <div class="location">
-          <span>${loc}${destroyed}</span>
-          <span class="bar-bg"><span class="armor-bar" style="width:${pct}%"></span></span>
-          <span>A:${armor}/I:${internal}</span>
-        </div>`;
-    }
-    armorHTML += '</div>';
-
-    const mounted = typeof unit.getAllWeapons === 'function' ? unit.getAllWeapons() : [];
-    const weapons = mounted.map(w => {
-      const wd = this._getWeaponData(w.type);
-      return wd ? `<li>${wd.name} (${w.location})</li>` : `<li>${w.type} (${w.location})</li>`;
-    }).join('');
-
-    return `
-      ${armorHTML}
-      <p>Weapons:</p><ul>${weapons || '<li>None</li>'}</ul>
-    `;
-  }
-
-  /**
-   * Switch the unit panel between the record card and the classic bars.
-   * The choice is kept in memory for the session (no localStorage).
-   * @param {'record'|'classic'} mode
-   */
-  setUnitView(mode) {
-    if (mode !== 'record' && mode !== 'classic') return;
-    this.unitView = mode;
-    const unit = this._selectedUnit || this._lookupSelectedUnit();
-    if (unit) {
-      this.updateUnitPanel(unit);
-    } else {
-      this._syncUnitViewControls();
-    }
-  }
-
-  /** Reflect the current view/selection on the view-control buttons. */
-  _syncUnitViewControls() {
-    const isRecord = this.unitView !== 'classic';
-    if (this.unitViewControls) this.unitViewControls.dataset.view = this.unitView;
-    if (this.btnViewRecord) {
-      this.btnViewRecord.classList.toggle('active', isRecord);
-      this.btnViewRecord.setAttribute('aria-pressed', String(isRecord));
-    }
-    if (this.btnViewClassic) {
-      this.btnViewClassic.classList.toggle('active', !isRecord);
-      this.btnViewClassic.setAttribute('aria-pressed', String(!isRecord));
-    }
-    if (this.btnRecordSheet) this.btnRecordSheet.disabled = !this.selectedUnitId;
-  }
 
   /**
    * Options forwarded to the record components. Weapon eligibility is NOT
@@ -1232,12 +1138,6 @@ export class UIController {
     }
 
     // Record-sheet presentation controls (unit panel, not the overlay).
-    if (this.btnViewRecord) {
-      this.btnViewRecord.addEventListener('click', () => this.setUnitView('record'));
-    }
-    if (this.btnViewClassic) {
-      this.btnViewClassic.addEventListener('click', () => this.setUnitView('classic'));
-    }
     if (this.btnRecordSheet) {
       this.btnRecordSheet.addEventListener('click', () => this.openRecordSheet());
     }

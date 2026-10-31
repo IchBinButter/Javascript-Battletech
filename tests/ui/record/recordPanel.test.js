@@ -1,9 +1,9 @@
 /**
  * @vitest-environment jsdom
  *
- * Both presentations in the running panel: the inline record card in the
- * 320 px sidebar, the classic health bars behind the view control, and the
- * full record-sheet overlay (open/close, Escape, live selection and damage).
+ * The inline record card in the 320 px sidebar and the full record-sheet
+ * overlay (open/close, Escape, live selection and damage). The old classic
+ * health-bar presentation has been removed.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -32,35 +32,21 @@ describe('record card in the unit panel', () => {
     ui.init(engine, createRecordRenderer());
   });
 
-  it('shows the record card by default and the classic bars on demand', () => {
+  it('shows the record card as the only inline presentation', () => {
     ui.updateUnitPanel(atlas);
 
     expect(document.querySelector('#unit-details .record-card')).not.toBeNull();
     expect(document.querySelectorAll('#unit-details .armor-bar')).toHaveLength(0);
-
-    document.getElementById('btn-view-classic').click();
-    expect(ui.unitView).toBe('classic');
-    expect(document.querySelectorAll('#unit-details .armor-bar')).toHaveLength(8);
-    expect(document.querySelector('#unit-details .heat-bar')).not.toBeNull();
-    expect(document.querySelectorAll('#unit-details .record-card')).toHaveLength(0);
-    expect(document.getElementById('btn-view-classic').classList.contains('active')).toBe(true);
-
-    document.getElementById('btn-view-record').click();
-    expect(ui.unitView).toBe('record');
-    expect(document.querySelector('#unit-details .record-card')).not.toBeNull();
-    expect(document.getElementById('btn-view-record').classList.contains('active')).toBe(true);
+    expect(document.getElementById('btn-view-classic')).toBeNull();
+    expect(document.getElementById('btn-view-record')).toBeNull();
   });
 
-  it('remembers the view choice when the selection changes', () => {
-    if (ui.unitView !== 'classic') {
-      document.getElementById('btn-view-classic').click();
-    }
+  it('keeps the card when the selection changes', () => {
     const locust = addUnit(engine, createRecordUnit('locust-lct1v', 0, 'locust-0'));
 
     ui.updateUnitPanel(locust);
 
-    expect(ui.unitView).toBe('classic');
-    expect(document.querySelectorAll('#unit-details .armor-bar')).toHaveLength(8);
+    expect(document.querySelector('#unit-details .record-card')).not.toBeNull();
     expect(document.getElementById('unit-details').textContent).toContain('Locust LCT-1V');
   });
 
@@ -109,15 +95,15 @@ describe('record card in the unit panel', () => {
     expect(css).toMatch(/\.record-sheet-grid\s*\{[^}]*grid-template-columns/);
   });
 
-  it('renders "—" for metadata the roster does not model', () => {
+  it('keeps non-tactical metadata out of the map-mode header', () => {
     ui.updateUnitPanel(atlas);
 
-    const metas = [...document.querySelectorAll('#unit-details .record-meta-item')];
-    expect(metas).toHaveLength(4);
-    for (const meta of metas) {
-      expect(meta.textContent).toContain('—');
-      expect(meta.getAttribute('title')).toBe('not modelled yet');
-    }
+    expect(document.querySelectorAll('#unit-details .record-meta-item')).toHaveLength(0);
+    const text = document.querySelector('#unit-details .record-unit-header').textContent;
+    expect(text).not.toContain('BV:');
+    expect(text).not.toContain('Role:');
+    expect(text).not.toContain('Tech Base:');
+    expect(text).not.toContain('Rules Level:');
   });
 
   it('refreshes the pips when the selected unit is damaged', () => {
