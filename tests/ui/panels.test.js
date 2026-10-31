@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { UIController } from '../../src/ui/UIController.js';
 import { EventBus } from '../../src/engine/EventBus.js';
+import { weaponInstanceKey } from '../../src/engine/GameEngine.js';
 import { Weapon } from '../../src/models/Weapon.js';
 import { createTestEngine, createTestUnit } from '../helpers/testUtils.js';
 import weaponsData from '../../src/data/weapons.json' with { type: 'json' };
@@ -272,14 +273,53 @@ describe('UIController weapon eligibility', () => {
     expect(row.querySelector('.weapon-check').disabled).toBe(false);
   });
 
-  it('disables a weapon whose critical slots are all destroyed', () => {
+  it('disables only the fired instance of two identical weapons', () => {
+    // p24 counts weapons, not weapon models: the Atlas has two medium lasers
+    // in one arm and firing one must leave the other selectable.
+    const weapons = [
+      { type: 'med_laser', location: 'rightArm' },
+      { type: 'med_laser', location: 'rightArm' }
+    ];
+    const unit = createUnit({ weapons });
+    unit.firedWeaponsThisTurn = new Set(['med_laser@rightArm#0']);
+    unit.firedWeaponsTurn = state.turn;
+    addUnit(state, unit);
+
+    openWeaponPanel(ui, unit.id);
+
+    const rows = weaponRows();
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => row.querySelector('.weapon-check').disabled)).toEqual([true, false]);
+    expect(rows[0].querySelector('.weapon-reason').textContent).toBe('already fired');
+    expect(rows[1].querySelector('.weapon-reason')).toBeNull();
+
+    // The old model-level record (a save from before per-instance identity)
+    // still counts for every identical mount.
+    unit.firedWeaponsThisTurn = new Set(['med_laser@rightArm']);
+    openWeaponPanel(ui, unit.id);
+    expect(weaponRows().map(row => row.querySelector('.weapon-check').disabled))
+      .toEqual([true, true]);
+  });
+
+  it('records each weapon instance index on its picker row', () => {
+    const unit = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    unit.position = { hexKey: '5,7', facing: 3 };
+    addUnit(state, unit);
+
+    openWeaponPanel(ui, unit.id);
+
+    const indices = [...document.querySelectorAll('.weapon-check')]
+      .map(check => Number(check.dataset.weaponIndex));
+    expect(indices).toEqual(unit.getAllWeapons().map((weapon, weaponIndex) => weaponIndex));
+  });
+
+  it('disables a weapon whose own critical slot is destroyed', () => {
     const unit = createUnit({
       weapons: [{ type: 'med_laser', location: 'rightArm' }],
       criticalSlots: {
         rightArm: [
           { slot: 1, item: 'shoulder', status: 'ok' },
-          { slot: 5, item: 'med_laser', status: 'destroyed' },
-          { slot: 6, item: 'med_laser', status: 'destroyed' }
+          { slot: 5, item: 'med_laser', status: 'destroyed' }
         ]
       }
     });
@@ -291,10 +331,100 @@ describe('UIController weapon eligibility', () => {
     expect(row.querySelector('.weapon-check').disabled).toBe(true);
     expect(row.querySelector('.weapon-reason').textContent).toBe('destroyed');
 
-    // One surviving slot and the weapon is still mounted.
+    // An intact record sheet (the mount is not damaged) offers the weapon.
     unit.criticalSlots.rightArm[1].status = 'ok';
     openWeaponPanel(ui, unit.id);
     expect(weaponRow('med_laser', 'rightArm').querySelector('.weapon-check').disabled).toBe(false);
+  });
+
+  it('disables only the identical mount whose slot is destroyed (Atlas)', () => {
+    // The Atlas has two medium lasers in the right arm. Losing slot 6 kills the
+    // second mount only, so one row stays selectable.
+    const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    atlas.position = { hexKey: '5,7', facing: 3 };
+    atlas.criticalSlots.rightArm
+      .find(slot => slot.item === 'med_laser' && slot.slot === 6).status = 'destroyed';
+    addUnit(state, atlas);
+
+    openWeaponPanel(ui, atlas.id);
+
+    const rows = weaponRows().filter(row => row.querySelector('.weapon-check').dataset.type === 'med_laser');
+    expect(rows).toHaveLength(2);
+    expect(rows.map(row => row.querySelector('.weapon-check').disabled)).toEqual([false, true]);
+    expect(rows[0].querySelector('.weapon-reason')).toBeNull();
+    expect(rows[1].querySelector('.weapon-reason').textContent).toBe('destroyed');
+  });
+
+  it('disables a multi-slot weapon when one of its slots is destroyed (Atlas AC/20)', () => {
+    const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    atlas.position = { hexKey: '5,7', facing: 3 };
+    // One of the AC/20's ten right-torso slots: the whole item is disabled (p46).
+    atlas.criticalSlots.rightTorso
+      .find(slot => slot.item === 'ac20' && slot.slot === 2).status = 'destroyed';
+    addUnit(state, atlas);
+
+    openWeaponPanel(ui, atlas.id);
+
+    const ac20 = weaponRow('ac20', 'rightTorso');
+    expect(ac20.querySelector('.weapon-check').disabled).toBe(true);
+    expect(ac20.querySelector('.weapon-reason').textContent).toBe('destroyed');
+
+    // The SRM-6 and LRM-20 in the left torso are separate components.
+    expect(weaponRow('srm6', 'leftTorso').querySelector('.weapon-check').disabled).toBe(false);
+    expect(weaponRow('lrm20', 'leftTorso').querySelector('.weapon-check').disabled).toBe(false);
+  });
+
+  it('disables a weapon whose multi-slot component is entirely gone', () => {
+    const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    atlas.position = { hexKey: '5,7', facing: 3 };
+    for (const slot of atlas.criticalSlots.leftTorso) {
+      if (slot.item === 'lrm20') slot.status = 'destroyed';
+    }
+    addUnit(state, atlas);
+
+    openWeaponPanel(ui, atlas.id);
+
+    expect(weaponRow('lrm20', 'leftTorso').querySelector('.weapon-check').disabled).toBe(true);
+    expect(weaponRow('lrm20', 'leftTorso').querySelector('.weapon-reason').textContent).toBe('destroyed');
+    // The SRM-6 shares the location but not the component.
+    expect(weaponRow('srm6', 'leftTorso').querySelector('.weapon-check').disabled).toBe(false);
+  });
+
+  it('leaves three arm lasers with two rows after one is destroyed (Thunderbolt)', () => {
+    const thunderbolt = createTestUnit('thunderbolt-tdr5s', 0, 'thunderbolt-0');
+    thunderbolt.position = { hexKey: '6,7', facing: 3 };
+    thunderbolt.criticalSlots.rightArm
+      .find(slot => slot.item === 'med_laser' && slot.slot === 6).status = 'destroyed';
+    addUnit(state, thunderbolt);
+
+    openWeaponPanel(ui, thunderbolt.id);
+
+    const rows = weaponRows().filter(row => row.querySelector('.weapon-check').dataset.type === 'med_laser');
+    expect(rows).toHaveLength(3);
+    expect(rows.map(row => row.querySelector('.weapon-check').disabled)).toEqual([false, true, false]);
+  });
+
+  it('splits six PPC slots so one destroyed slot disables one row (Awesome)', () => {
+    const awesome = createTestUnit('awesome-aws8q', 0, 'awesome-0');
+    awesome.position = { hexKey: '7,7', facing: 3 };
+    // Slot 7 is inside the second right-torso PPC's chunk (6-8).
+    awesome.criticalSlots.rightTorso
+      .find(slot => slot.item === 'ppc' && slot.slot === 7).status = 'destroyed';
+    addUnit(state, awesome);
+
+    openWeaponPanel(ui, awesome.id);
+
+    const torsoPpcs = weaponRows()
+      .filter(row => row.querySelector('.weapon-check').dataset.type === 'ppc')
+      .filter(row => row.querySelector('.weapon-check').dataset.location === 'rightTorso');
+    expect(torsoPpcs).toHaveLength(2);
+    expect(torsoPpcs.map(row => row.querySelector('.weapon-check').disabled)).toEqual([false, true]);
+    // The arm PPC is its own component.
+    const armPpc = weaponRows()
+      .filter(row => row.querySelector('.weapon-check').dataset.type === 'ppc')
+      .filter(row => row.querySelector('.weapon-check').dataset.location === 'rightArm');
+    expect(armPpc).toHaveLength(1);
+    expect(armPpc[0].querySelector('.weapon-check').disabled).toBe(false);
   });
 
   it('disables a weapon that cannot bear on the pending target', () => {
@@ -517,6 +647,119 @@ describe('UIController batched weapon fire', () => {
       ['lrm20', 'leftTorso']
     ]);
     expect(action.shots[0].ammoBin).toBe('ac20_ammo');
+  });
+
+  it('sends the mounted instance index for every checked weapon', () => {
+    const { unit } = armTwoWeaponDeclaration();
+
+    // The Atlas has two medium lasers in the right arm. Both rows must be
+    // selectable and each shot must name its own mount (p24 keys the fired
+    // record by instance, not by weapon model).
+    const laserChecks = [...document.querySelectorAll('.weapon-check')]
+      .filter(check => check.dataset.type === 'med_laser');
+    expect(laserChecks).toHaveLength(2);
+    expect(laserChecks.map(check => check.dataset.location)).toEqual(['rightArm', 'rightArm']);
+    expect(laserChecks.map(check => check.disabled)).toEqual([false, false]);
+    laserChecks.forEach(check => { check.checked = true; });
+
+    const processAction = vi.fn(() => ({
+      success: true,
+      fired: 2,
+      rejected: 0,
+      shots: [{ success: true, weaponIndex: 1 }, { success: true, weaponIndex: 2 }]
+    }));
+    engine.processAction = processAction;
+
+    document.getElementById('btn-fire').click();
+
+    expect(processAction).toHaveBeenCalledTimes(1);
+    const [, action] = processAction.mock.calls[0];
+    expect(action.type).toBe('fireWeapons');
+    expect(action.shots).toHaveLength(2);
+    expect(action.shots.map(shot => shot.weapon.id)).toEqual(['med_laser', 'med_laser']);
+    expect(action.shots.map(shot => shot.weaponIndex)).toEqual([1, 2]);
+  });
+
+  /**
+   * A real engine and UI for an Atlas-vs-Atlas duel 6 hexes due south, mid
+   * Weapon Attack Phase with the Atlas holding the declaration slot. Returns
+   * the live unit, which is what the engine mutates.
+   */
+  function realAtlasFireSetup() {
+    const atlas = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    atlas.position = { hexKey: '5,7', facing: 3 };
+    const target = createTestUnit('atlas-as7d', 1, 'target-1');
+    target.position = { hexKey: '5,13', facing: 0 };
+
+    const realEngine = createTestEngine({
+      units: { 'atlas-0': atlas, 'target-1': target },
+      enforceWeaponDeclarations: true
+    });
+    realEngine._weaponsData = weaponsLookup;
+    // Player 1 wins initiative, so player 0's Atlas declares first (p10).
+    realEngine.stateManager.getState().initiativeWinner = 1;
+    realEngine.phaseManager.enterPhase('weapon_attack');
+
+    const realUi = new UIController();
+    realUi.init(realEngine, renderer());
+    realUi.weaponFireMode = true;
+    realUi.selectedUnitId = atlas.id;
+    realUi._pendingTarget = target.id;
+    realUi._showWeaponPanel();
+    return { atlas, target, realEngine, realUi };
+  }
+
+  /**
+   * The live-play bug this fixes: an Atlas with two medium lasers in its right
+   * arm fired one, and the second was refused with "Weapon med_laser has
+   * already fired this turn". Run the whole click path against a real engine
+   * and declaration queue.
+   */
+  it('fires two identical weapons from one Fire Selected click', () => {
+    const { atlas } = realAtlasFireSetup();
+
+    const laserChecks = [...document.querySelectorAll('.weapon-check')]
+      .filter(check => check.dataset.type === 'med_laser');
+    expect(laserChecks).toHaveLength(2);
+    expect(laserChecks.every(check => !check.disabled)).toBe(true);
+    laserChecks.forEach(check => { check.checked = true; });
+
+    document.getElementById('btn-fire').click();
+
+    // Both mounts fired: two heat additions, two recorded instances, no
+    // "already fired" rejection on screen.
+    expect(atlas.heat).toBe(6);
+    expect([...atlas.firedWeaponsThisTurn].sort())
+      .toEqual(['med_laser@rightArm#1', 'med_laser@rightArm#2']);
+    expect(document.getElementById('dice-log').textContent).not.toContain('already fired');
+  });
+
+  /**
+   * T5-1 live path: one critical hit destroys one of the two right-arm lasers.
+   * The picker must disable exactly that row and Fire must resolve one shot,
+   * not two (the pre-fix engine fired both).
+   */
+  it('fires only the intact mount from one Fire Selected click after a crit', () => {
+    const { atlas, realUi } = realAtlasFireSetup();
+    // Record-sheet slot 6 is the second right-arm laser.
+    atlas.criticalSlots.rightArm
+      .find(slot => slot.item === 'med_laser' && slot.slot === 6).status = 'destroyed';
+    realUi._showWeaponPanel();
+
+    const laserChecks = [...document.querySelectorAll('.weapon-check')]
+      .filter(check => check.dataset.type === 'med_laser');
+    expect(laserChecks).toHaveLength(2);
+    expect(laserChecks.map(check => check.disabled)).toEqual([false, true]);
+    expect(laserChecks[1].closest('label').querySelector('.weapon-reason').textContent)
+      .toBe('destroyed');
+
+    // Only the surviving mount is selectable.
+    laserChecks[0].checked = true;
+    document.getElementById('btn-fire').click();
+
+    expect(atlas.heat).toBe(3);
+    expect([...atlas.firedWeaponsThisTurn]).toEqual(['med_laser@rightArm#1']);
+    expect(document.getElementById('dice-log').textContent).not.toContain('already fired');
   });
 
   it('logs a per-shot rejection without hiding the shots that resolved', () => {
@@ -746,9 +989,22 @@ describe('UIController / engine weapon-declaration parity', () => {
     atlas.position = { hexKey: '5,7', facing: 3 };
     const locust = createTestUnit('locust-lct1v', 0, 'locust-0');
     locust.position = { hexKey: '6,7', facing: 3 };
+    // Non-Atlas chassis with duplicate and multi-slot mounts in one location.
+    const thunderbolt = createTestUnit('thunderbolt-tdr5s', 0, 'thunderbolt-0');
+    thunderbolt.position = { hexKey: '7,7', facing: 3 };
+    const jenner = createTestUnit('jenner-jr7d', 0, 'jenner-0');
+    jenner.position = { hexKey: '8,7', facing: 3 };
+    const awesome = createTestUnit('awesome-aws8q', 0, 'awesome-0');
+    awesome.position = { hexKey: '9,7', facing: 3 };
 
     engine = createTestEngine({
-      units: { 'atlas-0': atlas, 'locust-0': locust },
+      units: {
+        'atlas-0': atlas,
+        'locust-0': locust,
+        'thunderbolt-0': thunderbolt,
+        'jenner-0': jenner,
+        'awesome-0': awesome
+      },
       enforceWeaponDeclarations: true
     });
     engine._weaponsData = weaponsLookup;
@@ -764,18 +1020,24 @@ describe('UIController / engine weapon-declaration parity', () => {
   /** Assert the picker and the engine agree for every mounted weapon. */
   function expectDeclarationParity(units) {
     for (const unit of units) {
+      const mountedWeapons = (unit.equipment && unit.equipment.weapons) || [];
       for (const mounted of unit.getAllWeapons()) {
         const weaponDef = weaponsLookup[mounted.type];
-        const picker = ui._getWeaponEligibility(unit, mounted, weaponDef, state);
+        // Ask the engine about the SAME mounted instance: without the index the
+        // engine allocates the first unfired instance of that model, which is
+        // not what an individual picker row is about.
+        const weaponIndex = mountedWeapons.indexOf(mounted);
+        const picker = ui._getWeaponEligibility(unit, mounted, weaponDef, state, weaponIndex);
         const engineDecision = engine._validateWeaponDeclaration(unit, {
           weapon: weaponDef,
           weaponLocation: mounted.location,
+          ...(weaponIndex >= 0 ? { weaponIndex } : {}),
           ammoBin: mounted.ammoBin || null
         }, state);
 
         expect(
           picker.eligible,
-          `${unit.id} ${mounted.type}@${mounted.location}: picker=${picker.reason || 'eligible'} engine=${engineDecision.error || 'eligible'}`
+          `${unit.id} ${mounted.type}@${mounted.location}#${weaponIndex}: picker=${picker.reason || 'eligible'} engine=${engineDecision.error || 'eligible'}`
         ).toBe(engineDecision.ok);
       }
     }
@@ -815,11 +1077,127 @@ describe('UIController / engine weapon-declaration parity', () => {
     expectDeclarationParity([atlas]);
   });
 
+  it('matches the engine per mounted instance, not per weapon model', () => {
+    const atlas = state.getUnit('atlas-0');
+    const lasers = atlas.equipment.weapons
+      .map((weapon, weaponIndex) => ({ weapon, weaponIndex }))
+      .filter(entry => entry.weapon.type === 'med_laser');
+    expect(lasers.map(entry => entry.weaponIndex)).toEqual([1, 2]);
+
+    // Only the first right-arm medium laser has fired (p24 is per WEAPON).
+    atlas.firedWeaponsThisTurn = new Set([
+      weaponInstanceKey('med_laser', 'rightArm', lasers[0].weaponIndex)
+    ]);
+    atlas.firedWeaponsTurn = state.turn;
+
+    expectDeclarationParity([atlas]);
+
+    // The picker really did split the pair: exactly the unfired one is offered.
+    ui.selectedUnitId = atlas.id;
+    ui._pendingTarget = null;
+    ui._showWeaponPanel();
+    const laserChecks = [...document.querySelectorAll('.weapon-check')]
+      .filter(check => check.dataset.type === 'med_laser');
+    expect(laserChecks.map(check => check.disabled)).toEqual([true, false]);
+  });
+
+  it('matches the engine when a pre-instance model key is recorded', () => {
+    const atlas = state.getUnit('atlas-0');
+    // A record written before per-instance identity: the conservative reading
+    // is that the model in that location has fired, for every instance of it.
+    atlas.firedWeaponsThisTurn = new Set(['med_laser@rightArm']);
+    atlas.firedWeaponsTurn = state.turn;
+
+    expectDeclarationParity([atlas]);
+  });
+
   it('matches the engine when a mounted weapon names a bin that does not feed it', () => {
     const atlas = state.getUnit('atlas-0');
     const ac20 = atlas.equipment.weapons.find(weapon => weapon.type === 'ac20');
     ac20.ammoBin = 'srm6_ammo'; // a real bin, but for the SRM racks
 
     expectDeclarationParity([atlas]);
+  });
+
+  it('matches the engine when one of two identical mounts is destroyed', () => {
+    const atlas = state.getUnit('atlas-0');
+    // Slot 6 is the second right-arm medium laser: only that mount dies.
+    atlas.criticalSlots.rightArm
+      .find(slot => slot.item === 'med_laser' && slot.slot === 6).status = 'destroyed';
+
+    expectDeclarationParity([atlas]);
+
+    // The picker offers exactly the surviving mount of the pair.
+    ui.selectedUnitId = atlas.id;
+    ui._pendingTarget = null;
+    ui._showWeaponPanel();
+    const laserChecks = [...document.querySelectorAll('.weapon-check')]
+      .filter(check => check.dataset.type === 'med_laser');
+    expect(laserChecks.map(check => check.disabled)).toEqual([false, true]);
+    expect(laserChecks[1].closest('label').querySelector('.weapon-reason').textContent)
+      .toBe('destroyed');
+  });
+
+  it('matches the engine when one slot of a multi-slot weapon is destroyed', () => {
+    const atlas = state.getUnit('atlas-0');
+    atlas.criticalSlots.rightTorso
+      .find(slot => slot.item === 'ac20' && slot.slot === 5).status = 'destroyed';
+    atlas.criticalSlots.leftTorso
+      .find(slot => slot.item === 'lrm20' && slot.slot === 2).status = 'destroyed';
+
+    expectDeclarationParity([atlas]);
+  });
+
+  it('matches the engine for destroyed components on Atlas and Locust together', () => {
+    const atlas = state.getUnit('atlas-0');
+    const locust = state.getUnit('locust-0');
+
+    // Atlas: one of two arm lasers, one AC/20 slot, one LRM-20 slot.
+    atlas.criticalSlots.rightArm
+      .find(slot => slot.item === 'med_laser' && slot.slot === 6).status = 'destroyed';
+    atlas.criticalSlots.rightTorso
+      .find(slot => slot.item === 'ac20' && slot.slot === 5).status = 'destroyed';
+    atlas.criticalSlots.leftTorso
+      .find(slot => slot.item === 'lrm20' && slot.slot === 3).status = 'destroyed';
+    // Locust: its single medium laser and one of its two machine guns.
+    locust.criticalSlots.centerTorso
+      .find(slot => slot.item === 'med_laser').status = 'destroyed';
+    locust.criticalSlots.leftArm
+      .find(slot => slot.item === 'machinegun').status = 'destroyed';
+
+    expectDeclarationParity([atlas, locust]);
+  });
+
+  it('matches the engine per mount on non-Atlas chassis', () => {
+    const thunderbolt = state.getUnit('thunderbolt-0');
+    const jenner = state.getUnit('jenner-0');
+    const awesome = state.getUnit('awesome-0');
+
+    // Three medium lasers in one arm: the middle one's slot dies.
+    thunderbolt.criticalSlots.rightArm
+      .find(slot => slot.item === 'med_laser' && slot.slot === 6).status = 'destroyed';
+    // Two lasers per arm: one right-arm mount dies.
+    jenner.criticalSlots.rightArm
+      .find(slot => slot.item === 'med_laser' && slot.slot === 5).status = 'destroyed';
+    // Six PPC slots split three each: one slot in the second chunk dies.
+    awesome.criticalSlots.rightTorso
+      .find(slot => slot.item === 'ppc' && slot.slot === 7).status = 'destroyed';
+
+    expectDeclarationParity([thunderbolt, jenner, awesome]);
+
+    // Thunderbolt: two of three arm lasers stay offered.
+    ui.selectedUnitId = thunderbolt.id;
+    ui._pendingTarget = null;
+    ui._showWeaponPanel();
+    const thunderboltLasers = [...document.querySelectorAll('.weapon-check')]
+      .filter(check => check.dataset.type === 'med_laser');
+    expect(thunderboltLasers.map(check => check.disabled)).toEqual([false, true, false]);
+
+    // Awesome: the second right-torso PPC row is the destroyed one.
+    ui.selectedUnitId = awesome.id;
+    ui._showWeaponPanel();
+    const torsoPpcs = [...document.querySelectorAll('.weapon-check')]
+      .filter(check => check.dataset.type === 'ppc' && check.dataset.location === 'rightTorso');
+    expect(torsoPpcs.map(check => check.disabled)).toEqual([false, true]);
   });
 });

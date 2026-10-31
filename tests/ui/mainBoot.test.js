@@ -148,4 +148,74 @@ describe('main.js boot', () => {
     // The grid toggle schedules a fresh frame, which clears and redraws.
     expect(canvasStub.ctx.calls.length).toBeGreaterThan(before);
   });
+
+  it('exposes the structured debug log with this game in its export', async () => {
+    expect(window.BT_LOG).toBeTruthy();
+    expect(typeof window.BT_LOG.dump).toBe('function');
+    expect(typeof window.BT_LOG.download).toBe('function');
+    expect(typeof window.BT_LOG.clear).toBe('function');
+
+    // This test's fetch stub has no /api/log endpoint, so the stream probe has
+    // to fall back to the in-memory log without throwing or retrying.
+    await waitFor(() => window.BT_LOG.dump().includes('log streaming unavailable'));
+
+    const text = window.BT_LOG.dump();
+
+    // The header names the game the entries belong to.
+    expect(text).toContain('game: game-');
+    expect(text).toContain('turn: 1');
+    expect(text).toContain('phase: initiative');
+
+    // Engine events and the dice log were both mirrored into the buffer.
+    expect(text).toContain('engine');
+    expect(text).toContain('phaseChanged');
+    expect(text).toContain('game started');
+    expect(text).toContain('ui');
+    expect(text).toContain('BattleTech Tabletop Simulator started!');
+
+    // Logging keeps no browser storage state: the only persistence is the
+    // optional dev-server file stream (or the Ctrl+Shift+L download).
+    expect(localStorage.length).toBe(0);
+  });
+
+  it('downloads a timestamped .txt of the debug log (Ctrl+Shift+L)', () => {
+    // jsdom has no object URLs; stub them and record the anchor download.
+    const originalCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+    const originalRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true, writable: true, value: () => 'blob:debug-log'
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true, writable: true, value: () => {}
+    });
+
+    const downloads = [];
+    const clickSpy = vi.spyOn(HTMLElement.prototype, 'click').mockImplementation(function click() {
+      if (this.tagName === 'A') downloads.push({ href: this.href, download: this.download });
+    });
+
+    try {
+      const result = window.BT_LOG.download();
+      expect(result.filename)
+        .toMatch(/^battletech-log-game-\d+-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.txt$/);
+      expect(result.text).toContain('BattleTech Tabletop Simulator debug log');
+      expect(downloads).toHaveLength(1);
+      expect(downloads[0].download).toBe(result.filename);
+      expect(downloads[0].href).toBe('blob:debug-log');
+
+      // The keyboard shortcut is the same export path.
+      const notCancelled = document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'L', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true
+      }));
+      expect(notCancelled).toBe(false); // preventDefault() ran: the browser does not also type an 'l'
+      expect(downloads).toHaveLength(2);
+      expect(downloads[1].download).toMatch(/^battletech-log-game-.*\.txt$/);
+    } finally {
+      clickSpy.mockRestore();
+      if (originalCreate) Object.defineProperty(URL, 'createObjectURL', originalCreate);
+      else delete URL.createObjectURL;
+      if (originalRevoke) Object.defineProperty(URL, 'revokeObjectURL', originalRevoke);
+      else delete URL.revokeObjectURL;
+    }
+  });
 });

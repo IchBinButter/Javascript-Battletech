@@ -257,10 +257,11 @@ export class ForceBuilder {
     reader.onload = async (e) => {
       try {
         const { parseMULToUnits } = await import('../import/mulParser.js');
-        const units = parseMULToUnits(e.target.result, this.mechsData);
-        for (const unitDef of units) {
-          this._addMechDefToPlayer(playerIndex, unitDef);
-        }
+        // parseMULToUnits(mulText, playerId, mechsData, mtfFiles): the roster is
+        // the THIRD argument. Passing mechsData as the player id skipped the
+        // roster lookup, so every imported 'Mech became a weaponless stub.
+        const units = parseMULToUnits(e.target.result, playerIndex, this.mechsData);
+        this._addUnitsToPlayer(playerIndex, units);
       } catch (err) {
         this._emitError(`Failed to import MUL file: ${err.message}`);
       }
@@ -281,6 +282,25 @@ export class ForceBuilder {
     const unitId = this._nextUnitId(mechDef.id || 'custom');
     const unitFromDef = this._createUnitFromDef(mechDef, playerIndex, unitId);
     this.players[playerIndex].units.push(unitFromDef);
+    this._renderUnitList(playerIndex);
+    this._updateTonnage(playerIndex);
+  }
+
+  /**
+   * Add already-built Unit instances (a parsed MUL force) to a player.
+   *
+   * The units arrive fully built: `parseMULToUnits` resolved the roster
+   * definition and stamped the player id. Push them as they are - wrapping them
+   * in `new Unit(unit)` again would rebuild them from their current state, and
+   * writing player/id fields here would bypass the model's constructor (the UI
+   * must not mutate units directly).
+   *
+   * @param {number} playerIndex
+   * @param {Array<import('../models/Unit.js').Unit>} units
+   */
+  _addUnitsToPlayer(playerIndex, units) {
+    if (!Array.isArray(units) || units.length === 0) return;
+    this.players[playerIndex].units.push(...units);
     this._renderUnitList(playerIndex);
     this._updateTonnage(playerIndex);
   }
@@ -307,7 +327,11 @@ export class ForceBuilder {
   }
 
   _renderUnitList(playerIndex) {
-    const list = document.getElementById(`fb-unit-list-${playerIndex}`);
+    // Scope every lookup to this builder: `document.getElementById` would find
+    // another Force Builder's list first if two were ever open at once, and the
+    // visible builder would then look empty while its units lived on.
+    const scope = this.container || document;
+    const list = scope.querySelector(`#fb-unit-list-${playerIndex}`);
     if (!list) return;
 
     list.innerHTML = '';
@@ -341,7 +365,8 @@ export class ForceBuilder {
   }
 
   _updateTonnage(playerIndex) {
-    const display = document.getElementById(`fb-tonnage-${playerIndex}`);
+    const scope = this.container || document;
+    const display = scope.querySelector(`#fb-tonnage-${playerIndex}`);
     if (!display) return;
 
     const total = this.players[playerIndex].units.reduce((sum, u) => sum + u.tonnage, 0);

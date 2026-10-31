@@ -39,6 +39,7 @@ import {
 } from '../rules/battlefield/BattlefieldSupport.js';
 import { canWeaponFireAt, getTargetArc, ARC } from '../rules/combat/ArcRules.js';
 import { hasActuatorSlot } from '../rules/combat/UnitDamage.js';
+import { isWeaponMountDestroyed, weaponMountKey } from '../rules/combat/WeaponMounts.js';
 import { quirkHeatModifier } from '../rules/quirks/Quirks.js';
 import { DamageResolver } from '../rules/combat/DamageResolver.js';
 import { PhysicalAttackResolver } from '../rules/combat/PhysicalAttackResolver.js';
@@ -46,6 +47,42 @@ import { HeatManager } from '../rules/heat/HeatManager.js';
 import { createSeededDice } from '../utils/dice.js';
 import { hexDistance } from '../hex/HexMath.js';
 import { parseHexKey } from '../utils/helpers.js';
+
+/**
+ * Fired-set key for ONE mounted weapon instance.
+ *
+ * p24 gives each weapon one attack per turn, and a 'Mech can carry several
+ * identical weapons in one location (the Atlas AS7-D has two medium lasers in
+ * its right arm). The weapon id plus its location therefore cannot identify a
+ * weapon: the position in `unit.equipment.weapons` does, and that position is
+ * stable for the whole game - damage marks critical slots, it never removes
+ * mounted entries.
+ *
+ * The format is owned by the rules helper that also maps a mount to the
+ * physical critical-slot component it occupies (`WeaponMounts.weaponMountKey`),
+ * so firing identity and mount identity are always the same key.
+ *
+ * @param {string} weaponId - weapon definition id (e.g. 'med_laser')
+ * @param {string} location - mounted location (e.g. 'rightArm')
+ * @param {number} weaponIndex - index into `unit.equipment.weapons`
+ * @returns {string} e.g. 'med_laser@rightArm#1'
+ */
+export function weaponInstanceKey(weaponId, location, weaponIndex) {
+  return weaponMountKey(weaponId, location, weaponIndex);
+}
+
+/**
+ * The pre-instance fired key (`<id>@<location>`).
+ *
+ * `_validateWeaponDeclaration` used to record this, and a caller (or a test
+ * fixture) may still hand one in. It is honoured as the conservative reading -
+ * "this model in this location has fired" - so a record written before
+ * per-instance identity can never let a weapon fire twice, while new records
+ * are always per-instance and identical mounts stay independent.
+ */
+export function weaponModelKey(weaponId, location) {
+  return `${weaponId}@${location}`;
+}
 
 export class GameEngine {
   /** Sequential game ids, so nothing depends on the wall clock. */
@@ -645,12 +682,111 @@ export class GameEngine {
   }
 
   /**
+   * Reset the unit's fired-weapon record when it belongs to another turn.
+   *
+   * p24's "once per turn" is per mounted instance, and the record is a Set on
+   * the unit itself, so no two units can ever share it. The set only holds
+   * keys for the current turn: the turn number alongside it is what resets it.
+   *
+   * @returns {Set<string>} the unit's current-turn fired-instance keys
+   */
+  _ensureFiredWeaponsRecord(unit, state) {
+    if (!(unit.firedWeaponsThisTurn instanceof Set) || unit.firedWeaponsTurn !== state.turn) {
+      unit.firedWeaponsThisTurn = new Set();
+      unit.firedWeaponsTurn = state.turn;
+    }
+    return unit.firedWeaponsThisTurn;
+  }
+
+  /**
+   * Decide which MOUNTED instance a declaration names.
+   *
+   * - `action.weaponIndex` (an index into `unit.equipment.weapons`) names the
+   *   instance exactly. The UI sends it, so two identical weapons in one
+   *   location are two independent declarations.
+   * - Without an index - every caller written before per-instance identity -
+   *   the first instance of that weapon in the requested location that has not
+   *   fired and whose component is still intact is allocated. A destroyed mount
+   *   cannot fire, so it never shadows its surviving sibling; when nothing is
+   *   left the first candidate is returned, so validation reports the familiar
+   *   "already fired" or "has been destroyed" error.
+   *
+   * An explicit index is still checked against the declared weapon and
+   * location, so it cannot be used to fire a weapon the declaration does not
+   * name.
+   *
+   * @returns {{ok: true, entry: object, weaponIndex: number}|
+   *   {ok: false, error: string}}
+   */
+  _resolveMountedWeapon(attacker, action, matches, mounted) {
+    const weaponDef = action.weapon;
+
+    if (action.weaponIndex !== undefined && action.weaponIndex !== null) {
+      const weaponIndex = Number(action.weaponIndex);
+      const entry = Number.isInteger(weaponIndex) ? mounted[weaponIndex] : undefined;
+      if (!entry) {
+        return {
+          ok: false,
+          error: `Weapon ${weaponDef.id} is not mounted at index ${action.weaponIndex}`
+        };
+      }
+      if (entry.type !== weaponDef.id && entry.type !== weaponDef.type) {
+        return { ok: false, error: `Weapon ${weaponDef.id} is not mounted at index ${weaponIndex}` };
+      }
+      if (action.weaponLocation && entry.location !== action.weaponLocation) {
+        return {
+          ok: false,
+          error: `Weapon ${weaponDef.id} is not mounted in ${action.weaponLocation} at index ${weaponIndex}`
+        };
+      }
+      return { ok: true, entry, weaponIndex };
+    }
+
+    const candidates = action.weaponLocation
+      ? matches.filter(w => w.location === action.weaponLocation)
+      : matches;
+    if (candidates.length === 0) {
+      return { ok: false, error: `Weapon ${weaponDef.id} is not mounted in ${action.weaponLocation}` };
+    }
+
+    const unfired = candidates.filter(candidate => !this._weaponInstanceFired(
+      attacker, weaponDef, candidate, mounted.indexOf(candidate)
+    ));
+    const intact = unfired.find(candidate =>
+      !isWeaponMountDestroyed(attacker, mounted.indexOf(candidate)));
+    const entry = intact || unfired[0] || candidates[0];
+    return { ok: true, entry, weaponIndex: mounted.indexOf(entry) };
+  }
+
+  /**
+   * Has this mounted instance already fired this turn?
+   *
+   * Reads the per-instance key first, then the pre-instance model key: a
+   * record written before per-instance identity (or by a caller that still
+   * uses the old key) is the conservative reading that the model has fired.
+   * The caller has already discarded a record from an earlier turn.
+   */
+  _weaponInstanceFired(attacker, weaponDef, entry, weaponIndex) {
+    const fired = attacker.firedWeaponsThisTurn;
+    if (!(fired instanceof Set)) return false;
+    if (fired.has(weaponInstanceKey(weaponDef.id, entry.location, weaponIndex))) return true;
+    return fired.has(weaponModelKey(weaponDef.id, entry.location));
+  }
+
+  /**
    * Validate a weapon declaration before any heat, ammo or dice are spent
    * (p24 "a 'Mech can fire each weapon only once per turn", p31 ammunition,
    * p46 destroyed weapons).
    *
+   * The once-per-turn check is per mounted INSTANCE (`weaponIndex` in
+   * `unit.equipment.weapons`), not per weapon model: firing one of the Atlas'
+   * two right-arm medium lasers must leave the other one able to fire. The p46
+   * destroyed check is per mounted COMPONENT (`WeaponMounts.js`): a multi-slot
+   * weapon dies with any of its slots, while one destroyed single-slot mount
+   * does not take its identical sibling with it.
+   *
    * @returns {{ok: boolean, error?: string, weaponLocation?: string,
-   *   ammoBin?: string|null, key?: string}}
+   *   ammoBin?: string|null, key?: string, weaponIndex?: number}}
    */
   _validateWeaponDeclaration(attacker, action, state) {
     const weaponDef = action.weapon;
@@ -660,27 +796,24 @@ export class GameEngine {
     const matches = mounted.filter(w => w.type === weaponDef.id || w.type === weaponDef.type);
     if (matches.length === 0) return { ok: false, error: `Weapon ${weaponDef.id} is not mounted` };
 
-    const entry = action.weaponLocation
-      ? matches.find(w => w.location === action.weaponLocation)
-      : matches[0];
-    if (!entry) {
-      return { ok: false, error: `Weapon ${weaponDef.id} is not mounted in ${action.weaponLocation}` };
-    }
+    this._ensureFiredWeaponsRecord(attacker, state);
 
-    // p24: one attack per weapon per turn.
-    if (!(attacker.firedWeaponsThisTurn instanceof Set) || attacker.firedWeaponsTurn !== state.turn) {
-      attacker.firedWeaponsThisTurn = new Set();
-      attacker.firedWeaponsTurn = state.turn;
-    }
-    const key = `${weaponDef.id}@${entry.location}`;
-    if (attacker.firedWeaponsThisTurn.has(key)) {
+    const resolved = this._resolveMountedWeapon(attacker, action, matches, mounted);
+    if (!resolved.ok) return resolved;
+    const { entry, weaponIndex } = resolved;
+
+    // p24: one attack per weapon INSTANCE per turn.
+    const key = weaponInstanceKey(weaponDef.id, entry.location, weaponIndex);
+    if (this._weaponInstanceFired(attacker, weaponDef, entry, weaponIndex)) {
       return { ok: false, error: `Weapon ${weaponDef.id} has already fired this turn` };
     }
 
-    // p46: a weapon whose critical slots are all destroyed cannot fire.
-    const slots = (attacker.criticalSlots && attacker.criticalSlots[entry.location]) || [];
-    const weaponSlots = slots.filter(s => s.item === weaponDef.id);
-    if (weaponSlots.length > 0 && weaponSlots.every(s => s.status === 'destroyed')) {
+    // p46: a mount whose own critical-slot component is destroyed cannot fire.
+    // A multi-slot weapon is one component (any destroyed slot disables it), and
+    // two identical single-slot mounts are two components (losing one slot
+    // disables only the mount that occupies it). WeaponMounts.js owns that
+    // mapping, and the UI picker reads the same helper.
+    if (isWeaponMountDestroyed(attacker, weaponIndex)) {
       return { ok: false, error: `Weapon ${weaponDef.id} has been destroyed` };
     }
 
@@ -711,7 +844,7 @@ export class GameEngine {
       ammoBin = null;
     }
 
-    return { ok: true, weaponLocation: entry.location, ammoBin, key };
+    return { ok: true, weaponLocation: entry.location, ammoBin, key, weaponIndex };
   }
 
   _handleFire(playerId, action) {
@@ -748,14 +881,18 @@ export class GameEngine {
 
     const weaponDef = action.weapon;
 
-    // p24/p31/p46: the declaration must name a weapon the unit actually mounts,
-    // that has not already fired this turn, is not destroyed, and has ammo.
+    // p24/p31/p46: the declaration must name a mounted weapon INSTANCE that has
+    // not already fired this turn, is not destroyed, and has ammo. A caller
+    // that did not name an instance learns which one was allocated.
     let declaration = null;
     if (this.enforceWeaponDeclarations) {
       declaration = this._validateWeaponDeclaration(attacker, action, state);
       if (!declaration.ok) return { success: false, error: declaration.error };
       if (!action.weaponLocation) action.weaponLocation = declaration.weaponLocation;
       if (declaration.ammoBin) action.ammoBin = declaration.ammoBin;
+      // Canonicalise the instance index: an explicit one was validated by the
+      // declaration, and a legacy caller that named none gets its allocation.
+      if (Number.isInteger(declaration.weaponIndex)) action.weaponIndex = declaration.weaponIndex;
     }
 
     // p72 "Combat Within Buildings" is scoped to 'Mechs in the SAME building:
@@ -878,7 +1015,7 @@ export class GameEngine {
         attacker.firedThisTurn.add(action.weaponLocation);
       }
 
-      // p24: the weapon itself has now fired this turn.
+      // p24: this mounted instance has now fired this turn.
       if (declaration && declaration.key) attacker.firedWeaponsThisTurn.add(declaration.key);
 
       // Hidden units (p82): firing reveals the attacker, hit or miss.  Run
@@ -959,6 +1096,10 @@ export class GameEngine {
     this.eventBus.emit('unitAttacked', toTransferable({ attackerId: attacker.id, targetId: target.id, result }));
 
     result.success = true;
+    // Which mounted instance resolved the declaration (p24): a caller that did
+    // not name one gets the allocated index back, and `fireWeapons` reports it
+    // per shot so identical mounts stay distinguishable.
+    if (Number.isInteger(action.weaponIndex)) result.weaponIndex = action.weaponIndex;
     return result;
   }
 
@@ -980,10 +1121,15 @@ export class GameEngine {
    * spent (the caller can retry with a legal weapon), matching the single-shot
    * failure behaviour.
    *
+   * Each shot keeps its own mounted-instance identity (p24): `shot.weaponIndex`
+   * is handed to `_handleFire` unchanged, so two identical weapons in one
+   * location are two shots and each result reports the instance it used.
+   *
    * @param {number} playerId
    * @param {{attackerId: string, targetId: string,
-   *   shots: Array<{weapon: object, weaponLocation?: string, ammoBin?: string,
-   *     indirect?: boolean, spotterId?: string, aimedLocation?: string}>}} action
+   *   shots: Array<{weapon: object, weaponLocation?: string, weaponIndex?: number,
+   *     ammoBin?: string, indirect?: boolean, spotterId?: string,
+   *     aimedLocation?: string}>}} action
    * @returns {{success: boolean, attackerId: string, targetId: string,
    *   fired: number, rejected: number, shots: Array<object>, error?: string}}
    */
@@ -999,13 +1145,16 @@ export class GameEngine {
       if (!shot || !shot.weapon) {
         const error = 'No weapon declared';
         if (!firstError) firstError = error;
-        results.push({ weapon: null, weaponLocation: null, ammoBin: null, success: false, error });
+        results.push({
+          weapon: null, weaponLocation: null, weaponIndex: null, ammoBin: null,
+          success: false, error
+        });
         continue;
       }
 
       // Each shot reuses the single-shot path with its own action object, so a
-      // declaration that resolves the ammo bin or weapon location cannot leak
-      // into the next shot's validation.
+      // declaration that resolves the ammo bin, weapon location or instance
+      // index cannot leak into the next shot's validation.
       const fireAction = {
         type: 'fire',
         attackerId: action.attackerId,
@@ -1014,6 +1163,9 @@ export class GameEngine {
         weaponLocation: shot.weaponLocation,
         ammoBin: shot.ammoBin || null
       };
+      if (shot.weaponIndex !== undefined && shot.weaponIndex !== null) {
+        fireAction.weaponIndex = shot.weaponIndex;
+      }
       if (shot.indirect) {
         fireAction.indirect = true;
         fireAction.spotterId = shot.spotterId;
@@ -1031,6 +1183,9 @@ export class GameEngine {
       results.push({
         weapon: fireAction.weapon,
         weaponLocation: fireAction.weaponLocation,
+        // The instance the shot declared, or the one the declaration allocated;
+        // a successful shot also reports it in `result.weaponIndex`.
+        weaponIndex: fireAction.weaponIndex,
         ammoBin: fireAction.ammoBin,
         ...result
       });

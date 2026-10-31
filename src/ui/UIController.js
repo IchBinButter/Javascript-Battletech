@@ -5,6 +5,8 @@
 
 import { describeHeatEffects } from '../rules/heat/HeatScale.js';
 import { projectStateForPlayer } from '../engine/visibility.js';
+import { weaponInstanceKey, weaponModelKey } from '../engine/GameEngine.js';
+import { weaponMountAt, weaponMountFor } from '../rules/combat/WeaponMounts.js';
 import { canWeaponFireAt } from '../rules/combat/ArcRules.js';
 import { buildingCombat } from '../rules/urban/Buildings.js';
 import { hexDistance } from '../hex/HexMath.js';
@@ -188,15 +190,25 @@ export class UIController {
     // 'fire' action once per weapon advanced the per-'Mech declaration queue
     // after the first shot, so every later shot was rejected with
     // "Not your turn" - a 'Mech could never fire two weapons at once.
+    //
+    // Each shot also names its mounted INSTANCE (index into
+    // `unit.getAllWeapons()`, which is the order of `unit.equipment.weapons`).
+    // A 'Mech can carry identical weapons in one location - the Atlas has two
+    // medium lasers in its right arm - and "one attack per weapon per turn"
+    // (p24) applies to each mount, not to the weapon model.
     const shots = [];
     for (const check of checks) {
       const weaponDef = this._getWeaponData(check.dataset.type);
       if (!weaponDef) continue;
-      shots.push({
+      const shot = {
         weapon: weaponDef,
         weaponLocation: check.dataset.location,
         ammoBin: check.dataset.ammo || null
-      });
+      };
+      if (check.dataset.weaponIndex !== undefined && check.dataset.weaponIndex !== '') {
+        shot.weaponIndex = Number(check.dataset.weaponIndex);
+      }
+      shots.push(shot);
     }
     if (shots.length === 0) { this.log('Select weapons to fire', 'miss'); return; }
 
@@ -307,15 +319,18 @@ export class UIController {
       this.weaponList.appendChild(notice);
     }
 
-    for (const w of unit.getAllWeapons()) {
+    // The mounted instance index is what the engine keys "already fired" by,
+    // so each row carries its position in `unit.getAllWeapons()`.
+    const weapons = unit.getAllWeapons();
+    for (const [weaponIndex, w] of weapons.entries()) {
       const weaponData = this._getWeaponData(w.type);
       if (!weaponData) continue;
 
       const eligibility = unitEligibility.eligible
-        ? this._getWeaponEligibility(unit, w, weaponData, state)
+        ? this._getWeaponEligibility(unit, w, weaponData, state, weaponIndex)
         : { eligible: false, reason: null }; // the unit-level notice carries the reason
       this.weaponList.appendChild(
-        this._renderWeaponOption(w, weaponData, eligibility.eligible, eligibility.reason)
+        this._renderWeaponOption(w, weaponData, eligibility.eligible, eligibility.reason, weaponIndex)
       );
     }
   }
@@ -380,22 +395,30 @@ export class UIController {
    * 'already fired', 'out of arc', 'out of range', 'no line of sight'.
    *
    * The checks reuse the helpers the engine uses instead of restating the
-   * rules: `_validateWeaponDeclaration` (destroyed slots, ammo bins, once per
-   * turn), `canWeaponFireAt` (arcs), `Weapon.getRangeModifier` (range) and the
-   * LOS gate of `_handleFire` (`buildingCombat` + `LineOfSight.calculateLOS`).
+   * rules: `WeaponMounts` (which physical critical-slot component each mount
+   * occupies, p46), `_validateWeaponDeclaration`'s key scheme (once per
+   * instance per turn), `_hasAmmoForWeapon`/ammo bins (p31),
+   * `canWeaponFireAt` (arcs), `Weapon.getRangeModifier` (range) and the LOS
+   * gate of `_handleFire` (`buildingCombat` + `LineOfSight.calculateLOS`).
    *
    * @param {Unit|object} unit - attacker
    * @param {{type: string, location: string, ammoBin?: string}} weapon - mounted entry
    * @param {Weapon|object} weaponData - weapon definition for `weapon.type`
    * @param {object} state - projected game state
+   * @param {number|null} [weaponIndex] - mounted instance index when the caller
+   *   has it; otherwise it is derived from `unit.equipment.weapons`
    * @returns {{eligible: boolean, reason: string|null}}
    */
-  _getWeaponEligibility(unit, weapon, weaponData, state) {
-    // p46: a weapon whose critical slots are all destroyed cannot fire. The
-    // engine only calls it destroyed when the weapon has slots to lose.
-    const slots = (unit.criticalSlots && unit.criticalSlots[weapon.location]) || [];
-    const weaponSlots = slots.filter(slot => slot.item === weaponData.id);
-    if (weaponSlots.length > 0 && weaponSlots.every(slot => slot.status === 'destroyed')) {
+  _getWeaponEligibility(unit, weapon, weaponData, state, weaponIndex = null) {
+    const index = weaponIndex === null ? this._weaponListIndex(unit, weapon) : weaponIndex;
+
+    // p46: a mount whose own critical-slot component is destroyed cannot fire.
+    // The mapping (multi-slot weapons are one component, identical single-slot
+    // mounts are separate components) comes from WeaponMounts.js - the same
+    // helper the engine's declaration check uses - so one destroyed arm laser
+    // greys out exactly one row.
+    const mount = index >= 0 ? weaponMountAt(unit, index) : weaponMountFor(unit, weapon);
+    if (mount && mount.destroyed) {
       return { eligible: false, reason: 'destroyed' };
     }
 
@@ -408,10 +431,10 @@ export class UIController {
       return { eligible: false, reason: 'no ammo' };
     }
 
-    // p24: one attack per weapon per turn. The engine keys declarations by
-    // "<weapon id>@<location>" and resets the set when the turn changes.
-    const firedKey = `${weaponData.id}@${weapon.location}`;
-    if (this._weaponFiredThisTurn(unit, firedKey, state)) {
+    // p24: one attack per weapon INSTANCE per turn. Same key scheme as
+    // `_validateWeaponDeclaration`: the mounted index identifies the weapon, so
+    // one of two identical lasers firing does not disable the other.
+    if (this._weaponFiredThisTurn(unit, weapon, weaponData, state, index)) {
       return { eligible: false, reason: 'already fired' };
     }
 
@@ -461,16 +484,34 @@ export class UIController {
   }
 
   /**
-   * Has `key` already fired this turn? Mirrors `_validateWeaponDeclaration`
-   * exactly: only a Set recorded on the current turn counts. The engine treats
-   * anything else (an array after a JSON round-trip, or a Set from an earlier
-   * turn) as a fresh empty set, so the UI must not report a stale shot either.
+   * Index of a mounted weapon entry in its 'Mech's equipment list, i.e. the
+   * position the engine's per-instance fired record is keyed by. Returns -1
+   * when the caller handed in an entry that is not part of the unit.
    */
-  _weaponFiredThisTurn(unit, key, state) {
+  _weaponListIndex(unit, weapon) {
+    const mounted = (unit && unit.equipment && unit.equipment.weapons) || [];
+    return mounted.indexOf(weapon);
+  }
+
+  /**
+   * Has this mounted INSTANCE already fired this turn? Mirrors
+   * `_validateWeaponDeclaration` exactly: only a Set recorded on the current
+   * turn counts, and both the per-instance key and the pre-instance
+   * `<id>@<location>` key (a caller or fixture that still uses it) are
+   * honoured. The engine treats anything else (an array after a JSON
+   * round-trip, or a Set from an earlier turn) as a fresh empty set, so the UI
+   * must not report a stale shot either.
+   */
+  _weaponFiredThisTurn(unit, weapon, weaponData, state, weaponIndex) {
     const fired = unit.firedWeaponsThisTurn;
     if (!(fired instanceof Set)) return false;
     if (unit.firedWeaponsTurn !== state.turn) return false;
-    return fired.has(key);
+
+    if (weaponIndex >= 0
+      && fired.has(weaponInstanceKey(weaponData.id, weapon.location, weaponIndex))) {
+      return true;
+    }
+    return fired.has(weaponModelKey(weaponData.id, weapon.location));
   }
 
   /**
@@ -499,7 +540,7 @@ export class UIController {
   }
 
   /** One row of the weapon picker; disabled and greyed out when ineligible. */
-  _renderWeaponOption(weapon, weaponData, eligible, reason) {
+  _renderWeaponOption(weapon, weaponData, eligible, reason, weaponIndex) {
     const rangeText = `${weaponData.shortRange}/${weaponData.mediumRange}/${weaponData.longRange}`;
 
     const label = document.createElement('label');
@@ -518,6 +559,8 @@ export class UIController {
     checkbox.dataset.type = weapon.type;
     checkbox.dataset.location = weapon.location;
     checkbox.dataset.ammo = weapon.ammoBin || '';
+    // The shot names its mounted instance, not just its weapon type.
+    if (weaponIndex !== undefined) checkbox.dataset.weaponIndex = String(weaponIndex);
     checkbox.disabled = !eligible;
     label.appendChild(checkbox);
 

@@ -13,6 +13,7 @@ import { MapRenderer } from './renderer/MapRenderer.js';
 import { UIController } from './ui/UIController.js';
 import { StartMenu } from './ui/StartMenu.js';
 import { ForceBuilder } from './ui/ForceBuilder.js';
+import { Logger, attachGameLogging } from './utils/logger.js';
 
 // ---- Globals ----
 const HEX_SIZE = 30;
@@ -29,6 +30,7 @@ const DECLARATION_PHASES = new Set(['movement', 'weapon_attack', 'physical_attac
 let gameEngine;
 let mapRenderer;
 let ui;
+let startMenu;
 let weaponsLookup;
 let mechsData, weaponsData, hitTables, mapsData;
 
@@ -39,6 +41,39 @@ let _skippingDeclarations = false;
 const canvas = document.getElementById('map-canvas');
 const app = document.getElementById('app');
 const startMenuOverlay = document.getElementById('start-menu-overlay');
+
+// ---- Structured debug log ----
+/**
+ * Engine events recorded in the debug log: every player action the engine
+ * processed, every turn/phase/queue move, and each rules result that changes
+ * the board. Kept next to the game wiring in this file so a new live-facing
+ * event is easy to add; `attachGameLogging` owns the actual subscriptions.
+ */
+const LOGGED_ENGINE_EVENTS = [
+  'actionProcessed',
+  'phaseChanged',
+  'queueAdvanced',
+  'unitMoved',
+  'damageApplied',
+  'unitAttacked',
+  'unitFell',
+  'unitDestroyed',
+  'fireStarted',
+  'buildingDamaged',
+  'minefieldTriggered',
+  'supportStrikeScheduled',
+  'supportStrikeResolved'
+];
+
+/**
+ * Session log. `debug`/`info` only feed the ring buffer (default 2000 entries),
+ * so the app does not spam the console; see `window.BT_LOG` and Ctrl+Shift+L for
+ * the export. A live report can now be reconstructed after the fact.
+ */
+const gameLog = new Logger({ level: 'debug' });
+
+/** Log wiring for the running game; disposed by teardownGame(). */
+let gameLogging = null;
 
 
 /** Reference to the resize handler so it can be removed for cleanup. */
@@ -58,6 +93,13 @@ function resizeCanvas() {
 
 /** Clean up state from a previous game before starting a new one. */
 function teardownGame() {
+  // Stop mirroring first: this removes the engine event subscriptions, the
+  // window error handlers and the ui.log wrapper, so a second game records
+  // exactly once instead of growing a duplicate listener per game.
+  if (gameLogging) {
+    try { gameLogging.dispose(); } catch (_) { /* ignore */ }
+    gameLogging = null;
+  }
   if (gameEngine) {
     gameEngine.eventBus.removeAllListeners();
   }
@@ -69,6 +111,58 @@ function teardownGame() {
   }
 }
 
+// ---- Structured log export ----
+
+/** File-safe timestamp slug for an exported log: 2026-10-31T05-04-03-123Z. */
+function logTimestampSlug(date = new Date()) {
+  return date.toISOString().replace(/[:.]/g, '-');
+}
+
+/** Timestamped .txt filename: battletech-log-<gameId>-<timestamp>.txt */
+function logFilename() {
+  const { gameId } = gameLog.getContext();
+  return `battletech-log-${gameId || 'nogame'}-${logTimestampSlug()}.txt`;
+}
+
+/**
+ * Download the recorded log as a timestamped .txt file.
+ *
+ * Returns `{ filename, text }` so the export can also be inspected directly
+ * (and so a headless environment without `URL.createObjectURL` still gets the
+ * text). A failed download is recorded in the log, never thrown at the player.
+ */
+function downloadLog() {
+  const text = gameLog.toText();
+  const filename = logFilename();
+  try {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    gameLog.error('export', 'log download failed', { message: error && error.message });
+  }
+  return { filename, text };
+}
+
+/**
+ * Console handle on the structured log:
+ * - `BT_LOG.dump()` returns the export text;
+ * - `BT_LOG.download()` downloads the timestamped .txt;
+ * - `BT_LOG.clear()` empties the buffer (recording continues).
+ */
+window.BT_LOG = {
+  dump: () => gameLog.toText(),
+  download: () => downloadLog(),
+  clear: () => { gameLog.clear(); }
+};
+
 // ---- Data loading ----
 async function loadJSON(path) {
   const resp = await fetch(path);
@@ -76,7 +170,92 @@ async function loadJSON(path) {
 }
 
 // ---- Show/hide game UI ----
+/** Deployment columns of a formation, three hexes apart, inside the map. */
+function formationColumns(width) {
+  const cols = [];
+  for (let col = 4; col < width; col += 3) cols.push(col);
+  if (cols.length === 0) cols.push(0);
+  return cols;
+}
+
+/**
+ * Candidate deployment hexes for `playerIdx`, nearest that player's home edge
+ * first.
+ *
+ * A formation fills one row at a time, marching from the home edge toward the
+ * centre of the player's own half. The old fixed `4 + i * 3` column had no
+ * bound, so on the standard 17-wide mapsheet the sixth 'Mech of a side landed
+ * on `19,3` - a hex that does not exist. The unit stayed in `gameState.units`
+ * but could never be drawn or clicked.
+ *
+ * @param {{width: number, height: number}} hexGrid
+ * @param {number} playerIdx - 0 deploys from the north edge, 1 from the south
+ * @returns {string[]} hex keys, preferred first
+ */
+function deploymentSlots(hexGrid, playerIdx) {
+  const width = hexGrid.width;
+  const height = hexGrid.height;
+  if (!width || !height) return [];
+
+  const homeRow = playerIdx === 0 ? 3 : height - 4;
+  const half = Math.floor(height / 2);
+  const rows = [];
+  for (let row = 0; row < height; row++) {
+    if (playerIdx === 0 ? row < half : row >= half) rows.push(row);
+  }
+  if (rows.length === 0) rows.push(Math.max(0, Math.min(height - 1, homeRow)));
+  rows.sort((a, b) => {
+    const distanceA = Math.abs(a - homeRow);
+    const distanceB = Math.abs(b - homeRow);
+    if (distanceA !== distanceB) return distanceA - distanceB;
+    return playerIdx === 0 ? a - b : b - a;
+  });
+
+  const slots = [];
+  for (const row of rows) {
+    for (const col of formationColumns(width)) slots.push(`${col},${row}`);
+  }
+  return slots;
+}
+
+/**
+ * The next free, real map hex for `playerIdx`.
+ *
+ * Formation slots come first; a force larger than the formation falls back to
+ * any free hex on its own side, then to any free hex on the map, so no unit is
+ * ever placed outside the map it has to stand on.
+ *
+ * @param {{width: number, height: number, hexes: Map<string, object>}} hexGrid
+ * @param {number} playerIdx
+ * @param {Set<string>} occupied - hex keys already taken by another unit
+ * @returns {string}
+ */
+function nextDeploymentHex(hexGrid, playerIdx, occupied) {
+  for (const hexKey of deploymentSlots(hexGrid, playerIdx)) {
+    if (!occupied.has(hexKey) && hexGrid.hexes.has(hexKey)) return hexKey;
+  }
+
+  const half = Math.floor(hexGrid.height / 2);
+  const onOwnSide = (hexKey) => {
+    const row = Number(hexKey.split(',')[1]);
+    return playerIdx === 0 ? row < half : row >= half;
+  };
+  for (const hexKey of hexGrid.hexes.keys()) {
+    if (!occupied.has(hexKey) && onOwnSide(hexKey)) return hexKey;
+  }
+  for (const hexKey of hexGrid.hexes.keys()) {
+    if (!occupied.has(hexKey)) return hexKey;
+  }
+
+  // Map full: keep the deployment deterministic rather than dropping a unit.
+  return `${formationColumns(hexGrid.width)[0]},${playerIdx === 0 ? 3 : hexGrid.height - 4}`;
+}
+
 function showGame() {
+  // Leave the menu properly: setting the overlay's display alone used to leave
+  // the StartMenu thinking it was still on screen, so its document-level key
+  // handler kept reacting during play (Enter ran New Game from inside a game).
+  if (startMenu) startMenu.hide();
   startMenuOverlay.style.display = 'none';
   app.style.display = 'grid';
 }
@@ -249,8 +428,19 @@ async function startGame(forceBuilder) {
   // Clean up any previous game to prevent listener leaks and stale references
   teardownGame();
 
+  // One export describes one game: drop the previous game's entries. The log
+  // header ({gameId, turn, phase}) is filled in once the engine exists.
+  gameLog.clear();
+
   const players = forceBuilder.getPlayers();
   const selectedMapId = forceBuilder.selectedMapId;
+  gameLog.info('game', 'startGame', {
+    selectedMapId: selectedMapId || null,
+    players: players.map(player => ({
+      name: player.name || null,
+      units: (player.units || []).map(unit => unit.name)
+    }))
+  });
 
   // Create hex grid from selected map or default
   let hexGrid;
@@ -271,6 +461,10 @@ async function startGame(forceBuilder) {
         BuildingRegistry.fromMap(mapDef).applyToHexes(hexGrid.hexes);
       } catch (error) {
         console.error(`Could not load map "${selectedMapId}":`, error);
+        gameLog.error('game', 'map load failed', {
+          mapId: selectedMapId,
+          message: error && error.message
+        });
         hexGrid = undefined;
       }
     }
@@ -291,25 +485,38 @@ async function startGame(forceBuilder) {
   // Create units from force builder selections
   // Reuse Unit instances directly instead of double-wrapping them in new Unit()
   let unitIndex = 0;
+  const occupiedHexes = new Set();
   for (let playerIdx = 0; playerIdx < 2; playerIdx++) {
     const player = players[playerIdx];
-    const homeRow = playerIdx === 0 ? 3 : hexGrid.height - 4;
     const units = player.units || [];
 
     for (let i = 0; i < units.length; i++) {
       const unit = units[i]; // already a Unit instance from ForceBuilder
       unit.id = `unit-${unitIndex++}`;
 
-      // Place units in a row at their home edge
-      const col = 4 + (i * 3);
-      unit.position.hexKey = `${col},${homeRow}`;
+      // Place units on their home edge, inside the loaded map (see
+      // nextDeploymentHex for the off-map formation this replaces).
+      const hexKey = nextDeploymentHex(hexGrid, playerIdx, occupiedHexes);
+      occupiedHexes.add(hexKey);
+      unit.position.hexKey = hexKey;
       unit.position.facing = playerIdx === 0 ? 3 : 0; // Face toward enemy
 
       gameState.addUnit(unit);
+      // Where a force actually landed is a recurring live report; record it
+      // per unit rather than only the total.
+      gameLog.info('game', 'unit deployed', {
+        unitId: unit.id,
+        name: unit.name,
+        player: playerIdx,
+        tonnage: unit.tonnage,
+        hexKey,
+        facing: unit.position.facing
+      });
     }
   }
 
   // If no units selected, use defaults
+  let defaultsUsed = null;
   if (Object.keys(gameState.units).length === 0) {
     const defaults = [
       { def: mechsData.mechs[0], player: 0, col: 6, row: 3, facing: 3 },
@@ -319,10 +526,19 @@ async function startGame(forceBuilder) {
     ];
     for (const d of defaults) {
       const unit = new Unit(d.def, d.player, `default-${d.player}-${d.col}`);
-      unit.position.hexKey = `${d.col},${d.row}`;
+      const col = Math.min(d.col, hexGrid.width - 1);
+      const row = Math.min(d.row, hexGrid.height - 1);
+      unit.position.hexKey = `${col},${row}`;
       unit.position.facing = d.facing;
       gameState.addUnit(unit);
     }
+    // The fallback is legitimate for an empty force, but the log must say so:
+    // a silent fallback reads as "my Force Builder selection was ignored".
+    defaultsUsed = defaults.map(d => d.def.name).join(', ');
+    gameLog.info('game', 'no units selected; defaults deployed', {
+      defaults: defaultsUsed,
+      players: players.map(player => player.name || null)
+    });
   }
 
   // Initialize game engine
@@ -336,6 +552,23 @@ async function startGame(forceBuilder) {
   // Initialize UI
   ui = new UIController({ viewerId: VIEWER_ID });
   ui.init(gameEngine, mapRenderer);
+
+  // Mirror the engine and the dice log into the structured log before the
+  // first phase event, so the export starts at the game's first turn. The
+  // wiring is disposed by teardownGame() when this game ends.
+  gameLogging = attachGameLogging({
+    logger: gameLog,
+    engine: gameEngine,
+    ui,
+    events: LOGGED_ENGINE_EVENTS,
+    windowRef: window
+  });
+  gameLog.info('game', 'game started', {
+    gameId: gameEngine.gameId,
+    units: Object.keys(gameState.units).length,
+    map: { width: hexGrid.width, height: hexGrid.height },
+    defaultsUsed: defaultsUsed || null
+  });
 
   // Trigger initial phase
   gameEngine.phaseManager.enterPhase('initiative');
@@ -375,6 +608,9 @@ async function startGame(forceBuilder) {
   ui.log(`BattleTech Tabletop Simulator started!`);
   ui.log(`${gameState.players[0].name} vs ${gameState.players[1].name}`);
   ui.log(`${unitCount} BattleMechs deployed`);
+  if (defaultsUsed) {
+    ui.log(`No BattleMechs were selected in the Force Builder - deploying the default BattleMechs: ${defaultsUsed}`, 'info');
+  }
   ui.log('Click a Mech to select it. Arrow keys to pan.');
 }
 
@@ -382,7 +618,14 @@ async function startGame(forceBuilder) {
 function showStartMenu() {
   hideGame();
 
-  const startMenu = new StartMenu({
+  // A fresh menu per visit: destroy the previous instance first so its
+  // document-level key handler cannot outlive the menu it belongs to.
+  if (startMenu) {
+    startMenu.destroy();
+    startMenu = null;
+  }
+
+  startMenu = new StartMenu({
     onNewGame: () => {
       showForceBuilder();
     },
@@ -397,7 +640,18 @@ function showStartMenu() {
 }
 
 function showForceBuilder() {
+  // Leave the menu completely, not just visually: hiding only the overlay left
+  // the StartMenu "visible" to its own key handler, so pressing Enter to confirm
+  // a player name or roster choice in the Force Builder silently ran New Game
+  // and stacked an empty second builder on top. Starting that one had no units,
+  // so startGame's fallback deployed the four defaults - the live-play report
+  // "whatever I choose in the Force Builder, the map deploys the defaults".
+  if (startMenu) startMenu.hide();
   startMenuOverlay.style.display = 'none';
+
+  // Never run two builders at once: a second one stacks over the first, so the
+  // player can end up starting the wrong force (see the comment above).
+  if (document.getElementById('force-builder-container')) return;
 
   // Create a temporary container for force builder
   const builderContainer = document.createElement('div');
@@ -657,6 +911,18 @@ _keydownHandler = (event) => {
   mapRenderer.render(state);
 };
 document.addEventListener('keydown', _keydownHandler);
+
+/**
+ * Ctrl+Shift+L downloads the structured debug log (same as BT_LOG.download()).
+ * A module-level handler, registered once, so the start/teardown game cycle
+ * cannot stack copies of it.
+ */
+document.addEventListener('keydown', (event) => {
+  if (!event.ctrlKey || !event.shiftKey) return;
+  if (event.key !== 'l' && event.key !== 'L') return;
+  event.preventDefault();
+  downloadLog();
+});
 
 function updateUI() {
   if (!gameEngine) return;

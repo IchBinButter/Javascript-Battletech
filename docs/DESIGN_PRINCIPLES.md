@@ -110,6 +110,13 @@ complete. The next import waits for it.
   edit units or state directly.
 - **Stateless rules modules** where practical: rules take `(unit, state, dice)`, return
   data, and let the engine apply it inside `applyStateChange` so history and diffs see it.
+- **Debug logs.** While the app is served by the local dev server
+  (`node tools/dev-server.cjs`), the structured game log streams to
+  `logs/<gameId>.txt` through `POST /api/log`; `logs/` is git-ignored and each file is
+  capped. The browser cannot write files itself, so on any other host the endpoint probe
+  fails, the log stays in memory, and `window.BT_LOG` / Ctrl+Shift+L downloads it. The
+  stream is a development aid: it never blocks play, a broken stream disables itself after
+  one warning, and it is not part of the shipped game rules.
 
 ---
 

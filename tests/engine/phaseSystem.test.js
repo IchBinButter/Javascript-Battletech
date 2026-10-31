@@ -2172,5 +2172,48 @@ describe('GameEngine: batched weapon fire (one declaration)', () => {
     expect(engine.phaseManager.phaseUnitIndex).toBe(indexBefore + 1);
     expect(queueAdvanced).toHaveLength(1);
   });
+
+  /**
+   * The Atlas carries two medium lasers in its right arm (p24: one attack per
+   * WEAPON, not per weapon model). A batched declaration can name both mounts
+   * and both must resolve inside the single declaration slot.
+   */
+  it('resolves both identical weapons in one location from one declaration', () => {
+    const { engine, atlas } = createBatchedFireEngine();
+    engine.diceRoller = makeDiceRoller(7);
+    const queueAdvanced = [];
+    engine.eventBus.on('queueAdvanced', (entry) => queueAdvanced.push(entry));
+    const indexBefore = engine.phaseManager.phaseUnitIndex;
+
+    const rightArmLasers = atlas.getAllWeapons()
+      .map((weapon, weaponIndex) => ({ weapon, weaponIndex }))
+      .filter(entry => entry.weapon.type === 'med_laser' && entry.weapon.location === 'rightArm');
+    expect(rightArmLasers).toHaveLength(2);
+
+    const result = engine.processAction(0, {
+      type: 'fireWeapons',
+      attackerId: 'atlas-0',
+      targetId: 'target-1',
+      shots: rightArmLasers.map(entry => ({
+        weapon: createWeaponDef('med_laser'),
+        weaponLocation: 'rightArm',
+        weaponIndex: entry.weaponIndex
+      }))
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.fired).toBe(2);
+    expect(result.rejected).toBe(0);
+    // Per-shot results keep the instance identity, not just the model.
+    expect(result.shots.map(shot => shot.weaponIndex))
+      .toEqual(rightArmLasers.map(entry => entry.weaponIndex));
+    expect(result.shots.map(shot => typeof shot.hit)).toEqual(['boolean', 'boolean']);
+    expect(atlas.heat).toBe(6); // medium laser 3 + 3
+    expect(atlas.firedWeaponsThisTurn.size).toBe(2);
+
+    // One declaration = one slot, even though two instances fired.
+    expect(engine.phaseManager.phaseUnitIndex).toBe(indexBefore + 1);
+    expect(queueAdvanced).toHaveLength(1);
+  });
 });
 
