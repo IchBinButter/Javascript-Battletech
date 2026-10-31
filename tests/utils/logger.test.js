@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Unit and wiring tests for the structured debug log (src/utils/logger.js).
  *
  * The app records into a bounded ring buffer and exports it after a live bug.
@@ -143,7 +143,7 @@ describe('Logger recording', () => {
       many: Array.from({ length: 60 }, (_, i) => i)
     });
     expect(summary.long.length).toBeLessThanOrEqual(501);
-    expect(summary.many).toHaveLength(41); // 40 values + a "… more" marker
+    expect(summary.many).toHaveLength(41); // 40 values + a "â€¦ more" marker
     expect(summary.many[40]).toContain('more');
   });
 });
@@ -670,6 +670,8 @@ describe('dev-server log streaming', () => {
       expect(postCalls(fetchMock)).toHaveLength(1);
       let body = JSON.parse(postCalls(fetchMock)[0][1].body);
       expect(body.gameId).toBe('game-42');
+      // One file per session: the engine game id repeats on every page load.
+      expect(body.sessionId.startsWith('game-42-')).toBe(true);
       expect(body.lines).toHaveLength(1);
       expect(body.lines[0]).toContain('debug log streaming to http://logs.test/api/log');
 
@@ -730,6 +732,7 @@ describe('dev-server log streaming', () => {
       expect(sendBeacon.mock.calls[0][0]).toBe('http://logs.test/api/log');
       const payload = JSON.parse(await sendBeacon.mock.calls[0][1].text());
       expect(payload.gameId).toBe('game-42');
+      expect(payload.sessionId.startsWith('game-42-')).toBe(true);
       expect(payload.lines).toHaveLength(1);
       expect(payload.lines[0]).toContain('pending at teardown');
       // The beacon replaced the fetch flush for those lines.
@@ -867,6 +870,15 @@ describe('dev-server appendLog', () => {
     expect(sanitised.ok).toBe(true);
     expect(path.basename(sanitised.file)).toBe('game_1_debug.txt');
     expect(fs.readFileSync(sanitised.file, 'utf8')).toBe('ok\n');
+  });
+
+  it('keeps one physical line per entry by folding embedded newlines', () => {
+    const result = appendLog('session-1', ['first\nsecond', 'third\r\nfourth'], tmpRoot);
+    expect(result.ok).toBe(true);
+
+    const contents = fs.readFileSync(result.file, 'utf8');
+    expect(contents).toBe('first | second\nthird | fourth\n');
+    expect(contents.split('\n').filter(Boolean)).toHaveLength(2);
   });
 
   it('refuses a write that would pass the per-file size cap with 413', () => {

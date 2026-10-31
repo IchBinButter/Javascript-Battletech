@@ -7,8 +7,10 @@
  * (the same job as the old untracked `_serve.cjs`) and adds one dev-only API:
  *
  *   GET  /api/log/status  -> { ok: true }
- *   POST /api/log         -> { gameId, lines: string[] } appends each line
- *                            (with a newline) to logs/<gameId>.txt
+ *   POST /api/log         -> { gameId, sessionId?, lines: string[] } appends
+ *                            each line to logs/<sessionId>.txt (the client sends
+ *                            `<gameId>-<session timestamp>` so separate games do
+ *                            not share a file), creating logs/ on first write
  *
  * The browser cannot write a file by itself; while the game is served by this
  * server the client streams its structured debug log here so a live bug leaves
@@ -72,13 +74,16 @@ function sanitizeGameId(gameId) {
 }
 
 /**
- * Append `lines` to `logs/<gameId>.txt` under `rootDir`.
+ * Append `lines` to `logs/<id>.txt` under `rootDir` (`<id>` is the sanitised
+ * session id, or the game id for older clients).
  *
  * The `logs/` directory is created on the first write. Every line gets one
- * trailing newline; the previous contents are kept. A write that would grow
- * the file past the cap is refused with status 413 and the file is untouched.
+ * trailing newline; the previous contents are kept. Newlines inside a line are
+ * folded to ` | ` so each entry stays on one physical line. A write that would
+ * grow the file past the cap is refused with status 413 and the file is
+ * untouched.
  *
- * @param {string} gameId - client game id (sanitised before use)
+ * @param {string} gameId - client session/game id (sanitised before use)
  * @param {string[]} lines - log lines to append
  * @param {string} [rootDir] - project root that owns `logs/`
  * @param {{maxBytes?: number}} [options] - cap override (used by tests)
@@ -96,6 +101,9 @@ function appendLog(gameId, lines, rootDir = PROJECT_ROOT, options = {}) {
     return { ok: false, status: 400, error: 'lines must be an array of strings' };
   }
 
+  // One physical line per entry: dice-log messages contain newlines.
+  const cleanLines = lines.map(line => line.replace(/\r\n|\r|\n/g, ' | '));
+
   const logDir = path.resolve(rootDir, LOG_DIR_NAME);
   const file = path.join(logDir, `${safeId}.txt`);
 
@@ -112,7 +120,7 @@ function appendLog(gameId, lines, rootDir = PROJECT_ROOT, options = {}) {
     if (error.code !== 'ENOENT') throw error;
   }
 
-  const payload = lines.length === 0 ? '' : `${lines.join('\n')}\n`;
+  const payload = cleanLines.length === 0 ? '' : `${cleanLines.join('\n')}\n`;
   const payloadBytes = Buffer.byteLength(payload, 'utf8');
   if (existingBytes + payloadBytes > maxBytes) {
     return {
@@ -200,7 +208,7 @@ async function handleLogApi(req, res, rootDir) {
       return true;
     }
 
-    const result = appendLog(payload.gameId, payload.lines ?? [], rootDir);
+    const result = appendLog(payload.sessionId ?? payload.gameId, payload.lines ?? [], rootDir);
     if (!result.ok) {
       sendJSON(res, result.status || 400, { ok: false, error: result.error, limit: result.limit });
       return true;

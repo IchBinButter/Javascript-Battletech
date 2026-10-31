@@ -534,7 +534,8 @@ export class Logger {
  * export header on phase changes, mirrors `ui.log` dice-log lines into the same
  * ring buffer, records uncaught errors / unhandled rejections while the game is
  * running, and - when the page is served by `tools/dev-server.cjs` - streams
- * the log to `logs/<gameId>.txt` through `POST /api/log`.
+ * the log to `logs/<gameId>-<session timestamp>.txt` through `POST /api/log`
+ * (one file per game, so reloading does not append to the previous game's log).
  *
  * main.js calls this from `startGame` and `dispose()`s it from `teardownGame`,
  * so listeners exist exactly once per game. `dispose()` is idempotent: after it
@@ -689,6 +690,20 @@ export function attachGameLogging({
 
   let streamState = 'disabled'; // 'probing' | 'streaming' | 'disabled'
   let pendingLines = [];
+
+  // One file per session: the engine gameId repeats on every page load, so a
+  // timestamp keeps separate games apart. The server sanitises it again.
+  const sessionStartedAt = (() => {
+    try {
+      return new Date(typeof logger._now === 'function' ? logger._now() : Date.now());
+    } catch (_) {
+      return new Date();
+    }
+  })();
+  const sessionId = `${engine.gameId ?? 'game'}-${sessionStartedAt.toISOString().replace(/[-:.]/g, '').replace('Z', '')}`;
+
+  // One physical line per entry: dice-log messages contain newlines.
+  const toWireLines = (lines) => lines.map(line => String(line).replace(/\r\n|\r|\n/g, ' | '));
   let streamUnsubscribe = null;
   let streamInterval = null;
   let probeTimer = null;
@@ -769,7 +784,11 @@ export function attachGameLogging({
 
     const lines = pendingLines;
     pendingLines = [];
-    const body = JSON.stringify({ gameId: engine.gameId ?? null, lines });
+    const body = JSON.stringify({
+      gameId: engine.gameId ?? null,
+      sessionId,
+      lines: toWireLines(lines)
+    });
 
     if (beacon && sendBeaconPayload(body)) return true;
 
