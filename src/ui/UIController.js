@@ -43,7 +43,6 @@ export class UIController {
     // session only (no localStorage): 'record' is the new card, 'classic' keeps
     // the old health-bar list available for comparison.
     this.unitView = 'record';
-    this.recordRear = false;
     this.recordOverlayOpen = false;
     this._selectedUnit = null;
     this._recordKeyHandler = null;
@@ -906,8 +905,6 @@ export class UIController {
     if (inWeaponPhase) unitEligibility = this._getUnitFireEligibility(unit, state);
 
     return {
-      rear: this.recordRear,
-      onToggleRear: (rear) => this._setRearArmour(rear),
       getWeaponData: (type) => this._getWeaponData(type),
       unitEligibility,
       getEligibility: (weapon, weaponData, weaponIndex) => {
@@ -917,13 +914,6 @@ export class UIController {
         return this._getWeaponEligibility(unit, weapon, weaponData, state, weaponIndex);
       }
     };
-  }
-
-  /** Toggle the rear torso armour strip and re-render both presentations. */
-  _setRearArmour(rear) {
-    this.recordRear = Boolean(rear);
-    const unit = this._selectedUnit || this._lookupSelectedUnit();
-    if (unit) this.updateUnitPanel(unit);
   }
 
   /** Open the full record-sheet overlay for the selected unit. */

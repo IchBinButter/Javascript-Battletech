@@ -64,17 +64,37 @@ describe('record card in the unit panel', () => {
     expect(document.getElementById('unit-details').textContent).toContain('Locust LCT-1V');
   });
 
-  it('renders the rear-armour toggle from the card', () => {
+  it('always renders the rear-armour strip in the card (no toggle)', () => {
     ui.updateUnitPanel(atlas);
     const strip = document.querySelector('#unit-details .record-rear-strip');
-    expect(strip.hidden).toBe(true);
+    expect(strip).not.toBeNull();
+    expect(strip.hidden).toBe(false);
+    expect(document.querySelector('#unit-details .record-rear-toggle')).toBeNull();
 
-    document.querySelector('#unit-details .record-rear-toggle').click();
-
-    const refreshed = document.querySelector('#unit-details .record-rear-strip');
-    expect(refreshed.hidden).toBe(false);
-    const rearCenter = refreshed.querySelector('[data-location="centerTorso"]');
+    const rearCenter = strip.querySelector('[data-location="centerTorso"]');
     expect(rearCenter.querySelectorAll('.pip').length).toBe(atlas.getMaxArmor('centerTorso', true));
+  });
+
+  it('shows armour and internal structure side by side in the card', () => {
+    ui.updateUnitPanel(atlas);
+
+    const diagrams = document.querySelector('#unit-details .record-diagrams');
+    expect(diagrams).not.toBeNull();
+    expect(diagrams.children).toHaveLength(2);
+    expect(diagrams.children[0].dataset.diagram).toBe('armor');
+    expect(diagrams.children[1].dataset.diagram).toBe('internal');
+    // The compact card hides the long location key; the A/I strip carries it.
+    expect(diagrams.querySelector('.record-diagram-key')).toBeNull();
+  });
+
+  it('keeps the heat-effects table collapsed but available', () => {
+    ui.updateUnitPanel(atlas);
+
+    const details = document.querySelector('#unit-details .heat-effects-details');
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary').textContent).toContain('Heat effects');
+    expect(details.querySelectorAll('.heat-steps tbody tr').length).toBeGreaterThan(10);
   });
 
   it('keeps the card inside the 320 px sidebar (scroll containers, no fixed width)', () => {
@@ -323,16 +343,15 @@ describe('full record-sheet overlay', () => {
     expect(body.textContent).toContain('G4/P5');
   });
 
-  it('renders the rear-armour toggle inside the overlay', () => {
+  it('always renders the rear-armour strip inside the overlay', () => {
     ui.updateUnitPanel(atlas);
     ui.openRecordSheet();
 
     const body = document.getElementById('record-sheet-body');
-    expect(body.querySelector('.record-rear-strip').hidden).toBe(true);
-    body.querySelector('.record-rear-toggle').click();
-
     const strip = body.querySelector('.record-rear-strip');
+    expect(strip).not.toBeNull();
     expect(strip.hidden).toBe(false);
+    expect(body.querySelector('.record-rear-toggle')).toBeNull();
     expect(strip.querySelectorAll('[data-location="centerTorso"] .pip')).toHaveLength(14);
   });
 });

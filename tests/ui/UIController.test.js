@@ -428,22 +428,17 @@ describe('UIController', () => {
       expect(text).toContain('Heat Sinks: 20');
     });
 
-    it('toggles the rear torso armour strip', () => {
+    it('always shows the rear torso armour strip', () => {
       ui.updateUnitPanel(atlas);
 
-      const strip = () => ui.unitDetails.querySelector('.record-rear-strip');
-      expect(strip().hidden).toBe(true);
+      const strip = ui.unitDetails.querySelector('.record-rear-strip');
+      expect(strip).not.toBeNull();
+      expect(strip.hidden).toBe(false);
+      expect(ui.unitDetails.querySelector('.record-rear-toggle')).toBeNull();
 
-      ui._setRearArmour(true);
-      expect(strip().hidden).toBe(false);
-      const rearCenter = ui.unitDetails.querySelector(
-        '.record-rear-strip [data-location="centerTorso"]'
-      );
+      const rearCenter = strip.querySelector('[data-location="centerTorso"]');
       expect(rearCenter.querySelectorAll('.pip').length)
         .toBe(atlas.getMaxArmor('centerTorso', true));
-
-      ui._setRearArmour(false);
-      expect(strip().hidden).toBe(true);
     });
 
     it('keeps the classic bars available and remembers the choice', () => {

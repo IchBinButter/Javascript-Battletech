@@ -95,8 +95,8 @@ export function MechDataPanel(unit, options = {}) {
  * Build the overlay sheet body.
  *
  * @param {object} unit
- * @param {object} [options] - weapon data, eligibility, rear-armour state and
- *   the rear toggle callback (same options the card takes)
+ * @param {object} [options] - weapon data and eligibility (same options the
+ *   card takes); the rear torso armour is always drawn, no toggle
  * @returns {HTMLElement}
  */
 export function RecordSheet(unit, options = {}) {
@@ -114,10 +114,7 @@ export function RecordSheet(unit, options = {}) {
   root.appendChild(left);
 
   const right = el('div', { className: 'sheet-column sheet-right' });
-  right.appendChild(ArmorDiagram(unit, {
-    rear: Boolean(options.rear),
-    onToggleRear: options.onToggleRear
-  }));
+  right.appendChild(ArmorDiagram(unit));
   right.appendChild(InternalStructureDiagram(unit));
   right.appendChild(HeatScale(unit));
   right.appendChild(WarriorData(unit));

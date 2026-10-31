@@ -94,7 +94,11 @@ export function HeatScale(unit, options = {}) {
   }));
   section.appendChild(avoid);
 
-  // The full printed table. `current` marks the highest step that applies.
+  // The full printed table, minimised behind a summary so it stays available
+  // for a quick lookup without taking up the card. `current` marks the highest
+  // step that applies.
+  const details = el('details', { className: 'heat-effects-details' });
+  details.appendChild(el('summary', { text: 'Heat effects' }));
   const scroll = el('div', { className: 'heat-steps-scroll' });
   const table = el('table', { className: 'heat-steps' });
   const head = el('thead');
@@ -118,7 +122,8 @@ export function HeatScale(unit, options = {}) {
   }
   table.appendChild(body);
   scroll.appendChild(table);
-  section.appendChild(scroll);
+  details.appendChild(scroll);
+  section.appendChild(details);
 
   return section;
 }

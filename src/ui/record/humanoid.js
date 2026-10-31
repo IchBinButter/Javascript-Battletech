@@ -187,12 +187,11 @@ function createDiagramKey(unit, isArmor) {
  * Rear-torso strip (armour only)
  * ------------------------------------------------------------------ */
 
-function createRearStrip(unit, rear) {
+function createRearStrip(unit) {
   const strip = el('div', {
     className: 'record-rear-strip',
     attrs: { 'aria-label': 'Rear torso armour' }
   });
-  strip.hidden = !rear;
 
   for (const location of TORSO_KEYS) {
     const current = armorValue(unit, location, true);
@@ -223,19 +222,19 @@ function createRearStrip(unit, rear) {
  * @param {object} unit - real Unit (or a plain fixture with the same accessors)
  * @param {object} [options]
  * @param {'armor'|'internal'} [options.variant]
- * @param {boolean} [options.rear] - show the rear-torso strip (armour only)
  * @param {boolean} [options.compact] - extra class for the 320 px card
- * @param {(rear: boolean) => void} [options.onToggleRear] - called with the
- *   next state when the toggle is pressed. Without it the component toggles
- *   itself (handy in isolation).
+ * @param {boolean} [options.showKey] - render the full-name location key
+ *   (the compact card hides it: the A/I strip already carries the numbers)
  * @returns {HTMLElement}
+ *
+ * The rear torso armour strip is always part of the armour diagram - the card
+ * must show front and rear without a toggle (the player needs both at a glance).
  */
 export function createHumanoidDiagram(unit, options = {}) {
   const {
     variant = 'armor',
-    rear = false,
     compact = false,
-    onToggleRear = null
+    showKey = true
   } = options;
   const isArmor = variant === 'armor';
   const pipClass = isArmor ? 'armor-pip' : 'internal-pip';
@@ -246,48 +245,21 @@ export function createHumanoidDiagram(unit, options = {}) {
       'record-diagram',
       isArmor ? 'record-armor' : 'record-internal',
       compact ? 'compact' : '',
-      isArmor && rear ? 'show-rear' : ''
+      isArmor ? 'show-rear' : ''
     ].filter(Boolean).join(' '),
     dataset: {
       diagram: isArmor ? 'armor' : 'internal',
-      face: isArmor && rear ? 'rear' : 'front'
+      face: 'front'
     }
   });
 
-  const header = el('div', { className: 'record-diagram-header' });
-  header.appendChild(el('span', {
-    className: 'record-diagram-title',
-    text: isArmor ? 'Armour' : 'Internal Structure'
+  root.appendChild(el('div', {
+    className: 'record-diagram-header',
+    children: [el('span', {
+      className: 'record-diagram-title',
+      text: isArmor ? 'Armour' : 'Internal Structure'
+    })]
   }));
-
-  let toggle = null;
-  if (isArmor) {
-    toggle = el('button', {
-      className: 'record-rear-toggle',
-      text: rear ? 'Rear armour: on' : 'Rear armour: off',
-      attrs: {
-        type: 'button',
-        'data-record-action': 'toggle-rear',
-        'aria-pressed': String(Boolean(rear))
-      },
-      title: 'Toggle the rear torso armour strip'
-    });
-    toggle.addEventListener('click', () => {
-      const next = !root.classList.contains('show-rear');
-      if (typeof onToggleRear === 'function') {
-        onToggleRear(next);
-        return;
-      }
-      root.classList.toggle('show-rear', next);
-      root.dataset.face = next ? 'rear' : 'front';
-      toggle.setAttribute('aria-pressed', String(next));
-      toggle.textContent = next ? 'Rear armour: on' : 'Rear armour: off';
-      const strip = root.querySelector('.record-rear-strip');
-      if (strip) strip.hidden = !next;
-    });
-    header.appendChild(toggle);
-  }
-  root.appendChild(header);
 
   const svg = svgEl('svg', {
     className: 'record-diagram-svg',
@@ -353,8 +325,8 @@ export function createHumanoidDiagram(unit, options = {}) {
   }
 
   root.appendChild(svg);
-  root.appendChild(createDiagramKey(unit, isArmor));
-  if (isArmor) root.appendChild(createRearStrip(unit, rear));
+  if (showKey) root.appendChild(createDiagramKey(unit, isArmor));
+  if (isArmor) root.appendChild(createRearStrip(unit));
 
   return root;
 }

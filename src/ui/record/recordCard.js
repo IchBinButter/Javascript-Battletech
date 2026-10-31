@@ -2,8 +2,9 @@
  * RecordCard - presentation A: the record-sheet blocks that replace the old
  * health-bar list inside the 320 px unit sidebar.
  *
- * Sections are single-column and self-contained; the weapons inventory scrolls
- * horizontally inside its own wrapper instead of pushing the panel wider.
+ * The two humanoid diagrams sit side by side at half width so armour and
+ * internal structure are visible together without scrolling; the location key
+ * is omitted here because the A/I strip below carries the same numbers.
  */
 
 import { el, recordSection } from './dom.js';
@@ -46,12 +47,10 @@ function armorInternalStrip(unit) {
 export function RecordCard(unit, options = {}) {
   const card = el('div', { className: 'record-card' });
 
-  card.appendChild(ArmorDiagram(unit, {
-    compact: true,
-    rear: Boolean(options.rear),
-    onToggleRear: options.onToggleRear
-  }));
-  card.appendChild(InternalStructureDiagram(unit, { compact: true }));
+  const diagrams = el('div', { className: 'record-diagrams' });
+  diagrams.appendChild(ArmorDiagram(unit, { compact: true, showKey: false }));
+  diagrams.appendChild(InternalStructureDiagram(unit, { compact: true, showKey: false }));
+  card.appendChild(diagrams);
   const weaponsSection = recordSection('Weapons', 'record-weapons-block');
   weaponsSection.appendChild(WeaponsTable(unit, {
     compact: true,

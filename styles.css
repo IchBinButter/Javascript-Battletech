@@ -320,6 +320,29 @@ input[type="radio"] {
   margin-top: 6px;
 }
 
+/* Armour and internal structure side by side at half width, so both fit the
+   sidebar without scrolling. */
+.record-diagrams {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.record-diagrams > .record-diagram {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px;
+}
+
+.record-diagrams .record-diagram-header {
+  margin-bottom: 1px;
+}
+
+.record-diagrams .record-diagram-title {
+  font-size: 9px;
+}
+
 .record-section {
   background: #0d1b2a;
   border: 1px solid #253652;
@@ -392,7 +415,12 @@ input[type="radio"] {
 }
 
 .record-diagram.compact .record-diagram-svg {
-  max-width: 280px;
+  max-width: none;
+  width: 100%;
+}
+
+.record-diagrams .record-diagram-svg {
+  max-width: 100%;
 }
 
 .silhouette rect {
@@ -653,6 +681,26 @@ input[type="radio"] {
   font-size: 9px;
   color: #ffb86b;
   margin-bottom: 4px;
+}
+
+/* Heat effects reference: collapsed by default, one click to look up a step. */
+.heat-effects-details {
+  margin-top: 4px;
+  font-size: 9px;
+  color: #9fb3c8;
+}
+
+.heat-effects-details > summary {
+  cursor: pointer;
+  padding: 2px 0;
+  color: #7dd3fc;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.heat-effects-details[open] > summary {
+  margin-bottom: 3px;
 }
 
 .heat-steps-scroll {

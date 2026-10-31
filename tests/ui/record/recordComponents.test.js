@@ -101,7 +101,7 @@ describe('ArmorDiagram', () => {
     const unit = createRecordUnit('atlas-as7d');
     unit.applyDamage('leftTorso', 3, true);
 
-    const diagram = ArmorDiagram(unit, { rear: true });
+    const diagram = ArmorDiagram(unit);
     const rear = [...rearPips(diagram, 'leftTorso')];
     expect(rear.filter(pip => pip.dataset.status === 'filled')).toHaveLength(7);
     expect(rear.filter(pip => pip.dataset.status === 'empty')).toHaveLength(3);
@@ -109,25 +109,26 @@ describe('ArmorDiagram', () => {
       .toBe(true);
   });
 
-  it('shows the rear strip behind a toggle', () => {
+  it('always shows the rear torso armour, without a toggle', () => {
     const unit = createRecordUnit('atlas-as7d');
-    const off = ArmorDiagram(unit, { rear: false });
-    expect(off.querySelector('.record-rear-strip').hidden).toBe(true);
-    expect(off.dataset.face).toBe('front');
+    const diagram = ArmorDiagram(unit);
 
-    const on = ArmorDiagram(unit, { rear: true });
-    expect(on.querySelector('.record-rear-strip').hidden).toBe(false);
-    expect(on.dataset.face).toBe('rear');
+    const strip = diagram.querySelector('.record-rear-strip');
+    expect(strip).not.toBeNull();
+    expect(strip.hidden).toBe(false);
+    expect(diagram.dataset.face).toBe('front');
+    expect(diagram.querySelector('.record-rear-toggle')).toBeNull();
+    // Front and rear are both visible at once: the card must not need a click.
+    expect(diagram.querySelector('[data-face="front"]')).not.toBeNull();
+    expect(strip.querySelectorAll('[data-location="centerTorso"] .pip')).toHaveLength(
+      unit.getMaxArmor('centerTorso', true)
+    );
   });
 
-  it('toggles itself when no callback is supplied', () => {
-    const diagram = ArmorDiagram(createRecordUnit('atlas-as7d'), { rear: false });
-    const toggle = diagram.querySelector('.record-rear-toggle');
-    toggle.click();
-
-    expect(diagram.classList.contains('show-rear')).toBe(true);
-    expect(diagram.querySelector('.record-rear-strip').hidden).toBe(false);
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  it('keeps the location key optional (the compact card omits it)', () => {
+    const unit = createRecordUnit('atlas-as7d');
+    expect(ArmorDiagram(unit).querySelector('.record-diagram-key')).not.toBeNull();
+    expect(ArmorDiagram(unit, { showKey: false }).querySelector('.record-diagram-key')).toBeNull();
   });
 
   it('marks a destroyed location', () => {
