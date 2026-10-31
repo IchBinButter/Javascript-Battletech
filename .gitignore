@@ -4,6 +4,9 @@ dist/
 coverage/
 logs/
 *.log
+kb/
+tools/*
+!tools/dev-server.cjs
 .DS_Store
 Thumbs.db
 .hive/
