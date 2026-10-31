@@ -25,7 +25,7 @@ const REQUIRED_IDS = [
   'movement-panel', 'movement-mode', 'mp-display',
   'btn-confirm-move', 'btn-cancel-move',
   // log
-  'log-panel', 'dice-log'
+  'log-panel', 'dice-log', 'btn-toggle-log'
 ];
 
 describe('index.html structure', () => {
@@ -51,6 +51,15 @@ describe('index.html structure', () => {
   it('offers every physical attack type', () => {
     const options = [...doc.querySelectorAll('#physical-type option')].map(o => o.value);
     expect(options).toEqual(['punch', 'kick', 'charge', 'dfa', 'push']);
+  });
+
+  it('puts the dice-log toggle inside the log panel and expanded by default', () => {
+    const panel = doc.getElementById('log-panel');
+    const button = doc.getElementById('btn-toggle-log');
+    expect(panel.contains(button)).toBe(true);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(button.getAttribute('aria-controls')).toBe('dice-log');
+    expect(panel.classList.contains('collapsed')).toBe(false);
   });
 
   it('starts with the game panels hidden and the canvas present', () => {

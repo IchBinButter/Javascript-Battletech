@@ -76,9 +76,13 @@
       </div>
     </div>
 
-    <!-- Bottom: Dice Log -->
+    <!-- Bottom: Dice Log (collapsible) -->
     <div id="log-panel">
-      <h3>Dice Log</h3>
+      <div class="log-header">
+        <h3>Dice Log</h3>
+        <button type="button" id="btn-toggle-log" class="log-toggle" aria-expanded="true"
+          aria-controls="dice-log" title="Minimise the dice log">Minimise</button>
+      </div>
       <div id="dice-log"></div>
     </div>
   </div>

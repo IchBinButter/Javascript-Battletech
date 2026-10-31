@@ -93,6 +93,10 @@ describe('record card in the unit panel', () => {
     expect(css).toMatch(/\.record-weapons-scroll\s*\{[^}]*overflow-x:\s*auto/);
     expect(css).toMatch(/\.record-card\s*\{[^}]*min-width:\s*0/);
     expect(css).toMatch(/\.record-sheet-grid\s*\{[^}]*grid-template-columns/);
+    // The sidebar runs the full height; the dice log ends where it starts.
+    expect(css).toMatch(/#ui-panel\s*\{[^}]*grid-row:\s*1\s*\/\s*span\s*2/);
+    expect(css).toMatch(/#log-panel\s*\{[^}]*grid-column:\s*1;/);
+    expect(css).toMatch(/#log-panel\.collapsed\s+#dice-log\s*\{[^}]*display:\s*none/);
   });
 
   it('keeps non-tactical metadata out of the map-mode header', () => {

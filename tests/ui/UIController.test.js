@@ -27,7 +27,13 @@ function createDOMFixture() {
       <button id="btn-confirm-move">Confirm Move</button>
       <button id="btn-cancel-move">Cancel</button>
     </div>
-    <div id="dice-log"></div>
+    <div id="log-panel">
+      <div class="log-header">
+        <h3>Dice Log</h3>
+        <button type="button" id="btn-toggle-log" aria-expanded="true">Minimise</button>
+      </div>
+      <div id="dice-log"></div>
+    </div>
   `;
 }
 
@@ -337,6 +343,22 @@ describe('UIController', () => {
       const rearCenter = strip.querySelector('[data-location="centerTorso"]');
       expect(rearCenter.querySelectorAll('.pip').length)
         .toBe(atlas.getMaxArmor('centerTorso', true));
+    });
+
+    it('minimises and restores the dice log', () => {
+      const panel = document.getElementById('log-panel');
+      const button = document.getElementById('btn-toggle-log');
+      expect(panel.classList.contains('collapsed')).toBe(false);
+
+      button.click();
+      expect(panel.classList.contains('collapsed')).toBe(true);
+      expect(button.textContent).toBe('Expand');
+      expect(button.getAttribute('aria-expanded')).toBe('false');
+
+      button.click();
+      expect(panel.classList.contains('collapsed')).toBe(false);
+      expect(button.textContent).toBe('Minimise');
+      expect(button.getAttribute('aria-expanded')).toBe('true');
     });
 
     it('has no classic health-bar option left', () => {

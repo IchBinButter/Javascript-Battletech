@@ -43,6 +43,8 @@ export class UIController {
     this._selectedUnit = null;
     this._recordKeyHandler = null;
     this.btnRecordSheet = document.getElementById('btn-record-sheet');
+    this.logPanel = document.getElementById('log-panel');
+    this.btnToggleLog = document.getElementById('btn-toggle-log');
     this.recordOverlay = document.getElementById('record-overlay');
     this.recordSheetBody = document.getElementById('record-sheet-body');
     this.recordSheetTitle = document.getElementById('record-sheet-title');
@@ -1143,6 +1145,25 @@ export class UIController {
     }
     if (this.btnCloseRecord) {
       this.btnCloseRecord.addEventListener('click', () => this.closeRecordSheet());
+    }
+
+    // Dice log can be minimised; it is reference, not permanent furniture.
+    if (this.btnToggleLog && this.logPanel) {
+      this.btnToggleLog.addEventListener('click', () => this._toggleLogPanel());
+    }
+  }
+
+  /** Collapse or expand the dice log footer. */
+  _toggleLogPanel() {
+    if (!this.logPanel) return;
+    const collapsed = this.logPanel.classList.toggle('collapsed');
+    if (this.btnToggleLog) {
+      this.btnToggleLog.textContent = collapsed ? 'Expand' : 'Minimise';
+      this.btnToggleLog.setAttribute('aria-expanded', String(!collapsed));
+      this.btnToggleLog.setAttribute(
+        'title',
+        collapsed ? 'Expand the dice log' : 'Minimise the dice log'
+      );
     }
   }
 }
