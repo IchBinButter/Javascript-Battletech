@@ -273,6 +273,793 @@ input[type="radio"] {
   #log-panel { grid-row: 3; grid-column: 1; }
 }
 
+/* ==================================================================== *
+ * Record-sheet unit panel (320 px sidebar) and full record-sheet overlay
+ * ==================================================================== */
+
+#unit-panel {
+  min-width: 0;
+}
+
+#unit-details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* View control: Record card / Classic bars / Record Sheet */
+.unit-view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.unit-view-button {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.unit-view-button.active {
+  background: #0d7377;
+  border-color: #7dd3fc;
+  color: #e6f7ff;
+}
+
+#btn-record-sheet {
+  margin-left: auto;
+}
+
+/* Shared record blocks */
+.record-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 6px;
+}
+
+.record-section {
+  background: #0d1b2a;
+  border: 1px solid #253652;
+  border-radius: 4px;
+  padding: 6px;
+  min-width: 0;
+}
+
+.record-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+  margin-bottom: 5px;
+  border-bottom: 1px solid #1f2f47;
+  padding-bottom: 3px;
+}
+
+.record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-size: 10px;
+  color: #8b9bb4;
+  margin-bottom: 4px;
+}
+
+/* ---------------------------------------------------------------- *
+ * Humanoid diagrams
+ * ---------------------------------------------------------------- */
+
+.record-diagram {
+  min-width: 0;
+}
+
+.record-diagram-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 3px;
+}
+
+.record-diagram-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+}
+
+.record-rear-toggle {
+  padding: 2px 6px;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.record-rear-toggle[aria-pressed="true"] {
+  background: #0d7377;
+  border-color: #7dd3fc;
+}
+
+.record-diagram-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.record-diagram.compact .record-diagram-svg {
+  max-width: 280px;
+}
+
+.silhouette rect {
+  fill: #0a1424;
+  stroke: #2b3d59;
+  stroke-width: 1.2;
+}
+
+.record-diagram .pip.armor-pip.filled {
+  fill: #4cc9f0;
+  stroke: #7dd3fc;
+  stroke-width: 0.4;
+}
+
+.record-internal .pip.internal-pip.filled {
+  fill: #f0b429;
+  stroke: #f6d365;
+  stroke-width: 0.4;
+}
+
+.record-diagram .pip.empty {
+  fill: #101a2c;
+  stroke: #3a4d6b;
+  stroke-width: 0.5;
+}
+
+.location-label {
+  fill: #cfe3ff;
+  font-size: 6px;
+  font-weight: 600;
+}
+
+.location-destroyed {
+  fill: #ff6b81;
+  font-size: 5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.record-location.destroyed .location-label {
+  fill: #ff6b81;
+}
+
+.record-location.destroyed .silhouette rect {
+  stroke: #7a2434;
+}
+
+.record-diagram-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin-top: 4px;
+  font-size: 9px;
+  line-height: 1.3;
+  color: #9fb3c8;
+}
+
+.record-diagram.compact .record-diagram-key {
+  font-size: 8px;
+  gap: 1px 6px;
+}
+
+.record-key-entry {
+  white-space: nowrap;
+}
+
+.record-rear-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed #2b3d59;
+}
+
+.record-rear-strip[hidden] {
+  display: none;
+}
+
+.rear-location {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rear-label {
+  font-size: 9px;
+  color: #b8c7dc;
+}
+
+.pip-block {
+  display: block;
+  width: 38px;
+  height: auto;
+}
+
+/* Armour / internal text strip (keeps the old A:/I: values) */
+.record-ai-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 8px;
+  font-size: 9px;
+  color: #9fb3c8;
+}
+
+.record-ai-entry {
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- *
+ * Weapons inventory
+ * ---------------------------------------------------------------- */
+
+.record-weapons-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.record-weapons {
+  width: 100%;
+  min-width: 340px;
+  border-collapse: collapse;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.record-weapons.compact {
+  font-size: 9px;
+  min-width: 320px;
+}
+
+.record-weapons th,
+.record-weapons td {
+  padding: 1px 3px;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid #16233a;
+}
+
+.record-weapons th {
+  color: #7dd3fc;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.record-weapons th[data-col="qty"],
+.record-weapons td[data-col="qty"],
+.record-weapons th[data-col="type"],
+.record-weapons td[data-col="type"],
+.record-weapons th[data-col="loc"],
+.record-weapons td[data-col="loc"] {
+  text-align: left;
+}
+
+.record-weapon-row-disabled {
+  opacity: 0.55;
+}
+
+.record-weapon-check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  font-size: inherit;
+}
+
+.record-weapon-check {
+  margin: 0;
+  accent-color: #4cc9f0;
+}
+
+.record-weapon-qty-value {
+  color: #cfe3ff;
+}
+
+.record-weapon-reason {
+  display: block;
+  color: #ff8fa3;
+  font-size: 8px;
+  line-height: 1.1;
+}
+
+.record-weapons-notice {
+  color: #ff8fa3;
+  font-size: 9px;
+  margin-bottom: 3px;
+}
+
+.record-weapon-empty td {
+  color: #7f8ea6;
+  text-align: left;
+}
+
+/* ---------------------------------------------------------------- *
+ * Heat scale
+ * ---------------------------------------------------------------- */
+
+.record-heat-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 10px;
+  font-size: 10px;
+  color: #cfe3ff;
+  margin-bottom: 4px;
+}
+
+.heat-current {
+  font-weight: 700;
+  color: #f0b429;
+}
+
+.heat-effects {
+  flex-basis: 100%;
+  color: #ffb86b;
+  font-size: 9px;
+}
+
+.record-heat-track {
+  position: relative;
+  display: flex;
+  gap: 1px;
+  height: 10px;
+  margin: 4px 0 10px;
+}
+
+.record-heat-segment {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 1px;
+  background: #22314a;
+}
+
+.record-heat-segment.safe.filled { background: #4ade80; }
+.record-heat-segment.warn.filled { background: #facc15; }
+.record-heat-segment.danger.filled { background: #f97316; }
+.record-heat-segment.critical.filled { background: #ef4444; }
+
+.heat-marker {
+  position: absolute;
+  top: -3px;
+  transform: translateX(-50%);
+  background: #f72585;
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 3px;
+  font-size: 8px;
+  line-height: 13px;
+  font-weight: 700;
+}
+
+.heat-avoid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  font-size: 9px;
+  color: #ffb86b;
+  margin-bottom: 4px;
+}
+
+.heat-steps-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.heat-steps {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9px;
+}
+
+.heat-steps th,
+.heat-steps td {
+  padding: 1px 3px;
+  text-align: left;
+  border-bottom: 1px solid #16233a;
+  white-space: nowrap;
+}
+
+.heat-steps th {
+  color: #7dd3fc;
+}
+
+.heat-step-value {
+  width: 28px;
+  color: #f0b429;
+  font-weight: 600;
+}
+
+.heat-step.current {
+  background: #233b5c;
+}
+
+.heat-step.current .heat-step-effect {
+  color: #ffffff;
+}
+
+.heat-step.active:not(.current) .heat-step-effect {
+  color: #b8c7dc;
+}
+
+/* ---------------------------------------------------------------- *
+ * Critical hit tables
+ * ---------------------------------------------------------------- */
+
+.crit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.crit-location {
+  min-width: 0;
+  background: #0a1424;
+  border: 1px solid #1f2f47;
+  border-radius: 3px;
+  padding: 4px;
+}
+
+.crit-location-title {
+  font-size: 10px;
+  color: #cfe3ff;
+  margin-bottom: 3px;
+  font-weight: 600;
+}
+
+.crit-location.destroyed .crit-location-name {
+  color: #ff6b81;
+}
+
+.crit-location-destroyed {
+  color: #ff6b81;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.crit-columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.crit-columns.two-blocks {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.crit-slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.crit-slot {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 0 2px;
+  font-size: 9px;
+  line-height: 1.35;
+  border-bottom: 1px solid #101c2e;
+  min-width: 0;
+}
+
+.crit-number {
+  flex: 0 0 12px;
+  color: #6f86a6;
+  font-size: 8px;
+  text-align: right;
+}
+
+.crit-item {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #cfe3ff;
+}
+
+.crit-slot.destroyed {
+  opacity: 0.7;
+}
+
+.crit-slot.destroyed .crit-item {
+  color: #ff6b81;
+}
+
+.crit-slot.destroyed s {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* ---------------------------------------------------------------- *
+ * MechWarrior block
+ * ---------------------------------------------------------------- */
+
+.record-warrior .warrior-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 10px;
+  margin-bottom: 3px;
+}
+
+.warrior-label {
+  color: #7dd3fc;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.warrior-name {
+  color: #cfe3ff;
+  font-weight: 600;
+}
+
+.warrior-status {
+  color: #ffb86b;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.warrior-status.dead {
+  color: #ff6b81;
+}
+
+.warrior-gunnery,
+.warrior-piloting {
+  color: #f0b429;
+  font-weight: 700;
+}
+
+.warrior-hit-boxes {
+  display: flex;
+  gap: 3px;
+}
+
+.warrior-hit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #3a4d6b;
+  border-radius: 2px;
+  font-size: 9px;
+  color: #8b9bb4;
+  background: #0a1424;
+}
+
+.warrior-hit.taken {
+  background: #ef4444;
+  border-color: #f87171;
+  color: #fff;
+}
+
+.warrior-hit.fatal {
+  border-style: double;
+}
+
+.warrior-consciousness-current {
+  color: #f0b429;
+  font-weight: 700;
+}
+
+.warrior-consciousness-table {
+  flex-basis: 100%;
+  color: #8b9bb4;
+  font-size: 9px;
+}
+
+/* ---------------------------------------------------------------- *
+ * Full record-sheet overlay
+ * ---------------------------------------------------------------- */
+
+#record-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(4, 8, 16, 0.86);
+}
+
+.record-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(1500px, 96vw);
+  height: min(960px, 94vh);
+  background: #0f1a2e;
+  border: 1px solid #35507a;
+  border-radius: 6px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+}
+
+.record-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #2b3d59;
+  background: #13223a;
+}
+
+.record-sheet-header h2 {
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7dd3fc;
+  margin: 0;
+}
+
+.record-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.record-sheet-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.sheet-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sheet-crits-column {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.record-sheet .record-section {
+  background: #0c1728;
+}
+
+.record-sheet .record-weapons {
+  min-width: 420px;
+  font-size: 11px;
+}
+
+.record-sheet .record-diagram-svg {
+  max-width: 460px;
+}
+
+.record-sheet .crit-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.record-sheet .crit-slot {
+  font-size: 10px;
+}
+
+/* 'Mech data block */
+.record-mech-data .mech-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  color: #cfe3ff;
+  margin-bottom: 6px;
+}
+
+.record-mech-data .mech-tonnage {
+  font-size: 11px;
+  color: #8b9bb4;
+}
+
+.mech-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 12px;
+  margin-bottom: 6px;
+}
+
+.mech-meta-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  border-bottom: 1px solid #16233a;
+}
+
+.mech-meta-item dt {
+  color: #7dd3fc;
+}
+
+.mech-meta-item dd {
+  color: #8b9bb4;
+}
+
+.mech-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px 12px;
+}
+
+.mech-stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  border-bottom: 1px solid #16233a;
+}
+
+.mech-stat-label {
+  color: #7dd3fc;
+}
+
+.mech-stat-value {
+  color: #cfe3ff;
+  text-align: right;
+}
+
+.mech-heat-effects {
+  margin-top: 4px;
+  color: #ffb86b;
+  font-size: 10px;
+}
+
+.mech-flag {
+  color: #ff4444;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .record-sheet-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .record-sheet {
+    width: 100%;
+    height: 100%;
+  }
+  #record-overlay {
+    padding: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .record-ai-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mech-stats,
+  .mech-meta {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .crit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* Start Menu Overlay */
 #start-menu-overlay {
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;

@@ -593,6 +593,12 @@ async function startGame(forceBuilder) {
   gameEngine.eventBus.on('damageApplied', () => {
     mapRenderer.render(viewState());
   });
+  gameEngine.eventBus.on('physicalAttackResolved', () => {
+    // A punch/kick/charge/DFA can knock a unit prone or destroy a location
+    // without a unitMoved event, so the board token needs a redraw. The unit
+    // sheet refresh for the same event is wired in UIController.init.
+    mapRenderer.render(viewState());
+  });
   gameEngine.eventBus.on('unitDestroyed', () => {
     mapRenderer.render(viewState());
   });
@@ -739,27 +745,31 @@ canvas.addEventListener('click', (event) => {
       const clickedUnit = unitOnHex;
       const targetable = ui.getTargetableUnits(ui.selectedUnitId);
       if (selectedUnit && targetable.some(unit => unit.id === clickedUnit.id)) {
+        // Record the target BEFORE refreshing anything that reads it. The
+        // classic picker and the record-card inventory are both rebuilt from
+        // the same `_getWeaponEligibility` verdict, so targets in the rear arc
+        // disable the same rows in both views.
         ui._pendingTarget = unitOnHex.id;
         ui.log(`Target selected: ${clickedUnit.name}`);
         mapRenderer.selectedUnit = ui.selectedUnitId;
 
         // Two-step fire flow: picking the target only records it and refreshes
-        // the weapon panel, because target-dependent eligibility (out of arc,
+        // the weapon views, because target-dependent eligibility (out of arc,
         // out of range, no line of sight) can only be judged once the target is
         // known. "Fire Selected" resolves the checked weapons afterwards.
-        if (ui.weaponFireMode && typeof ui._showWeaponPanel === 'function') {
-          ui._showWeaponPanel();
-        }
+        ui.refreshWeaponViews();
         mapRenderer.render(state);
         return;
       }
     }
 
     // Normal selection. The panel stays an inspection tool - movement follows
-    // the declaration queue (see refreshMovementPreview).
+    // the declaration queue (see refreshMovementPreview). The pending target
+    // belonged to the previous attacker, so it is cleared BEFORE the render
+    // that derives target-aware eligibility.
     mapRenderer.selectedUnit = unitOnHex.id;
-    ui.updateUnitPanel(unitOnHex);
     ui._pendingTarget = null;
+    ui.refreshWeaponViews(unitOnHex);
     refreshMovementPreview(unitOnHex, state);
     mapRenderer.render(state);
     return;
@@ -767,8 +777,13 @@ canvas.addEventListener('click', (event) => {
 
   // Clicked empty hex - handle movement
   if (ui.weaponFireMode) {
+    // Cancelling the declaration also clears the target before the record card
+    // is re-rendered; otherwise its rows would stay disabled for a target that
+    // no longer exists.
     ui.weaponFireMode = false;
+    ui._pendingTarget = null;
     ui.weaponPanel.style.display = 'none';
+    ui.refreshWeaponViews();
     ui.log('Weapon fire cancelled', 'info');
     return;
   }
@@ -886,9 +901,12 @@ _keydownHandler = (event) => {
     case 'ArrowRight': mapRenderer.offsetX -= 20; break;
     case 'Escape':
       mapRenderer.selectedUnit = null;
-      ui.updateUnitPanel(null);
       ui.weaponFireMode = false;
+      // Clear the target before the dependent panel render, then hide the
+      // picker: both weapon views drop their target-aware arrows together.
+      ui._pendingTarget = null;
       ui.weaponPanel.style.display = 'none';
+      ui.updateUnitPanel(null);
       clearPendingMovement();
       break;
     case 'n':

@@ -244,7 +244,12 @@ describe('UIController', () => {
     });
   });
 
-  describe('heat bar rendering', () => {
+  describe('heat bar rendering (classic view)', () => {
+    beforeEach(() => {
+      // The legacy health-bar list is still available behind the view control.
+      ui.setUnitView('classic');
+    });
+
     it('renders heat bar with inactive segments at zero heat', () => {
       atlas.heat = 0;
       ui.updateUnitPanel(atlas);
@@ -305,7 +310,11 @@ describe('UIController', () => {
     });
   });
 
-  describe('armor bar rendering', () => {
+  describe('armor bar rendering (classic view)', () => {
+    beforeEach(() => {
+      ui.setUnitView('classic');
+    });
+
     it('uses getMaxArmor from the unit for each location', () => {
       const maxArmorSpy = vi.spyOn(atlas, 'getMaxArmor');
       ui.updateUnitPanel(atlas);
@@ -371,6 +380,95 @@ describe('UIController', () => {
       ui.updateUnitPanel(atlas);
 
       expect(ui.selectedUnitId).toBe('atlas-0');
+    });
+  });
+
+  describe('record-sheet card (default view)', () => {
+    const LOCATIONS = [
+      'head', 'centerTorso', 'leftTorso', 'rightTorso',
+      'leftArm', 'rightArm', 'leftLeg', 'rightLeg'
+    ];
+
+    it('renders the record card instead of the health bars by default', () => {
+      ui.updateUnitPanel(atlas);
+
+      expect(ui.unitView).toBe('record');
+      expect(ui.unitDetails.querySelector('.record-card')).not.toBeNull();
+      expect(ui.unitDetails.querySelector('.record-armor')).not.toBeNull();
+      expect(ui.unitDetails.querySelector('.record-internal')).not.toBeNull();
+      expect(ui.unitDetails.querySelector('.heat-bar')).toBeNull();
+      expect(ui.unitDetails.querySelector('.armor-bar')).toBeNull();
+    });
+
+    it('draws one armour and internal pip per point from the unit maxima', () => {
+      ui.updateUnitPanel(atlas);
+
+      for (const loc of LOCATIONS) {
+        const front = ui.unitDetails.querySelector(
+          `.record-armor [data-location="${loc}"] [data-face="front"]`
+        );
+        expect(front.querySelectorAll('.pip').length, `${loc} armour`).toBe(atlas.getMaxArmor(loc));
+
+        const internal = ui.unitDetails.querySelector(
+          `.record-internal [data-location="${loc}"]`
+        );
+        expect(internal.querySelectorAll('.pip').length, `${loc} internal`)
+          .toBe(atlas.getMaxInternal(loc));
+      }
+    });
+
+    it('shows the A/I text, movement, engine and pilot info', () => {
+      ui.updateUnitPanel(atlas);
+
+      const text = ui.unitDetails.textContent;
+      expect(text).toContain('A:9/9 I:3/3'); // head
+      expect(text).toContain('MP: 3/3(5)');
+      expect(text).toContain('Pilot: G4/P5');
+      expect(text).toContain('Engine: standard');
+      expect(text).toContain('Heat Sinks: 20');
+    });
+
+    it('toggles the rear torso armour strip', () => {
+      ui.updateUnitPanel(atlas);
+
+      const strip = () => ui.unitDetails.querySelector('.record-rear-strip');
+      expect(strip().hidden).toBe(true);
+
+      ui._setRearArmour(true);
+      expect(strip().hidden).toBe(false);
+      const rearCenter = ui.unitDetails.querySelector(
+        '.record-rear-strip [data-location="centerTorso"]'
+      );
+      expect(rearCenter.querySelectorAll('.pip').length)
+        .toBe(atlas.getMaxArmor('centerTorso', true));
+
+      ui._setRearArmour(false);
+      expect(strip().hidden).toBe(true);
+    });
+
+    it('keeps the classic bars available and remembers the choice', () => {
+      ui.updateUnitPanel(atlas);
+      expect(ui.unitDetails.querySelector('.armor-bar')).toBeNull();
+
+      ui.setUnitView('classic');
+      expect(ui.unitDetails.querySelectorAll('.armor-bar')).toHaveLength(8);
+      expect(ui.unitDetails.querySelector('.heat-bar')).not.toBeNull();
+      expect(ui.unitDetails.querySelector('.record-card')).toBeNull();
+
+      // The choice survives a re-render and a selection change for the session.
+      ui.updateUnitPanel(atlas);
+      expect(ui.unitView).toBe('classic');
+      expect(ui.unitDetails.querySelectorAll('.armor-bar')).toHaveLength(8);
+
+      ui.setUnitView('record');
+      expect(ui.unitDetails.querySelector('.record-card')).not.toBeNull();
+    });
+
+    it('marks a destroyed location in the record card', () => {
+      atlas.internalStructure.head = 0;
+      ui.updateUnitPanel(atlas);
+
+      expect(ui.unitDetails.innerHTML).toContain('DESTROYED');
     });
   });
 

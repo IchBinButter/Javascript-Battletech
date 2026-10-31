@@ -10,6 +10,12 @@ import { weaponMountAt, weaponMountFor } from '../rules/combat/WeaponMounts.js';
 import { canWeaponFireAt } from '../rules/combat/ArcRules.js';
 import { buildingCombat } from '../rules/urban/Buildings.js';
 import { hexDistance } from '../hex/HexMath.js';
+import { RecordCard, RecordSheet } from './record/index.js';
+import {
+  movementValues,
+  currentMP as unitCurrentMP,
+  heatSinkInfo
+} from './record/unitValues.js';
 
 export class UIController {
   constructor({ viewerId = 0 } = {}) {
@@ -33,6 +39,28 @@ export class UIController {
     this.diceLog = document.getElementById('dice-log');
     this.mpDisplay = document.getElementById('mp-display');
 
+    // Record-sheet views. The chosen presentation lives in memory for the
+    // session only (no localStorage): 'record' is the new card, 'classic' keeps
+    // the old health-bar list available for comparison.
+    this.unitView = 'record';
+    this.recordRear = false;
+    this.recordOverlayOpen = false;
+    this._selectedUnit = null;
+    this._recordKeyHandler = null;
+    this.unitViewControls = document.getElementById('unit-view-controls');
+    this.btnViewRecord = document.getElementById('btn-view-record');
+    this.btnViewClassic = document.getElementById('btn-view-classic');
+    this.btnRecordSheet = document.getElementById('btn-record-sheet');
+    this.recordOverlay = document.getElementById('record-overlay');
+    this.recordSheetBody = document.getElementById('record-sheet-body');
+    this.recordSheetTitle = document.getElementById('record-sheet-title');
+    this.btnCloseRecord = document.getElementById('btn-close-record');
+
+    // A controller is created per game. Never inherit an overlay (or the
+    // checked rows it may contain) left in the page by a previous game.
+    if (this.recordOverlay) this.recordOverlay.style.display = 'none';
+    if (this.recordSheetBody) this.recordSheetBody.innerHTML = '';
+
     // Movement mode
     this.movementMode = 'walk';
     this.weaponFireMode = false;
@@ -53,6 +81,7 @@ export class UIController {
     gameEngine.eventBus.on('damageApplied', (data) => this._onDamageApplied(data));
     gameEngine.eventBus.on('unitAttacked', (data) => this._onUnitAttacked(data));
     gameEngine.eventBus.on('unitDestroyed', (data) => this._onUnitDestroyed(data));
+    gameEngine.eventBus.on('physicalAttackResolved', (data) => this._onPhysicalAttackResolved(data));
     gameEngine.eventBus.on('actionProcessed', (data) => this._onActionProcessed(data));
     gameEngine.eventBus.on('queueAdvanced', (data) => this._onQueueAdvanced(data));
 
@@ -107,6 +136,26 @@ export class UIController {
 
     this._hideAllPanels();
     this._updateActionButtons(data.phase);
+    // The record card's fire eligibility depends on the phase ("weapon phase"),
+    // so a selected 'Mech's card is re-rendered when the phase turns over.
+    this._refreshSelectedUnitPanel();
+  }
+
+  /**
+   * Re-render the selected unit's panel from the current view, if the selection
+   * is still visible. Used after phase changes and damage events so the card
+   * and an open overlay never show stale pips or stale weapon eligibility.
+   */
+  _refreshSelectedUnitPanel() {
+    this.refreshWeaponViews();
+  }
+
+  /** The selected unit from the current (projected) state, if still visible. */
+  _lookupSelectedUnit() {
+    if (!this.selectedUnitId) return null;
+    const state = this.viewState();
+    if (!state || typeof state.getUnit !== 'function') return null;
+    return state.getUnit(this.selectedUnitId) || null;
   }
 
   _updateActivePlayer(state) {
@@ -166,8 +215,44 @@ export class UIController {
       this.log('Weapon fire mode: Click a target to fire selected weapons', 'info');
       this._showWeaponPanel();
     } else {
+      // Cancelling drops the target before the dependent render; otherwise the
+      // record card would keep target-aware (disabled) rows after the picker is
+      // hidden and the pending target is gone.
+      this._pendingTarget = null;
       this.weaponPanel.style.display = 'none';
+      this.refreshWeaponViews();
     }
+  }
+
+  /**
+   * The checked weapon rows the player can act on right now.
+   *
+   * A declaration must only ever come from a visible surface. The closed
+   * record-sheet overlay can retain checked inputs in its hidden DOM (the
+   * overlay body is cleared on close as well, so this is defence in depth),
+   * and the picker can be hidden while its old rows are still mounted. Scoping
+   * the query to the open overlay - or, when it is closed, to the unit panel
+   * and the visible picker - makes stale rows unable to fire.
+   *
+   * @returns {HTMLInputElement[]} checked weapon rows, visible surface only
+   */
+  _visibleWeaponChecks() {
+    const roots = [];
+    if (this.recordOverlayOpen && this.recordSheetBody) {
+      // The modal covers everything else: only its rows are visible.
+      roots.push(this.recordSheetBody);
+    } else {
+      if (this.unitDetails) roots.push(this.unitDetails);
+      if (this.weaponPanel && this.weaponPanel.style.display !== 'none') {
+        roots.push(this.weaponPanel);
+      }
+    }
+
+    const checks = [];
+    for (const root of roots) {
+      checks.push(...root.querySelectorAll('.weapon-check:checked, .record-weapon-check:checked'));
+    }
+    return checks;
   }
 
   _handleFireSelected() {
@@ -183,7 +268,12 @@ export class UIController {
     const target = state.getUnit(this._pendingTarget);
     if (!target) { this.log('Target no longer available', 'miss'); return; }
 
-    const checks = [...document.querySelectorAll('.weapon-check:checked')];
+    // The record-sheet weapons table renders its own per-mount checkboxes. Both
+    // sources are honoured, but ONLY from the surface the player can currently
+    // see: a closed overlay may keep checked rows in its hidden DOM, and those
+    // must never be declared for a newly selected 'Mech. A mount checked in
+    // both visible places is still one shot (keyed by mounted instance).
+    const checks = this._visibleWeaponChecks();
     if (checks.length === 0) { this.log('Select weapons to fire', 'miss'); return; }
 
     // One declaration carries every checked weapon. Calling the single-shot
@@ -197,7 +287,15 @@ export class UIController {
     // medium lasers in its right arm - and "one attack per weapon per turn"
     // (p24) applies to each mount, not to the weapon model.
     const shots = [];
+    const declared = new Set();
     for (const check of checks) {
+      const mountIndex = check.dataset.weaponIndex;
+      const shotKey = mountIndex !== undefined && mountIndex !== ''
+        ? `mount:${mountIndex}`
+        : `model:${check.dataset.type}@${check.dataset.location}`;
+      if (declared.has(shotKey)) continue;
+      declared.add(shotKey);
+
       const weaponDef = this._getWeaponData(check.dataset.type);
       if (!weaponDef) continue;
       const shot = {
@@ -205,8 +303,8 @@ export class UIController {
         weaponLocation: check.dataset.location,
         ammoBin: check.dataset.ammo || null
       };
-      if (check.dataset.weaponIndex !== undefined && check.dataset.weaponIndex !== '') {
-        shot.weaponIndex = Number(check.dataset.weaponIndex);
+      if (mountIndex !== undefined && mountIndex !== '') {
+        shot.weaponIndex = Number(mountIndex);
       }
       shots.push(shot);
     }
@@ -236,10 +334,9 @@ export class UIController {
       // be on screen immediately.
       this.mapRenderer.render(this.viewState());
     }
-    this.updateUnitPanel(attacker);
-    // The shots spent ammo and/or marked weapons as fired this turn. Rebuild
-    // the picker once so a dead weapon stops being offered immediately.
-    if (this.weaponFireMode) this._showWeaponPanel();
+    // Target cleared before the dependent render: both the record card and the
+    // picker are rebuilt from the same now-targetless eligibility verdict.
+    this.refreshWeaponViews();
   }
 
   _handlePhysicalAttack() {
@@ -614,28 +711,136 @@ export class UIController {
     return effects.length ? ` (${effects.join(', ')})` : '';
   }
 
+  /**
+   * Render the unit panel.
+   *
+   * Two presentations share the same header (name, player, heat, MP, pilot,
+   * engine/gyro) and differ below it:
+   *
+   *  - 'record' (default): the record-sheet card - humanoid armour and
+   *    internal-structure diagrams, compact weapons inventory, heat scale,
+   *    MechWarrior block, and the old A/I text;
+   *  - 'classic': the previous health-bar list, kept for comparison.
+   *
+   * The choice is memory-only and survives selection changes for the session.
+   */
   updateUnitPanel(unit) {
     if (!unit) {
-      this.unitDetails.innerHTML = '<p>Select a unit to view details</p>';
+      // Drop the pending target before anything target-aware is re-rendered.
+      this._pendingTarget = null;
+      if (this.unitDetails) {
+        this.unitDetails.innerHTML = '<p>Select a unit to view details</p>';
+      }
       this.selectedUnitId = null;
+      this._selectedUnit = null;
+      this.closeRecordSheet();
+      this._syncUnitViewControls();
       // Deselecting drops the previous selection's destinations.
       this._clearMovementPreview();
       return;
     }
 
     // A different 'Mech is now selected: the previous reachable-hex preview
-    // belonged to the old selection and must not linger over the map.
-    if (this.selectedUnitId !== unit.id) this._clearMovementPreview();
+    // belonged to the old selection, and a pending target belonged to the
+    // previous attacker. Both are cleared BEFORE the panel renders so the new
+    // selection never inherits stale target-dependent eligibility.
+    if (this.selectedUnitId !== unit.id) {
+      this._clearMovementPreview();
+      this._pendingTarget = null;
+      // A stale overlay belongs to the previous selection; drop its inputs
+      // before the new unit's sheet (card and overlay) is rendered.
+      this._clearRecordOverlayBody();
+    }
     this.selectedUnitId = unit.id;
+    this._selectedUnit = unit;
 
+    if (this.unitDetails) {
+      this.unitDetails.innerHTML = this._renderUnitHeader(unit);
+      if (this.unitView === 'classic') {
+        this.unitDetails.insertAdjacentHTML('beforeend', this._renderClassicBody(unit));
+      } else {
+        this.unitDetails.appendChild(RecordCard(unit, this._recordOptions(unit)));
+      }
+    }
+
+    this._updateMPDisplay(unit);
+    this._syncUnitViewControls();
+    if (this.recordOverlayOpen) this._renderRecordOverlay(unit);
+  }
+
+  /**
+   * Refresh every weapon view that depends on the pending target.
+   *
+   * Setting or clearing `_pendingTarget` changes what `_getWeaponEligibility`
+   * answers (arc, range, line of sight) without a phase or selection change.
+   * Both the record-card inventory and the classic picker are rebuilt from
+   * that one verdict here, so they cannot drift; callers must assign
+   * `_pendingTarget` BEFORE calling this.
+   *
+   * @param {object|null} [unit] - unit to refresh (defaults to the current
+   *   selection, so a selection change can be routed through the same entry)
+   */
+  refreshWeaponViews(unit = null) {
+    const selected = unit || this._selectedUnit || this._lookupSelectedUnit();
+    if (!selected) return;
+    this.updateUnitPanel(selected);
+    if (this.weaponFireMode) this._showWeaponPanel();
+  }
+
+  /** Header lines shared by both presentations (movement, engine, pilot...). */
+  _renderUnitHeader(unit) {
+    const movement = movementValues(unit);
+    const currentMP = unitCurrentMP(unit);
+    const sinks = heatSinkInfo(unit);
+    const pilot = unit.pilot || {};
+    const engine = unit.engine || {};
+    const gyro = unit.gyro || {};
+    const facing = unit.position && unit.position.facing !== undefined
+      ? unit.position.facing
+      : '—';
+    const heat = Number(unit.heat) || 0;
+
+    const playerColor = unit.player === 0 ? '#3b82f6' : '#ef4444';
+    const playerName = this.gameEngine
+      ? (this.gameEngine.stateManager.getState().players[unit.player]?.name || `Player ${unit.player + 1}`)
+      : `Player ${unit.player + 1}`;
+    const isActive = this.gameEngine
+      && this.gameEngine.stateManager.getState().currentPlayer === unit.player;
+
+    return `
+      <p>
+        <strong>${unit.name}</strong> (${unit.tonnage}t)
+        <span style="color:${playerColor}"> - ${playerName}</span>
+        ${isActive ? ' <span style="color:#4cc9f0">[ACTIVE]</span>' : ''}
+      </p>
+      <div class="record-meta">
+        <span class="record-meta-item" title="not modelled yet">BV: —</span>
+        <span class="record-meta-item" title="not modelled yet">Role: —</span>
+        <span class="record-meta-item" title="not modelled yet">Tech Base: —</span>
+        <span class="record-meta-item" title="not modelled yet">Rules Level: —</span>
+      </div>
+      <p>Heat: ${heat} / ${sinks.dissipation} dissipation${this._getHeatEffects(unit)}</p>
+      ${this.unitView === 'classic' ? this._renderHeatBar(unit) : ''}
+      <p>MP: ${currentMP}/${movement.walk}(${movement.run})</p>
+      <p>Pilot: G${pilot.gunnery ?? '—'}/P${pilot.piloting ?? '—'} | Facing: ${facing}</p>
+      ${unit.prone ? '<p style="color:#ff4444">PRONE</p>' : ''}
+      ${unit.shutdown ? '<p style="color:#ff4444">SHUTDOWN</p>' : ''}
+      <p>Heat Sinks: ${sinks.count} (${sinks.type})</p>
+      <p>Engine: ${engine.type || '—'} (${engine.hits ?? 0}hits) | Gyro: ${gyro.hits ?? 0}hits</p>
+    `;
+  }
+
+  /** The old health-bar armour list plus the simple weapons list. */
+  _renderClassicBody(unit) {
     let armorHTML = '<div class="armor-diagram">';
     const locations = ['head', 'centerTorso', 'leftTorso', 'rightTorso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg'];
     for (const loc of locations) {
-      const armor = unit.getArmor(loc);
-      const maxArmor = unit.getMaxArmor(loc);
+      const armor = typeof unit.getArmor === 'function' ? unit.getArmor(loc) : 0;
+      const maxArmor = typeof unit.getMaxArmor === 'function' ? unit.getMaxArmor(loc) : 0;
       const pct = maxArmor > 0 ? Math.min(100, Math.max(0, (armor / maxArmor) * 100)) : 0;
-      const internal = unit.getInternal(loc);
-      const destroyed = unit.isLocationDestroyed(loc) ? ' DESTROYED' : '';
+      const internal = typeof unit.getInternal === 'function' ? unit.getInternal(loc) : 0;
+      const destroyed = typeof unit.isLocationDestroyed === 'function'
+        && unit.isLocationDestroyed(loc) ? ' DESTROYED' : '';
       armorHTML += `
         <div class="location">
           <span>${loc}${destroyed}</span>
@@ -645,37 +850,131 @@ export class UIController {
     }
     armorHTML += '</div>';
 
-    const weapons = unit.getAllWeapons().map(w => {
+    const mounted = typeof unit.getAllWeapons === 'function' ? unit.getAllWeapons() : [];
+    const weapons = mounted.map(w => {
       const wd = this._getWeaponData(w.type);
       return wd ? `<li>${wd.name} (${w.location})</li>` : `<li>${w.type} (${w.location})</li>`;
     }).join('');
 
-    const playerColor = unit.player === 0 ? '#3b82f6' : '#ef4444';
-    const playerName = this.gameEngine
-      ? (this.gameEngine.stateManager.getState().players[unit.player]?.name || `Player ${unit.player + 1}`)
-      : `Player ${unit.player + 1}`;
-    const isActive = this.gameEngine
-      && this.gameEngine.stateManager.getState().currentPlayer === unit.player;
-
-    this.unitDetails.innerHTML = `
-      <p>
-        <strong>${unit.name}</strong> (${unit.tonnage}t)
-        <span style="color:${playerColor}"> - ${playerName}</span>
-        ${isActive ? ' <span style="color:#4cc9f0">[ACTIVE]</span>' : ''}
-      </p>
-      <p>Heat: ${unit.heat} / ${unit.heatSinks.count * (unit.heatSinks.type === 'double' ? 2 : 1)} dissipation${this._getHeatEffects(unit)}</p>
-      ${this._renderHeatBar(unit)}
-      <p>MP: ${unit.currentMP}/${unit.movement.walk}(${unit.movement.run})</p>
-      <p>Pilot: G${unit.pilot.gunnery}/P${unit.pilot.piloting} | Facing: ${unit.position.facing}</p>
-      ${unit.prone ? '<p style="color:#ff4444">PRONE</p>' : ''}
-      ${unit.shutdown ? '<p style="color:#ff4444">SHUTDOWN</p>' : ''}
-      <p>Heat Sinks: ${unit.heatSinks.count} (${unit.heatSinks.type})</p>
+    return `
       ${armorHTML}
       <p>Weapons:</p><ul>${weapons || '<li>None</li>'}</ul>
-      <p>Engine: ${unit.engine.type} (${unit.engine.hits}hits) | Gyro: ${unit.gyro.hits}hits</p>
     `;
+  }
 
-    this._updateMPDisplay(unit);
+  /**
+   * Switch the unit panel between the record card and the classic bars.
+   * The choice is kept in memory for the session (no localStorage).
+   * @param {'record'|'classic'} mode
+   */
+  setUnitView(mode) {
+    if (mode !== 'record' && mode !== 'classic') return;
+    this.unitView = mode;
+    const unit = this._selectedUnit || this._lookupSelectedUnit();
+    if (unit) {
+      this.updateUnitPanel(unit);
+    } else {
+      this._syncUnitViewControls();
+    }
+  }
+
+  /** Reflect the current view/selection on the view-control buttons. */
+  _syncUnitViewControls() {
+    const isRecord = this.unitView !== 'classic';
+    if (this.unitViewControls) this.unitViewControls.dataset.view = this.unitView;
+    if (this.btnViewRecord) {
+      this.btnViewRecord.classList.toggle('active', isRecord);
+      this.btnViewRecord.setAttribute('aria-pressed', String(isRecord));
+    }
+    if (this.btnViewClassic) {
+      this.btnViewClassic.classList.toggle('active', !isRecord);
+      this.btnViewClassic.setAttribute('aria-pressed', String(!isRecord));
+    }
+    if (this.btnRecordSheet) this.btnRecordSheet.disabled = !this.selectedUnitId;
+  }
+
+  /**
+   * Options forwarded to the record components. Weapon eligibility is NOT
+   * re-implemented in the UI kit: the table receives the same
+   * `_getWeaponEligibility` verdict the picker uses, and only in the weapon
+   * phase - a record sheet is also an inspection panel the rest of the turn.
+   */
+  _recordOptions(unit) {
+    const state = this.viewState();
+    const inWeaponPhase = Boolean(state && state.phase === 'weapon_attack');
+    let unitEligibility = { eligible: false, reason: inWeaponPhase ? null : 'weapon phase' };
+    if (inWeaponPhase) unitEligibility = this._getUnitFireEligibility(unit, state);
+
+    return {
+      rear: this.recordRear,
+      onToggleRear: (rear) => this._setRearArmour(rear),
+      getWeaponData: (type) => this._getWeaponData(type),
+      unitEligibility,
+      getEligibility: (weapon, weaponData, weaponIndex) => {
+        if (!inWeaponPhase || !unitEligibility.eligible) {
+          return { eligible: false, reason: null };
+        }
+        return this._getWeaponEligibility(unit, weapon, weaponData, state, weaponIndex);
+      }
+    };
+  }
+
+  /** Toggle the rear torso armour strip and re-render both presentations. */
+  _setRearArmour(rear) {
+    this.recordRear = Boolean(rear);
+    const unit = this._selectedUnit || this._lookupSelectedUnit();
+    if (unit) this.updateUnitPanel(unit);
+  }
+
+  /** Open the full record-sheet overlay for the selected unit. */
+  openRecordSheet() {
+    if (!this.recordOverlay || !this.recordSheetBody) return;
+    const unit = this._selectedUnit || this._lookupSelectedUnit();
+    if (!unit) {
+      this.log('Select a unit first', 'miss');
+      return;
+    }
+
+    this.recordOverlayOpen = true;
+    this.recordOverlay.style.display = 'flex';
+    this._renderRecordOverlay(unit);
+
+    if (!this._recordKeyHandler) {
+      this._recordKeyHandler = (event) => {
+        if (event && event.key === 'Escape') this.closeRecordSheet();
+      };
+      document.addEventListener('keydown', this._recordKeyHandler);
+    }
+    if (this.btnRecordSheet) this.btnRecordSheet.classList.add('active');
+  }
+
+  /** Remove the overlay's rendered rows so stale checked inputs cannot survive. */
+  _clearRecordOverlayBody() {
+    if (this.recordSheetBody) this.recordSheetBody.innerHTML = '';
+  }
+
+  /** Close the overlay (Close button or Escape). */
+  closeRecordSheet() {
+    this.recordOverlayOpen = false;
+    if (this.recordOverlay) this.recordOverlay.style.display = 'none';
+    if (this.btnRecordSheet) this.btnRecordSheet.classList.remove('active');
+    if (this._recordKeyHandler) {
+      document.removeEventListener('keydown', this._recordKeyHandler);
+      this._recordKeyHandler = null;
+    }
+    // The hidden DOM must not keep checked rows around for a later Fire click.
+    this._clearRecordOverlayBody();
+    if (this.recordSheetTitle) this.recordSheetTitle.textContent = 'Record Sheet';
+  }
+
+  /** Fill the overlay body for `unit` (used on open and on every refresh). */
+  _renderRecordOverlay(unit) {
+    if (!this.recordOverlayOpen || !this.recordSheetBody) return;
+    this.recordSheetBody.innerHTML = '';
+    this.recordSheetBody.appendChild(RecordSheet(unit, this._recordOptions(unit)));
+    if (this.recordSheetTitle) {
+      this.recordSheetTitle.textContent = `Record Sheet — ${unit.name}`;
+    }
   }
 
   /**
@@ -708,10 +1007,12 @@ export class UIController {
   }
 
   _updateMPDisplay(unit) {
+    if (!this.mpDisplay) return;
     const jumpMP = this._availableJumpMP(unit);
+    const movement = movementValues(unit);
     // p19: with Jump selected, the current MP is the water-adjusted jump MP.
-    const currentMP = this.movementMode === 'jump' ? jumpMP : unit.currentMP;
-    this.mpDisplay.textContent = `MP: ${currentMP} / ${unit.movement.walk} (Run: ${unit.movement.run}, Jump: ${jumpMP})`;
+    const currentMP = this.movementMode === 'jump' ? jumpMP : unitCurrentMP(unit);
+    this.mpDisplay.textContent = `MP: ${currentMP} / ${movement.walk} (Run: ${movement.run}, Jump: ${jumpMP})`;
   }
 
   log(msg, className = 'info') {
@@ -741,6 +1042,21 @@ export class UIController {
         this.log(`  CRITICAL: ${crit.effect}`, 'crit');
       }
     }
+    // Keep the pips honest while the sheet is on screen (the selected 'Mech
+    // may be the one that was just hit).
+    if (data.targetId && data.targetId === this.selectedUnitId) {
+      this._refreshSelectedUnitPanel();
+    }
+  }
+
+  /**
+   * A punch/kick/charge/DFA resolves: damage and its consequences (DFA leg
+   * damage, prone, PSRs) are applied inside the engine without a unitMoved
+   * event for every affected location. Refresh the sheet on screen so armour
+   * pips, heat and crit tables are current immediately.
+   */
+  _onPhysicalAttackResolved() {
+    this._refreshSelectedUnitPanel();
   }
 
   _onUnitAttacked(data) {
@@ -754,18 +1070,25 @@ export class UIController {
 
   _onUnitDestroyed(data) {
     this.log(`UNIT DESTROYED: ${data.unitId}!`, 'crit');
+    if (data.unitId && data.unitId === this.selectedUnitId) {
+      // Drop any rows rendered for the destroyed 'Mech before refreshing; if it
+      // is already gone from the state, the overlay must not keep stale inputs.
+      this._clearRecordOverlayBody();
+      this._refreshSelectedUnitPanel();
+    }
   }
 
   _onActionProcessed(data) {
     // A resolved fire spends ammo and marks the weapon as fired this turn. If
-    // the picker is still open, rebuild it against the current target so a
-    // spent weapon is greyed out immediately instead of staying clickable.
-    // The UI declares all checked weapons in one batched 'fireWeapons' action;
-    // a single-shot 'fire' is still handled for direct callers.
+    // the weapon views are open, rebuild both (record card and classic picker)
+    // against the current target so a spent weapon is greyed out immediately
+    // instead of staying clickable in only one of them. The UI declares all
+    // checked weapons in one batched 'fireWeapons' action; a single-shot 'fire'
+    // is still handled for direct callers.
     const actionType = data && data.action ? data.action.type : null;
     if (this.weaponFireMode && this.selectedUnitId
       && (actionType === 'fire' || actionType === 'fireWeapons')) {
-      this._showWeaponPanel();
+      this.refreshWeaponViews();
     }
   }
 
@@ -916,6 +1239,20 @@ export class UIController {
     const btnPhysical = document.getElementById('btn-physical');
     if (btnPhysical) {
       btnPhysical.addEventListener('click', () => this._handlePhysicalAttack());
+    }
+
+    // Record-sheet presentation controls (unit panel, not the overlay).
+    if (this.btnViewRecord) {
+      this.btnViewRecord.addEventListener('click', () => this.setUnitView('record'));
+    }
+    if (this.btnViewClassic) {
+      this.btnViewClassic.addEventListener('click', () => this.setUnitView('classic'));
+    }
+    if (this.btnRecordSheet) {
+      this.btnRecordSheet.addEventListener('click', () => this.openRecordSheet());
+    }
+    if (this.btnCloseRecord) {
+      this.btnCloseRecord.addEventListener('click', () => this.closeRecordSheet());
     }
   }
 }

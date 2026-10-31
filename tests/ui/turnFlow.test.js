@@ -198,6 +198,13 @@ describe('turn 2 movement flow (live-player path)', () => {
     expect(eligibilityAfterTarget).toHaveLength(eligibilityBeforeTarget.length);
     expect(eligibilityAfterTarget).not.toEqual(eligibilityBeforeTarget);
 
+    // t5: target selection refreshes the record-card inventory from the same
+    // verdict as the picker, so the two compared panels agree row-for-row.
+    const recordEligibilityAfterTarget = [
+      ...document.querySelectorAll('#unit-details .record-weapon-check')
+    ].map(checkbox => checkbox.disabled);
+    expect(recordEligibilityAfterTarget).toEqual(eligibilityAfterTarget);
+
     // The target-aware panel now disables weapons that cannot fire at it, so
     // at least two eligible weapons must remain for the multi-shot declaration.
     const eligible = [...document.querySelectorAll('.weapon-check:not(:disabled)')];
@@ -214,6 +221,17 @@ describe('turn 2 movement flow (live-player path)', () => {
     const fireLog = logText().slice(beforeFire.length);
     expect(fireLog.match(/HIT!|MISS!/g) || []).toHaveLength(2);
     expect(fireLog).not.toMatch(/Fire error/);
+
+    // Firing clears the target and refreshes both weapon views: they still
+    // agree, and the spent mounts are disabled in both.
+    const recordEligibilityAfterFire = [
+      ...document.querySelectorAll('#unit-details .record-weapon-check')
+    ].map(checkbox => checkbox.disabled);
+    const pickerEligibilityAfterFire = [
+      ...document.querySelectorAll('#weapon-list .weapon-check')
+    ].map(checkbox => checkbox.disabled);
+    expect(recordEligibilityAfterFire).toEqual(pickerEligibilityAfterFire);
+    expect(recordEligibilityAfterFire).toContain(true);
   });
 
   it('plays turn 1 through the phase buttons and reaches turn 2 movement', async () => {

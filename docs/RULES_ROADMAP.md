@@ -4,7 +4,9 @@ Plan derived from the BattleMech Manual (7th printing) in the knowledge base and
 audit of the current engine. Page references are BMM pages.
 
 Conventions and scope live in `docs/DESIGN_PRINCIPLES.md`; current defects with evidence
-live in `docs/RULES_COMPLIANCE_SWEEP.md`.
+live in `docs/RULES_COMPLIANCE_SWEEP.md`, whose
+[closure matrix](RULES_COMPLIANCE_SWEEP.md#closure-matrix) gives the per-finding verdict
+(fixed / partial / deferred / not-addressed) for all 162 sweep findings.
 
 ## Roster scope and the chassis/variant restructure
 

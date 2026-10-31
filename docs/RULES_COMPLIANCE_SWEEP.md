@@ -1993,3 +1993,266 @@ The recovered pages settled several findings that had been marked unverifiable o
 | C-09 weapon declaration | **fixed** | p24/p31/p46: firing now requires a weapon the unit mounts, that has not already fired this turn, whose critical slots are not all destroyed, and a matching ammunition bin (auto-picked when the caller omits one, and a bin that feeds a different weapon is refused). Enforced by default; `tests/rules/combat/WeaponDeclaration.test.js` exercises all four rules with enforcement on, while the shared test engine opts out so fixtures can still fire synthetic weapons in isolation. |
 
 Still open after this pass: H-01 and every other Phase A dead-wiring item (movement heat, skidding, MASC activation, 20+ PSR), BLD-02 building levels, D-05 ammo-bin split, M-10/M-11 jump movement, H-02/H-08/H-09 engine/heat/water crit effects, H-11/H-12 initiative and unequal forces, the dead M-23/M-24/M-25 PSR triggers, and the remaining sweep sections outside phases B-C.
+
+---
+
+## Closure matrix
+
+**Compiled by:** `docs-closure` (fidelity-ui t1), 2026-10-31. It is the per-finding verdict for the sweep as it now stands, and it **supersedes** the ad-hoc "still open" line above wherever the two disagree.
+
+**Scope and count.** One row for every **active** finding: **162** rows across the six domains, plus a separate table for the six headings that are withdrawn, consolidated or not counted. That reconciles with §3's counting notes: 168 headings − 5 duplicates (D-03, D-04, F-01, M-29 consolidated; X-01 never counted) = 163 distinct, and M-04 is withdrawn, leaving **162 active**. The domain is the section the row sits under; ids that collide across domains (t5's `H-01`…`H-07` hidden findings and `M-01`/`M-02` minefield findings versus t1/t4) are tagged `[t5]`.
+
+**Status scale and the rule used.**
+
+- `fixed` — the manual rule is implemented in a **live** engine path (the movement, attack, physical, heat or phase pipeline actually calls it) and a named test pins the manual-derived behaviour.
+- `partial` — implemented in part, or implemented but not wired/reachable in play, or the finding has several sub-defects of which some remain. The unverified/remaining part is stated.
+- `deferred` — knowingly accepted debt that this run does not carry: Phase A dead wiring or a scope item explicitly parked for a later phase. It is **not** used for work the matrix still lists as an open defect (those stay `not-addressed` even when the roadmap schedules them).
+- `not-addressed` — the defect described by the finding is still present in the shipped code.
+- `wontfix` — reserved; **no** finding currently qualifies.
+
+**Evidence.** Code `file:line` first, then the test that pins it. `latent content` marks a rule the engine and data implement but that no shipped map currently exercises (jungle, sand, swamp, ice/mud/deep-snow modifiers; the six maps carry none of these). "Pinned by" is a static reading of the named test, exactly the sweep's own evidence rule: **the suite was not re-run for this matrix** — Vitest's config load shells out (`child_process.exec("net use")`) and process spawn is blocked in this environment with `EPERM`. Code claims were re-read in the tree and spot-checked with direct `node` imports and JSON queries (e.g. every roster weapon id resolves, Atlas SRM-6 now occupies `leftTorso` slots 8–9, every water hex is still Level 0).
+
+### Summary
+
+| Status | Blocker | High | Medium | Low | Total |
+|---|---:|---:|---:|---:|---:|
+| fixed | 7 | 26 | 21 | 3 | **57** |
+| partial | 0 | 2 | 5 | 6 | **13** |
+| deferred | 1 | 9 | 1 | 0 | **11** |
+| not-addressed | 0 | 2 | 45 | 34 | **81** |
+| wontfix | 0 | 0 | 0 | 0 | **0** |
+| **Total** | **8** | **39** | **72** | **43** | **162** |
+
+Per domain:
+
+| Domain | fixed | partial | deferred | not-addressed | Total |
+|---|---:|---:|---:|---:|---:|
+| 3.1 Movement, terrain & PSR (t1) | 18 | 2 | 8 | 8 | 36 |
+| 3.2 Weapon attack, LOS, arcs & damage (t2) | 12 | 4 | 1 | 10 | 27 |
+| 3.3 Physical attacks & urban combat (t3) | 7 | 1 | 0 | 21 | 29 |
+| 3.4 Heat, MechWarrior & phase sequence (t4) | 14 | 4 | 1 | 6 | 25 |
+| 3.5 Battlefield layers (t5) | 1 | 1 | 1 | 23 | 26 |
+| 3.6 Data, import & export (t6) | 5 | 1 | 0 | 13 | 19 |
+| **Total** | **57** | **13** | **11** | **81** | **162** |
+
+Reading the numbers: the eight blockers split **7 fixed / 1 deferred** (only H-01, movement heat, remains); the shipped fix waves retired most of the high-severity core (26 fixed, 2 partial, 9 deferred, 2 not-addressed), while the remaining volume is concentrated in two places — the optional battlefield layers of t5 (23 of 26 not-addressed: weather/fire/support/minefield/hidden-unit refinements) and the physical/urban residuals of t3 (21 of 29 not-addressed: clubs, push/charge/DFA details, collapse/basement details). The 13 `partial` rows are the honest "half-done" set: implemented rules whose remaining half is either dead wiring (M-09, M-25), an unmodelled data layer (C-24, D-13), a text/UX detail with no test (C-19), or a residual sub-rule (H-06, H-17, H-20, H-24, C-21, C-27, PHY-09, M-02 [t5]).
+
+### 3.1 Movement, terrain and PSR (t1) — 36 active
+
+| ID | Severity | Status | Evidence |
+|---|---|---|---|
+| M-01 | blocker | fixed | `MovementCalculator.js:93-133`: 1 MP to enter + terrain cost + level change; Depth 1 from Level 0 = 3, Depth 2 = 6 (p128). `MovementCalculator.test.js` water cases. |
+| M-02 | blocker | fixed | `MovementCalculator.js:112-119`: `Math.abs(levelDiff)` for 1–2 levels, 3+ returns Infinity. `MovementCalculator.test.js:244` ("adds +1 MP per level descended too"), `:318` ("returns Infinity for a 3-level descent too"). |
+| M-03 | blocker | fixed | `MovementCalculator.js:28-32, 97-133`: pavement is the mpCost-1 terrain row; level/ice/mud/weather costs are still added (p20). `MovementCalculator.test.js:194` ("pavement costs 1 MP"), `:262` ("pavement keeps the level change cost"). |
+| M-05 | high | deferred | Dead code: `SkiddingRules.js:15-98` still has no production caller; skid length is still unspent MP. Phase A. |
+| M-06 | high | deferred | Same dead path; `SkiddingRules.js:90` still `floor(tonnage/10) * hexes`. Phase A. |
+| M-07 | blocker | fixed | `maxMP.js:42-59, 152-183, 197-224`: one leg → Walking 1 / Running 0; both legs → 0 MP everywhere. `MovementCalculator.test.js:547` ("a destroyed leg leaves 1 Walking MP and no running"), `:575` ("both legs destroyed: 0 Walking MP, 0 Running MP and no MASC/TSM rescue"). |
+| M-08 | blocker | fixed | `maxMP.js:162-176, 213-224`: hip halves walk before leg loss, run = `ceil(1.5 × walk)`, two hips → 0. `MovementCalculator.test.js:638` ("a destroyed hip halves walking MP and recalculates running MP"), `:645` (second hip). |
+| M-09 | high | partial | Formula fixed: `maxMP.js:219-224` leaves walk unchanged and gives run = 2 × walk (`equipment.test.js:352-375`), but `activateMASC` (`MovementCalculator.js:648`) still has no caller, so the branch is unreachable (M-19). |
+| M-10 | high | fixed | `MovementCalculator.js:289-405, 537-544`: jumping pays no facing; landing facing comes from the action. `MovementCalculator.test.js` jump cases. |
+| M-11 | high | fixed | `MovementCalculator.js:316-405, 537-634`: range/height model, overflight, occupied landing hex check; start hex is the 0-MP "stand still", an in-place jump costs 1. `MovementCalculator.test.js:962` ("does not charge a facing change when jumping"), `:1037` ("charges 1 MP for a jump that stays in the starting hex"), `:1101` ("rejects a landing hex higher than Jumping MP + start level"). |
+| M-12 | high | not-addressed | No run-into-water guard: `MovementCalculator.js:93-133` (`calculateMPCost`) special-cases only jump, and `:467-511` (`validateMovement`) has no run/water check anywhere in `src/`. |
+| M-13 | medium | fixed | p51 (KB id 141): "Remember that Running MP is 1.5 times the current Walking MP; if the Walking MP is reduced, … recalculate". `maxMP.js:213-224` does exactly that; `MovementCalculator.test.js:844` ("derives run MP from the heat-reduced walk MP"). |
+| M-14 | high | deferred | `SkiddingRules.js:15-35` unchanged and dead (no caller): still no facing-change precondition, no PSR. Phase A. |
+| M-15 | high | deferred | `SkiddingRules.js:46` still skids along the post-turn facing; dead code. |
+| M-16 | high | deferred | `SkiddingRules.js:81-88` chain-skid extension and missing terrain reduction remain; dead code. |
+| M-17 | high | deferred | `SkiddingRules.js:42-98` still ignores level/water/edge/"movement ends" rules; dead code. |
+| M-18 | high | deferred | No Skid Modifiers Table; `PSRCalculator.js:83-85` still a 0-modifier skid trigger; dead code. |
+| M-19 | high | deferred | `activateMASC`/`rollMASC` still have no caller; failure still destroys one actuator in the first leg (`MovementCalculator.js:696-707`), deactivate resets the counter. Phase A. |
+| M-20 | high | fixed | `PSRCalculator.js:57-97, 212-256`: gyro/hip/leg are standing modifiers, run/jump are causes; `PSRCalculator.test.js`. |
+| M-21 | high | fixed | `PSRCalculator.js:161-171`: the involuntary-shutdown trigger bypasses the 999 auto-fail; other shutdown PSRs auto-fail. `PSRCalculator.test.js:519` ("the involuntary-shutdown PSR resolves at piloting +3"), `:533` ("a shutdown PSR with no cause fails automatically"). |
+| M-22 | high | fixed | `PSRCalculator.js:318-387` + `GameEngine.js:226-265`: warrior PSR before damage, Facing After Fall column, `ceil(t/10) × (levels+1)`, 5-point groups. `PSRCalculator.test.js:684` ("rolls 1D6 on the Facing After Fall Table"), `:738` ("carries the modifiers of the fall-causing PSR into the warrior roll"), `:792-831` (fall damage by level). |
+| M-23 | medium | fixed | `PSRCalculator.js:61-71`: woods push no trigger; jungle +1/+2. `PSRCalculator.test.js:337-377`; `GameEngine.js:530-543` maps terrain. |
+| M-24 | medium | fixed | `PSRCalculator.js:73-76, 99-110`: sand +1 trigger, Depth 0 water no trigger. `PSRCalculator.test.js:242-252, 371-385`. Latent content (no map carries sand). |
+| M-25 | medium | partial | Fabricated triggers removed (`PSRCalculator.js:57-145`), but `_damageThisPhase` still has no writer (only `:131`), so the 20+ PSR never fires (C-04), and `_physicalAttackReceived` is never set either. |
+| M-26 | medium | not-addressed | No four-legged / AES-leg / hardened-armour / small-or-torso cockpit special cases in `calculatePSRModifier` (`PSRCalculator.js:154-203`). |
+| M-27 | medium | fixed | `PSRCalculator.js:231-247`: a destroyed hip's +2 replaces the other actuator modifiers in that leg; foot/upper/lower counted elsewhere. `PSRCalculator.test.js:487` ("a destroyed hip replaces the other actuator modifiers from that leg"). |
+| M-28 | medium | fixed | `PSRCalculator.js:318-387` rolls Facing After Fall, returns the column and 5-point groups; `GameEngine.applyFall` (`GameEngine.js:226-265`) applies them. `PSRCalculator.test.js:684` (facing), `:792-831` (damage). |
+| M-30 | medium | fixed | `terrain.json:26-43, 82-89` adds light/heavy jungle (3/4 MP) and sand (1 MP, PSR +1); `MovementCalculator.js:28-32` reads the costs. `MovementCalculator.test.js:114-120`. Latent content. |
+| M-31 | medium | fixed | `terrain.json:90-96` swamp mpCost 2 (+1 over clear), `TerrainRules.js:50-54` PSR +1. `residuals.test.js:72-79`. |
+| M-32 | medium | not-addressed | No minimum-movement fallback and no drop/stand-up/lateral-shift costs (`MovementCalculator.js:205-287`). |
+| M-33 | medium | not-addressed | `MovementCalculator.js:248` still blocks every occupied hex (friend or foe); the test pins the block. |
+| M-34 | medium | not-addressed | No facing-only move states; `validateMovement` ends facing at the last move direction; `calculateFacingChange` has no caller (`MovementCalculator.js:163-190, 444-451`). |
+| M-35 | medium | fixed | `PSRCalculator.js:258-270`: `makePSR` accepts the movement context as its 4th argument and derives triggers from it. `PSRCalculator.test.js:645` ("derives triggers from movement when none are provided"), `:651` (run-with-damaged-gyro). |
+| M-36 | medium | not-addressed | No reckless-movement declaration; `TerrainRules.js:59-63` exports `requiresTerrainPSR` which nothing calls, and `MovementCalculator.js:121-130` always charges the modifier MP. |
+| M-37 | low | not-addressed | `terrain.json:113-133` still stores ice/mud/deep-snow `mpCostMultiplier` 1.5/2/2 while `MovementCalculator.js:121-125` hardcodes +1; two sources of truth remain. |
+| M-38 | low | not-addressed | `HexMath.js:113` still `offsets[direction % 6]` (throws for negative directions); unused `hexToPixel`/`hexKey`/`parseHexKey` imports remain in `MovementCalculator.js:8-9`. |
+
+### 3.2 Weapon attack, LOS, arcs and damage (t2) — 27 active
+
+| ID | Severity | Status | Evidence |
+|---|---|---|---|
+| C-01 | blocker | fixed | `hitTables.json:62-133` is the p139 Left Side / Right Side pair (roll 2 crits the near-side torso). `HitTables.test.js:98-179` asserts the p139 rows, not the file's copy. |
+| C-02 | blocker | fixed | `hitTables.json:134-173`: rear = front locations with `isRear` only on CT/LT/RT; `DamageResolver.js:119-134` applies rear armour only to torsos. `DamageResolver.test.js` rear cases. |
+| C-03 | high | fixed | `AttackResolver.js:457-482` builds Damage Value groupings (SRM 2, LRM/MRM/ATM 5), one location roll each. `AttackResolver.test.js:1033-1089`. |
+| C-04 | high | deferred | `unit._damageThisPhase` still has no writer in `src/` (only read at `PSRCalculator.js:131`); no end-of-weapon-phase PSR pass. Phase A. |
+| C-05 | low | fixed | `DamageResolver.js:745-755`: side torso → center torso, head/CT → null. `DamageResolver.test.js:302-317`. |
+| C-06 | high | fixed | `DamageResolver.js:250-260`: 2–7 none, 8–9 one, 10–11 two, 12 three crits or head/limb blown off. `DamageResolver.test.js` crit-band cases. |
+| C-07 | high | fixed | `DamageResolver.js:300-337`: two blocks of six, inapplicable-slot re-roll, multi-slot soak. `DamageResolver.test.js` (R-04/R-05). |
+| C-08 | high | fixed | `AttackResolver.js:423-440` propagates `critical`, `DamageResolver.js:213-216` rolls the TAC; `AttackResolver.test.js:1119-1161`. |
+| C-09 | high | fixed | `GameEngine.js:791-848, 884-896` requires a mounted, unfired, undestroyed weapon instance with a matching ammo bin. `WeaponDeclaration.test.js`. |
+| C-10 | medium | not-addressed | Partial-cover leg hits are still discarded: `AttackResolver.js:407-427` gives `absorbedByCover`, `GameEngine.js:1031-1036` skips the hit, the building CF is untouched. |
+| C-11 | medium | not-addressed | No aimed-shot cover handling: `calculateTargetNumber` still adds the +1 (`AttackResolver.js:222-226`) and leg locations are never re-rolled (`:362-403`). |
+| C-12 | medium | not-addressed | No aimed-head branch: the immobile −4 is unconditional (`AttackResolver.js:95-98`) and there is no +3 head modifier. |
+| C-13 | medium | not-addressed | Head-hit pilot damage is still in the weapon loop only (`GameEngine.js:1067-1074`); `_applyDamageTo`/physical damage never applies it. |
+| C-14 | medium | fixed | `DamageResolver.js:583-638`: CASE damages internal structure only, ignores excess, blows the arm off without stripping its armour. `equipment.test.js:17-85`. |
+| C-15 | medium | fixed | `DamageResolver.applyExplosionDamage:615-638` transfers the excess inward past armour when there is no CASE. `equipment.test.js:86-106`. |
+| C-16 | medium | fixed | `DamageResolver.js:160-166` passes `explosiveOnly` when the hit destroys the location; `:288-290` discards other crits. `DamageResolver.test.js:578` ("resolves only explosive criticals on a hit that destroys the location"), `:594` (non-explosive discarded). |
+| C-17 | medium | fixed | `DamageResolver.js:430-458`: engine 3 sets `destroyed`, gyro 2 sets `prone`, cockpit kills the pilot. `residuals.test.js:37-60`. |
+| C-18 | medium | not-addressed | Damage is still applied inside the firing action (`GameEngine.js:979-1077`); there is no phase-end damage queue (p32). |
+| C-19 | low | partial | `DamageResolver.js:459-463` now prints "Sensors hit (+2 TN)"; the +2 matches `UnitDamage.hasSensorHit`/`AttackResolver.js:123-126`, but no test pins the string (the finding is a text defect). |
+| C-20 | low | not-addressed | `AttackResolver.js:162-166` still adds +1 per pilot hit with no cited BMM rule; the test still asserts it. |
+| C-21 | low | partial | `PhaseManager.refreshImmobileFlag` derives `immobile` for unconscious pilots and leaves shutdown off it, so live play applies one −4 — but the two flags remain and `AttackResolver.js:95-104` would double-count if both were set. |
+| C-22 | low | not-addressed | `LineOfSight.js:81-92` still blocks every LOS involving Depth-2 water, including submerged-vs-submerged (p28 allows that pair). |
+| C-23 | low | not-addressed | No leg-mounted-weapon / own-partial-cover restriction in `AttackResolver.js:44-279` (target-number/LOS path) or `ArcRules.js:93-130`. |
+| C-24 | low | partial | `GameEngine.js:1696-1717` checks actuators/prone/twist, but not the "no weapon split between torso and arm" condition; `ArcRules.canWeaponFireAt` still has no eligibility check of its own. |
+| C-25 | low | not-addressed | `AttackResolver.js:507-532` still returns the full cluster size for a size that is not a table column (8, 11, 13, …). |
+| C-26 | low | not-addressed | `AttackResolver.js:487-499` still silently returns `centerTorso` for an unknown direction or roll. |
+| C-27 | low | partial | Battlefield Support now consumes the corrected rear table, but the unused invented `criticalHitTable` is still in `hitTables.json:394-480` with no consumer. |
+
+### 3.3 Physical attacks and urban combat (t3) — 29 active
+
+| ID | Severity | Status | Evidence |
+|---|---|---|---|
+| PHY-01 | high | fixed | `hitTables.json:174-225` are 1D6 direction-column punch/kick tables; `PhysicalAttackResolver.js:659-671` rolls 1D6. `PhysicalAttackResolver.test.js` rewritten from p140. |
+| PHY-02 | high | fixed | `PhysicalAttackResolver.js:203-242`: kick rejected one level up, punch one level down; the forced tables are the manual's (punch at +1 → Kick table, kick at −1 → Punch table). `PhysicalCombat.test.js`. |
+| PHY-03 | medium | fixed | `PhysicalAttackResolver.js:118-141`: physical weapons add +2 per arm actuator but keep full damage; only punches halve. `PhysicalAttackResolver.test.js:325` ("an arm actuator adds +2 to a physical weapon but does not halve its damage"), `PhysicalCombat.test.js:195`. |
+| PHY-04 | medium | fixed | `PhysicalAttackResolver.js:149-163`: a leg that fired weapons blocks the kick. `PhysicalCombat.test.js:237` ("cannot kick with a leg that fired weapons this turn"). |
+| PHY-05 | medium | not-addressed | `resolvePunch` still accepts `options.arm` verbatim (`PhysicalAttackResolver.js:278-284`); the arc does not validate which arm is thrown (the default pick is correct, the API is not). |
+| PHY-06 | medium | not-addressed | No `resolveClub`/club legality; `BASE_MODIFIER.club` is dead (`PhysicalAttackResolver.js:31-38`). |
+| PHY-07 | medium | not-addressed | `physicalWeapons.json:4-12` still has 7 rows; Talons and both Vibroblade modes are absent. |
+| PHY-08 | medium | not-addressed | `resolvePush` returns `targetPsrRequired` (`PhysicalAttackResolver.js:489-516`) but `GameEngine.js:1290-1292, 1346-1379` ignores it; no displacement/advance and no shoulder +2 on the push TN. |
+| PHY-09 | medium | partial | DFA now checks Jumping MP and water depth (`PhysicalAttackResolver.js:424-449`), but it is still declared in the Physical Attack Phase, spends no movement MP, has no height clearance and no physical-attack immunity (p36). |
+| PHY-10 | medium | not-addressed | `resolveCharge` takes `action.distanceCharged || 1` (`GameEngine.js:1285`), never validates it against the move; self-damage is never applied (`:1309-1315` handles only DFA); no advance/displacement. |
+| PHY-11 | medium | not-addressed | `PhysicalAttackResolver.js:613-657` (`calculatePhysicalTN`) has no target-prone, terrain or partial-cover terms (p28 All Attacks applies to physical too). |
+| PHY-12 | low | not-addressed | `PhysicalAttackResolver.js:656` still clamps the TN to [2,12]; a 13+ becomes a natural-12 hit. |
+| PHY-13 | low | not-addressed | `UnitDamage.js:101-116` (`getActuatorDamage`) reads only `status: 'destroyed'`; absent actuator slots are still not treated as damaged (p48). |
+| PHY-14 | low | not-addressed | `PhysicalAttackResolver.js:651-653` adds the option-table +4 whenever `usePunchTable` is set, including when a level difference forced the table. |
+| PHY-15 | low | not-addressed | `PhysicalAttackResolver.js:130-132` still rejects a destroyed hand actuator for every physical weapon, retractable blade included; the p109 text is absent, so this remains a silent p48-only implementation. |
+| PHY-16 | low | not-addressed | A prone attacker is still rejected by every `resolve*` (e.g. `PhysicalAttackResolver.js:264-266`) and charged +2 in `calculatePhysicalTN` (`PhysicalAttackResolver.js:635`). |
+| PHY-17 | low | not-addressed | No quad rear-kick +1, moonless-night +1 or unintentional-charge +3; `WeatherRules.js:101-104` (`physicalAttackModifier`) is still unwired and `PhysicalAttackResolver.js:613-657` has no weather call. |
+| PHY-18 | low | not-addressed | `PhysicalAttackResolver.js:579-581` lets `weapon.table === 'punch'` (claws) override the level-forced table. |
+| BLD-01 | high | fixed | `terrain.json:160-165` hardened `psrModifier: 5`; `Buildings.test.js:47` and `:147-153`. |
+| BLD-02 | high | fixed | `Buildings.js:120-176` counts building levels and roofs; `GameEngine.js:905-946` blocks >2 intervening and `:992-996` forwards the +1/+2 into the roll. `urban.test.js:325-360, 530-610`. |
+| BLD-03 | high | fixed | `Buildings.js:54-59` uses the phase-start CF; `GameEngine.js:338-367` banks CF damage; `PhaseManager.js:608-617` snapshots it. `urban.test.js` five-hit example. |
+| BLD-04 | medium | not-addressed | `GameEngine.js:1640-1667` (`_collapseBuildingHex`) still uses `levels - 1` for every occupant, one hit location, the standard front table (not Punch) and no extra falling damage. The `levels - 1` sub-item is the one part gated on the Phase 8a floor model; the other three are independent. |
+| BLD-05 | medium | not-addressed | Building entry is still processed only for the final hex (`GameEngine.js:518-523`); `_enterBuilding:1578-1633` adds no hexes-moved row, no charge +1, no displaced auto-fail. |
+| BLD-06 | medium | not-addressed | `GameEngine.js:1239-1330` (`_handlePhysicalAttack`) has no building check; any physical attack can be declared at an occupant (p72). |
+| BLD-07 | medium | not-addressed | No AE reduction exemption, no adjacent-attacker missed-shot building damage, no partial-cover leg-hit building damage, no same-hex forward-direction rule (`GameEngine.js:1031-1075`). |
+| BLD-08 | low | not-addressed | `terrain.json:141-166` default levels are 1/2/3/4 per type; `BuildingRegistry.validate:288-319` checks CF > 0 only (no type range) and there is no p66 "unspecified building = medium, Level 2" default. |
+| BAS-01 | high | not-addressed | `GameEngine.js:1610-1614` still falls on `hex.basement.depth > 0` regardless of tonnage, so a light 'Mech drops through any basement. |
+| BAS-02 | medium | not-addressed | `GameEngine.js:1614` still `Math.max(1, hex.basement.depth)`; an overweight 'Mech falls one level even on a "No basement" result (documented designer call in roadmap 5.5). |
+| BAS-03 | low | not-addressed | `GameEngine.js:1616-1618` still uses `determineHitLocation(roll, 'front')` for a basement fall instead of Facing After Fall (p66/p56). |
+
+### 3.4 Heat, MechWarrior damage and phase sequence (t4) — 25 active
+
+| ID | Severity | Status | Evidence |
+|---|---|---|---|
+| H-01 | blocker | deferred | `HeatManager.js:56-108` (`calculateHeatGeneration`) still has no production caller (its own comment says Phase A), and `GameEngine.js:369-589` (`_handleMove`) never adds heat; walking/running/jumping heat is absent in play. |
+| H-02 | high | fixed | `HeatManager.js:48-54` engine +5/+10 with `!unit.shutdown`; applied in the live Heat Phase (`:389-392`). `heatScale.test.js:535-580`. |
+| H-03 | high | fixed | `HeatManager.js:328-348, 393-400`: fire +5 standing / +2 per burning hex, outside heat capped at 15 before dissipation. `battlefield.test.js:141-170`. |
+| H-04 | high | fixed | `PhaseManager.js:377-429` consciousness on damage; `:455-488` End Phase is recovery-only for pilots knocked out on an earlier turn. `GameEngine.js:297-312`; `phaseSystem.test.js:869` ("rolls as soon as a head hit damages the pilot, not in the End Phase"), `:974` ("an unconscious warrior from an earlier turn rolls to recover"). |
+| H-05 | high | fixed | `PhaseManager.js:432-448, 333-351`: sixth hit kills, one kill path, unit removed on phase transition; `DamageResolver.js:643-651` head destruction kills the pilot. `phaseSystem.test.js:926` ("kills the warrior on the sixth point of damage"), `:1594` ("buildUnitQueue leaves destroyed Mechs out"); `fullTurn.test.js:235` ("a pilot with six hits is dead and the Mech leaves play"). |
+| H-06 | high | partial | Actions are rejected for shutdown/unconscious units (`PhaseManager.js:873-891`, `GameEngine._handleMove/_handleFire` guards), but `maxMP` still reports walk/run for an immobile unit (no shutdown/conscious check in `getWalkingMP`). |
+| H-07 | high | fixed | `PhaseManager.js:659-729, 748-801`: restart in the Heat Phase, auto below 14, roll at 14–29 against `shutdownAvoid`, blocked at 30+, not eligible in the phase it shut down. `phaseSystem.test.js:1048` ("restarts automatically below 14 heat, even with an unconscious pilot"), `:1084` ("restarts when the roll meets the avoid target"), `:1101` ("cannot restart at 30 or more heat"). |
+| H-08 | high | fixed | `HeatManager.js:367-372, 422-436` routes the exploding bin through `DamageResolver.resolveAmmoExplosion` (shots × damage, CASE, pilot 2). `heatScale.test.js:631` ("one LRM-20 shot explodes for 20 damage straight to internal structure"), `:664` ("a bin with two shots explodes for shots x per-shot damage and transfers inward"). |
+| H-09 | medium | fixed | `HeatManager.js:194-215`: +1 per single / +2 per double submerged leg sink, capped at 6. `HeatManager.test.js:122-190`. |
+| H-10 | medium | fixed | `PhaseManager.js:632-657`: physical queue starts with the initiative loser. `phaseStateMachine.test.js`/`gameEngineFlow.test.js` rewritten. |
+| H-11 | medium | fixed | `InitiativeManager.js:63-68` returns loser-first; the winner-goes-first house rule is gone (`PhaseManager.js:548-571`). `phaseSystem.test.js:218` ("_enterMovement puts the initiative loser first"), `:230` ("the winner of the initiative roll does not get to declare first"), `:554` ("does not expose the removed winner-goes-first house rule"). |
+| H-12 | medium | fixed | `PhaseManager.js:74-82, 147-249`: 2:1/3:1 declaration blocks re-evaluated before each pair from the remaining counts. `phaseSystem.test.js:116` ("the side with twice as many Mechs declares two per pair"), `:158` ("declares three per pair for a 3 vs 1 force"), `:683` ("builds the printed tables into the full declaration queue exactly"); `phaseStateMachine.test.js:165`. |
+| H-13 | medium | not-addressed | No victory/draw state or survivor check: `GameState.js:19-51` has no result field and `PhaseManager.js:918-949` (`nextPhase`) only advances. |
+| H-14 | high | fixed | `PhaseManager.js:108-112, 333-351`: destroyed units are filtered from the queue and deleted at the phase transition (`unitRemoved`). `phaseSystem.test.js:1594` (queue filter), `:1606` (removal). |
+| H-15 | medium | fixed | `PhaseManager.js:700-719`: the involuntary-shutdown PSR rolls at piloting +3 and a failure goes through `applyFall`. `phaseStateMachine.test.js:518-548`. |
+| H-16 | medium | not-addressed | Heat is still added at fire time (`GameEngine.js:1000`); no pending-heat accumulator, so later shots in the phase see the new heat. |
+| H-17 | medium | partial | Restart requires a conscious pilot (`PhaseManager.js:776-779`), but shutdown-avoid still rolls for an unconscious pilot (`HeatManager.checkShutdown:261-277` has no conscious check). |
+| H-18 | medium | fixed | `PSRCalculator.makePSR:271-276` auto-fails an unconscious warrior; the heat path rolls consciousness before the shutdown PSR (`PhaseManager.js:683-719`). `residuals.test.js:17-35`. |
+| H-19 | low | fixed | `heatScale.json` has no heat-29 row (28 and 30 remain). `residuals.test.js:82-89`. |
+| H-20 | low | partial | The explosive filter exists (`HeatManager.js:121-123`), but the manual's player choice / random tie-break is still a deterministic "most shots" pick (`mostDestructiveAmmoBin:114-135`). |
+| H-21 | low | not-addressed | No inferno ammunition and no extra Inferno Avoid-Roll set: `HeatManager.js:374-461` runs one ammo-avoid check only (p52/p107). |
+| H-22 | low | not-addressed | No voluntary shutdown, heat-sink on/off, or submerged-life-support End-Phase damage; `PhaseManager.js:803-845` (`_enterEndPhase`) has only fire/support/consciousness/cleanup. |
+| H-23 | low | not-addressed | No torso-mounted cockpit model and no ±5-heat life-support quirks: `HeatManager.js:438-447` applies the standard 15/26 ladder only, and `quirks.json:1-119` has no such quirk. |
+| H-24 | low | partial | Ties now re-roll up to 100 times (`InitiativeManager.js:19-38`), but the deterministic lowest-id fallback remains and `Unit.initiativeModifier` is still unread (no Battle Computer/Command 'Mech bonus). |
+| H-25 | low | not-addressed | `endPhase` still bypasses queue/player checks (`PhaseManager.js:850-913`, `validateAction` returns valid immediately), so either player can end a phase mid-alternation. |
+
+### 3.5 Battlefield layers: weather, fire, mines, support, quirks, visibility (t5) — 26 active
+
+| ID | Severity | Status | Evidence |
+|---|---|---|---|
+| F-02 | medium | not-addressed | One `canBurn` still excludes heavy/hardened buildings (`FireRules.js:36-46`), so their Fire Table rows stay unreachable; ignition and spread are still the same predicate. |
+| F-03 | medium | not-addressed | Smoke is still hard-coded `{ level: 'light', turnsRemaining: 6 }` (`GameEngine.js:1413-1419`); heavy smoke is impossible while F-02 holds. |
+| F-04 | medium | not-addressed | No extinguishing helper and no 40-AE-damage path: `FireRules.js:1-152` has none, and `GameEngine.js:1398-1452` (`resolveEndPhaseFire`) only adds fire/smoke. |
+| F-05 | low | not-addressed | `weaponCategory` still keys on the weapon id containing "inferno"/"plasma" (`FireRules.js:55-61`); there is no ammo/munition layer. |
+| F-06 | low | not-addressed | `fireTargetNumber` still clamps to 2 (`FireRules.js:84`), with no manual basis. |
+| F-07 | low | fixed | `terrain.json:26-43` adds light/heavy jungle and `FireRules.js:22-39` has the jungle Fire-Table rows/burnable set. `FireRules.test.js:27-32, 61-62`. Latent content (no shipped map places jungle). |
+| W-01 | medium | not-addressed | No illumination/searchlight input; night modifiers always apply (`WeatherRules.js:5-6, 39-71`). |
+| W-02 | medium | not-addressed | `physicalAttackModifier` (`WeatherRules.js:101-104`) is still imported only by tests; `PhysicalAttackResolver` never calls it and there is no target-heat reduction. |
+| S-01 | medium | not-addressed | BSP pool is still the bare constant 12 (`GameState.js:39-42`); no scenario-type/map-count helper (p147). |
+| S-02 | medium | not-addressed | No Light/Heavy Air Cover rows in `BATTLEFIELD_SUPPORT_TABLE` (`BattlefieldSupport.js:41-86`), so p76 interception cannot happen. |
+| S-03 | medium | not-addressed | Scattered strikes still force `isRear: false` (`BattlefieldSupport.js:382-387`). |
+| S-04 | medium | not-addressed | `resolveScheduledSupport` (`GameEngine.js:1490-1547`) applies hits to units only; a bombed building hex takes no CF damage (p76). |
+| S-05 | medium | not-addressed | Strafing is still one scheduled hex / one 2D6 (`BattlefieldSupport.js:58-61, 326-367`), not 1–5 consecutive hexes with a roll per 'Mech. |
+| M-01 [t5] | medium | not-addressed | Minefield hits still resolve on the front column of the Kick Location Table (`Minefields.js:133-139, 194-204`), so they can only ever hit legs; p79 is absent. |
+| M-02 [t5] | medium | partial | The hit-location choice is now explicitly labelled an unverified p79 assumption (`Minefields.js:14-18, 133-135`), but the quoted p79 decrement and trigger rules are still presented as citations (`:206-207`, `GameEngine.js:360-365`). |
+| S-06 | low | not-addressed | No Copperhead or Illumination/Smoke artillery rows (`BattlefieldSupport.js:62-73`) despite p78 being quotable. |
+| Q-01 | medium | deferred | `quirks.json:13-119` still carries only 9 negative quirks (no positive quirks, not the 20+ mechanical negative rows); `Quirks.js:148-241` has only the three negative rule hooks. Deferred with the chassis restructure (roadmap Phase 6.6). |
+| Q-02 | low | not-addressed | `describeModifier` still always renders "+n" (`Quirks.js:132-136`), so a future positive −1 quirk would print "+-1". |
+| Q-03 | low | not-addressed | No `incompatibleWith` data or validation for Cramped Cockpit / Small Cockpit (`quirks.json:74-83`). |
+| H-01 [t5] | medium | not-addressed | No active-probe reveal: `visibility.js:9-16` lists the modelled triggers and omits it, and `activeProbe` appears nowhere in `src/` (p82). |
+| H-02 [t5] | medium | not-addressed | No point-blank shot: `visibility.js:164-172` (`revealOnFire`) still requires a fired declaration, and there is no one-shot attack path in `GameEngine.js:850-1104` (p82). |
+| H-03 [t5] | medium | not-addressed | `PhaseManager.js:147-180` (`_planDeclarationEntries`) still gives hidden units queue slots; no hidden filter exists. |
+| H-04 [t5] | medium | not-addressed | No hidden-placement legality API: `GameState.js:100-111` only stores/reveals, `visibility.js` has no placement check. |
+| H-05 [t5] | medium | not-addressed | Offensive aerospace support is still owner-secret (`visibility.js:76-90`); `sync.test.js` still pins the secrecy instead of the p76 public announcement. |
+| H-06 [t5] | low | not-addressed | Reveal-on-fire still happens during resolution, after the shot (`visibility.js:164-172`, `GameEngine.js:1023`); hidden spotting/C3 is unmodelled. |
+| H-07 [t5] | low | not-addressed | Ownerless minefields are still dropped from both players' projections (`visibility.js:99-108`), documented as scenario responsibility rather than fixed. |
+
+### 3.6 Data, import and export (t6) — 19 active
+
+| ID | Severity | Status | Evidence |
+|---|---|---|---|
+| D-01 | high | fixed | `weapons.json:49-64` has the p121 `small_laser` (heat 1, damage 3, 0/1/2/3, 0.5 t, 1 crit). `mechs.test.js:340-370` asserts the stats and that every roster weapon id resolves. |
+| D-02 | high | fixed | Atlas AS7-D `srm6` now occupies `leftTorso` slots 8–9 (`mechs.json:189-194`); `mechs.test.js:372-384` asserts every mounted weapon has a critical slot. |
+| D-05 | high | fixed | Per-slot ammo bins: `unitConverter.js:253-285` creates one full bin per critical slot with location/slot; roster bins follow suit (`mechs.json` Atlas ammo). `mechs.test.js:189-215, 268-320`; `DamageResolver` explodes only that bin. |
+| D-06 | high | fixed | `mtfExporter.js:316-329` writes `mechDef.heatSinks.count`; `residuals.test.js:63-69` asserts `Heat Sinks:20 Single` for the Atlas. |
+| D-07 | medium | fixed | `mtfExporter.js:208-217`: arms 12, legs 6, head 6; `mtfExporter.test.js:425`. |
+| D-08 | medium | not-addressed | `mtfParser.js:309-323` still returns without cockpit/structure/armour-type/TSM/MASC fields. |
+| D-09 | medium | not-addressed | Rear mount still detected only from the name (`mtfParser.js:137-143`); `Medium Laser, CT (R)` / `CTR` location keys still lose the mount. |
+| D-10 | medium | not-addressed | Armour regex still lacks `RTL` and `break`s on an unknown line (`mtfParser.js:82-107`), still losing rear torso armour. |
+| D-11 | medium | not-addressed | Both importers still floor: `unitConverter.js:200` and `mulParser.js:177` (`Math.floor(walkMP * 1.5)`); the roster uses `ceil`. |
+| D-12 | medium | not-addressed | `mulParser.js:146-186` still fabricates a walk MP from tonnage and a zero-armour/zero-weapon stub for an unknown chassis. |
+| D-13 | medium | partial | Swamp, the missing sand/jungle/depth-3 terrains and the hardened PSR are fixed; still wrong: `water_depth2` data `mpCost: 3` (`terrain.json:52-59`, the code prices it correctly), ice/mud/deep-snow multipliers 1.5/2/2 (`:113-133`), rubble `height: 1` (`:75-81`). |
+| D-14 | low | not-addressed | The invented, consumer-less `criticalHitTable` is still in `hitTables.json:394-480`. |
+| D-15 | low | not-addressed | `physicalWeapons.json:4-12` still lists 7 rows; Talons and Vibroblade are missing. |
+| D-16 | low | not-addressed | `equipment.json:10-66` still carries: jump-jet `heatPerUse: 3` only (minimum, not per hex), invented jet/TC weight formulas, ECM `toHitModifierEnemy: 1`, MASC `failureRollTarget: 3`/`failureDamage: 'leg actuator'`, CASE `sideTorsoOnly`, and no double-sink critical-slot count. |
+| D-17 | medium | not-addressed | Locust LCT-1V legs are still `front: 10` armour over 4 internal structure (`mechs.json:2122`, both legs). |
+| D-18 | low | not-addressed | `unitConverter.js:195` still mints `atlas-as7-d`; the roster id is `atlas-as7d`, so round-tripped units are distinct. |
+| D-19 | low | not-addressed | `ammoShotsPerTon` still invents `flamer: 20` (`unitConverter.js:4-10`) and `explosiveAmmo` is still a set of weapon values (`:157, :299`), so every imported bin is explosive. |
+| D-20 | low | not-addressed | `maps/urban.json` still uses `light_building`/`medium_building`/`heavy_building` terrain ids that `terrain.json.terrain` does not define; `Mapsheets.test.js:9-13` still duplicates the allowed set. |
+| D-21 | low | not-addressed | Every water hex on every map is still `level: 0` (grassland 22, forest 14, desert 5, tundra 10 water hexes; 0 negative), so the level-change water cost cannot apply; `Mapsheets.test.js:62-69` still forbids negative levels. |
+
+### Non-active headings and narrative notes
+
+These headings are part of §3's audit history but are **not** active findings, so they are listed separately rather than given a forced verdict.
+
+| ID | Disposition |
+|---|---|
+| M-04 | **Withdrawn** (review R-01): `min(diff, 6 - diff)` is the correct hexside count under p14/p143; helper is `MovementCalculator.js:447-451`. Not counted. |
+| M-29 | **Consolidated into BLD-01** (fixed). Not counted. |
+| D-03 | **Consolidated into C-01** (fixed). Not counted. |
+| D-04 | **Consolidated into PHY-01** (fixed). Not counted. |
+| F-01 | **Consolidated into H-03** (fixed). Not counted. |
+| X-01 | **Cross-module duplicate of C-01** (fixed); never part of t3's count. Not counted. |
+
+Non-id narrative material, left in place and not given ids: §2's Top-10 priorities P1–P10 (all map to ids above); the review-round repairs R-01…R-08 in the remediation log (fix records, reflected in the rows they repair); §3.7's engine-infrastructure checks (`EventBus`, `StateManager`, `HeatScale` — no rules findings); §4's cannot-verify inventory (now a page-by-page KB coverage note after the gap-fill; individual unverified clauses are named in the affected rows, e.g. C-14's CASE II, C-17's p47, PHY-15's p109); §5's tests-that-pin-the-code table (the rows for fixed findings were rewritten; the rows for `not-addressed` findings still pin the old behaviour, e.g. `FireRules.test.js:32-36` for F-02); and the "Confirmed correct by the audit" lists at the end of each domain section, which are not findings.
+
+### What is knowingly deferred
+
+1. **Phase A dead wiring** — accepted debt, out of scope for this run (roadmap's "Recommended next slice" and Phase 8 notes):
+   - movement heat (H-01) — `HeatManager.calculateHeatGeneration` has no caller;
+   - skidding (M-05, M-06, M-14–M-18) — `SkiddingRules` has no caller and its formulas are still the old ones;
+   - MASC activation (M-19, and the unreachable half of M-09) — `activateMASC`/`rollMASC` have no caller;
+   - 20+ damage PSR (C-04, half of M-25) — `_damageThisPhase` has no writer.
+2. **Elevation / `position.level`** — roadmap Phase 8a. This is **not itself a sweep finding**, and the matrix's `not-addressed` statuses are implementation-state statements, not schedules. `buildingCombat` now *reads* a floor/roof level correctly (BLD-02 fixed), but no movement path *writes* one, so roofs and upper floors only appear when a test or scenario sets the level by hand. Of the matrix rows, only **BLD-04**'s "levels above the occupant" multiplier depends on that write; the row stays `not-addressed` because its other three sub-defects (Punch table, 5-point groupings, extra falling damage) are independent. **C-10 and the other urban residuals (BLD-05–BLD-08, BAS-01–BAS-03) do not depend on the Phase 8a floor write**: they can be implemented against the `position.level` field that already exists (as BLD-02/03 were), so they are open `not-addressed` work, not deferred by Phase 8a. The roadmap groups C-10 under Phase 8.4 (alongside the elevation work) but it is independent of the floor write.
+3. **Quirks breadth** (Q-01) — 9 negative quirks only; positive quirks and the mechanical negative table wait for the chassis/variant restructure that makes quirks per-chassis (roadmap Phase 6.6 and the data restructure).
+4. **BV / role / tech-base metadata** — not a sweep finding; deferred with the chassis/variant restructure (roadmap "Roster scope": chassis layer carries tonnage, structure, quirks, tech base).
+5. **AI / opponents** — Phase 7.3 (heuristic bot over the deterministic engine); not a rules finding.
+6. **Multiplayer log projection** — the state projection and JSON-safe patches shipped (R1–R5/M2–M4), but projecting the action/event log per player (and the server UI) is still Phase 7.4; the sweep's t5 hidden-information findings (H-01–H-07 [t5]) remain the rules-side gap.

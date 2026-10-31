@@ -120,8 +120,20 @@ describe('JSON-safe events (R4)', () => {
 describe('command boundary (R5)', () => {
   const read = (file) => fs.readFileSync(path.join(process.cwd(), file), 'utf8');
 
+  /** Every .js/.mjs source under a directory, so nested UI folders are scanned too. */
+  const sourcesIn = (relativeDir) => {
+    const entries = fs.readdirSync(path.join(process.cwd(), relativeDir), { withFileTypes: true });
+    return entries.flatMap(entry => {
+      const relativePath = `${relativeDir}/${entry.name}`;
+      if (entry.isDirectory()) return sourcesIn(relativePath);
+      return /\.m?js$/.test(entry.name) ? [relativePath] : [];
+    });
+  };
+
   it('keeps UI code from writing unit or state fields', () => {
-    const files = fs.readdirSync(path.join(process.cwd(), 'src/ui')).map(f => `src/ui/${f}`);
+    const files = sourcesIn('src/ui');
+    // Guard against a future refactor that makes the scan silently vacuous.
+    expect(files).toContain('src/ui/record/index.js');
     const sources = files.map(read).join('\n');
 
     // The UI may read the state and track its own selection, but it must not

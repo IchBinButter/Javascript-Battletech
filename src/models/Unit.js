@@ -53,8 +53,11 @@ export class Unit {
     this.armor = deepClone(mechDef.armor);
     this._initialArmor = deepClone(mechDef.armor);
 
-    // Internal structure
+    // Internal structure. The record-sheet diagram needs the printed maximum,
+    // not just what is left, so the starting values are kept beside the live
+    // copy exactly like `_initialArmor`.
     this.internalStructure = deepClone(mechDef.internalStructure);
+    this._initialInternalStructure = deepClone(mechDef.internalStructure);
 
     // Critical slots
     this.criticalSlots = deepClone(mechDef.criticalSlots);
@@ -152,6 +155,17 @@ export class Unit {
 
   /** Get current internal structure for a location */
   getInternal(location) {
+    return this.internalStructure[location] || 0;
+  }
+
+  /**
+   * Get the printed (maximum) internal structure for a location, i.e. the
+   * number of circles on the record sheet. Falls back to the live value for
+   * units restored from an older save that predates the snapshot.
+   */
+  getMaxInternal(location) {
+    const initial = this._initialInternalStructure && this._initialInternalStructure[location];
+    if (initial !== undefined) return initial;
     return this.internalStructure[location] || 0;
   }
 

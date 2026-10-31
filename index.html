@@ -26,6 +26,11 @@
       <!-- Unit Info -->
       <div id="unit-panel">
         <h3>Unit Info</h3>
+        <div id="unit-view-controls" class="unit-view-controls" data-view="record">
+          <button type="button" id="btn-view-record" class="unit-view-button active" aria-pressed="true">Record card</button>
+          <button type="button" id="btn-view-classic" class="unit-view-button" aria-pressed="false">Classic bars</button>
+          <button type="button" id="btn-record-sheet" class="unit-view-button" disabled>Record Sheet</button>
+        </div>
         <div id="unit-details">
           <p>Select a unit to view details</p>
         </div>
@@ -77,6 +82,17 @@
     <div id="log-panel">
       <h3>Dice Log</h3>
       <div id="dice-log"></div>
+    </div>
+  </div>
+
+  <!-- Full record sheet overlay (filled by UIController) -->
+  <div id="record-overlay" class="record-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="record-sheet-title">
+    <div id="record-sheet" class="record-sheet">
+      <div class="record-sheet-header">
+        <h2 id="record-sheet-title">Record Sheet</h2>
+        <button type="button" id="btn-close-record">Close</button>
+      </div>
+      <div id="record-sheet-body" class="record-sheet-body"></div>
     </div>
   </div>
 

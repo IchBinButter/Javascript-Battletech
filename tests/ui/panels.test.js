@@ -14,7 +14,7 @@ import { UIController } from '../../src/ui/UIController.js';
 import { EventBus } from '../../src/engine/EventBus.js';
 import { weaponInstanceKey } from '../../src/engine/GameEngine.js';
 import { Weapon } from '../../src/models/Weapon.js';
-import { createTestEngine, createTestUnit } from '../helpers/testUtils.js';
+import { createTestEngine, createTestUnit, makeDiceRoller } from '../helpers/testUtils.js';
 import weaponsData from '../../src/data/weapons.json' with { type: 'json' };
 
 const weaponsLookup = Weapon.createLookup(weaponsData);
@@ -1199,5 +1199,55 @@ describe('UIController / engine weapon-declaration parity', () => {
     const torsoPpcs = [...document.querySelectorAll('.weapon-check')]
       .filter(check => check.dataset.type === 'ppc' && check.dataset.location === 'rightTorso');
     expect(torsoPpcs.map(check => check.disabled)).toEqual([false, true]);
+  });
+});
+
+/**
+ * R-2: a resolved physical attack changes armour/crits without emitting
+ * unitMoved. The engine's physicalAttackResolved event must refresh the unit
+ * sheet so the pips on screen match the state the resolver just changed.
+ */
+describe('unit panel refresh after a physical attack', () => {
+  it('re-renders the selected record sheet when a real punch damages armour', () => {
+    createDOMFixture();
+
+    const attacker = createTestUnit('atlas-as7d', 0, 'atlas-0');
+    attacker.position = { hexKey: '5,7', facing: 0 };
+    const target = createTestUnit('locust-lct1v', 1, 'target-1');
+    target.position = { hexKey: '6,7', facing: 3 };
+
+    const engine = createTestEngine({
+      units: { [attacker.id]: attacker, [target.id]: target },
+      phase: 'physical_attack'
+    });
+    engine.diceRoller = makeDiceRoller(12);
+    engine.phaseManager.enterPhase('physical_attack');
+
+    const ui = new UIController();
+    ui.init(engine, renderer());
+    ui.updateUnitPanel(target);
+
+    const headArmourPips = () => [...document.querySelectorAll(
+      '#unit-details .record-armor [data-location="head"] [data-face="front"] .pip'
+    )];
+    expect(headArmourPips().filter(pip => pip.dataset.status === 'empty')).toHaveLength(0);
+
+    const result = engine.processAction(0, {
+      type: 'physicalAttack',
+      attackerId: attacker.id,
+      targetId: target.id,
+      attackType: 'punch'
+    });
+    expect(result.success).toBe(true);
+    expect(result.hit).toBe(true);
+
+    // No explicit updateUnitPanel call: the physicalAttackResolved handler did
+    // the refresh. Punch 10 vs Locust head (8 armour) strips the armour and the
+    // blow-off critical finishes the internal structure.
+    expect(headArmourPips().filter(pip => pip.dataset.status === 'empty')).toHaveLength(8);
+    const internalPips = [...document.querySelectorAll(
+      '#unit-details .record-internal [data-location="head"] .pip'
+    )];
+    expect(internalPips.filter(pip => pip.dataset.status === 'empty')).toHaveLength(3);
   });
 });
